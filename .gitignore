@@ -1,0 +1,81 @@
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Packaging and test output
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Native and CUDA build products
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.pyd
+*.ninja
+.ninja_deps
+.ninja_log
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+
+# Training and evaluation artifacts
+checkpoints/
+runs/
+logs/
+outputs/
+results/
+artifacts/
+wandb/
+lightning_logs/
+tensorboard/
+events.out.tfevents.*
+*.pt
+*.pth
+*.ckpt
+
+# Local datasets and generated samples
+datasets/
+data/raw/
+data/processed/
+data/generated/
+data/cache/
+
+# Local cluster and scheduler output
+slurm-*.out
+slurm-*.err
+*.joblib
+
+# Temporary, backup, and copied files
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+* copy.*
+
