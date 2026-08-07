@@ -1,0 +1,37 @@
+defaults:
+  - base.yaml
+
+experiment:
+  name: pretrain_mixed
+
+data:
+  batch_size: 48
+  datasets:
+    plants:
+      role: source
+      root: "${PLANTS_DATASET}"
+      train_samples: 25900
+      coordinate_order_on_disk: [y, x]
+    synthetic_mri:
+      role: target
+      root: "${SYNTHETIC_MRI_DATASET}"
+      train_samples: 4000
+      coordinate_space_on_disk: normalized
+
+training:
+  epochs: 50
+  checkpoint:
+    interval_epochs: 5
+
+domain_adaptation:
+  enabled: true
+
+ema:
+  enabled: false
+  warmup_iterations: 2080
+
+hard_negative_mining:
+  enabled: false
+
+evaluation:
+  interval_epochs: 5

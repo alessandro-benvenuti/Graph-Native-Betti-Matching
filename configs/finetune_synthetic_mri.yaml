@@ -1,0 +1,32 @@
+defaults:
+  - base.yaml
+
+experiment:
+  name: finetune_synthetic_mri
+
+data:
+  batch_size: 48
+  datasets:
+    synthetic_mri:
+      role: target
+      root: "${SYNTHETIC_MRI_DATASET}"
+      train_samples: 4000
+      coordinate_space_on_disk: normalized
+
+training:
+  epochs: 100
+  checkpoint:
+    interval_epochs: 10
+
+domain_adaptation:
+  enabled: false
+
+ema:
+  enabled: true
+  warmup_iterations: 1600
+
+hard_negative_mining:
+  enabled: true
+
+evaluation:
+  interval_epochs: 10

@@ -1,0 +1,196 @@
+schema_version: 1
+
+experiment:
+  name: null
+  seed: 364505
+  output_dir: "${GNBM_OUTPUT_DIR}"
+
+runtime:
+  device: cuda
+  distributed: false
+  deterministic: false
+  workers: 4
+  pin_memory: true
+
+data:
+  spatial_dims: 3
+  image_size: [64, 64, 64]
+  batch_size: 48
+  train_augmentation: true
+  datasets: {}
+
+augmentation:
+  coordinate_order: [D, H, W]
+  normalization_denominator: axis_size
+  synthetic_mri:
+    rotate_90:
+      enabled: true
+      planes: [[D, H], [D, W], [H, W]]
+    zoom:
+      enabled: true
+      range: [0.6, 1.0]
+      image_interpolation: trilinear
+      segmentation_interpolation: nearest
+    gaussian_noise:
+      enabled: true
+      probability: 0.35
+      std_range: [0.0, 0.015]
+    intensity_clamp: [-0.5, 0.5]
+  plants:
+    projection_depth: 5
+    rotate_90:
+      enabled: true
+      planes: [[D, H], [D, W], [H, W]]
+    flip:
+      enabled: true
+      axes: [D, H, W]
+      probability_per_axis: 0.5
+    intensity_scale: [-0.5, 0.5]
+    pad_to_image_size: true
+
+model:
+  num_classes: 2
+  drop_rate: 0.1
+  drop_path_rate: 0.2
+  label_smoothing: 0.1
+  encoder:
+    type: se_resnet
+    cell_size: 8
+    input_channels: 1
+    depths: [4, 4, 16, 4]
+    strides: [2, 2, 2, 2]
+  decoder:
+    type: deformable_detr
+    hidden_dim: 552
+    attention_heads: 6
+    encoder_layers: 4
+    decoder_layers: 4
+    feedforward_dim: 1280
+    dropout: 0.0
+    activation: relu
+    feature_levels: 1
+    decoder_points: 4
+    encoder_points: 4
+    two_stage: false
+    object_queries: 120
+    relation_tokens: 2
+    dummy_tokens: 0
+    relation_attention: true
+  matcher:
+    type: hungarian
+    class_cost: 2.0
+    node_cost: 5.0
+
+training:
+  start_epoch: 0
+  epochs: null
+  epoch_length: null
+  warmup_epochs: 1
+  gradient_clip_norm: 5.0
+  train_encoder: true
+  train_decoder: true
+  optimizer:
+    name: adamw
+    base_lr: 7.0e-5
+    domain_lr: 7.0e-5
+    weight_decay: 1.0e-4
+    epsilon: 1.0e-8
+    betas: [0.9, 0.999]
+  scheduler:
+    name: polynomial
+    warmup_lr: 1.0e-9
+    minimum_lr: 5.0e-6
+    power: 0.9
+  checkpoint:
+    resume: null
+    auto_resume: true
+    policy: interval
+    interval_epochs: 5
+
+domain_adaptation:
+  enabled: false
+  image_adversarial: true
+  graph_adversarial: true
+  consistency_regularization: true
+  alpha: 1.0
+  class_weights: [0.05, 0.95]
+  loss_weight: 0.1
+  upsample_target_domain: true
+  compute_target_graph_loss: true
+
+loss:
+  enabled: [boxes, class, cardinality, nodes, edges]
+  weights:
+    boxes: 3.0
+    class: 4.0
+    cardinality: 0.8
+    nodes: 2.0
+    edges: 6.0
+  node:
+    classification:
+      name: weighted_cross_entropy
+      class_weights: [0.25, 0.75]
+      focal_gamma: 2.0
+  edge:
+    classification:
+      name: cross_entropy
+      class_weights: [1.0, 1.0]
+      focal_gamma: 2.0
+    candidates:
+      max_per_graph: 9999
+      positive_cap: null
+      include_unmatched: false
+      unmatched_object_threshold: 0.25
+      max_active_unmatched: 32
+      max_unmatched_pairs_per_graph: 256
+      unmatched_weight: 1.0
+      unmatched_warmup_epochs: 0
+      unmatched_ramp_epochs: 0
+    balancing:
+      mode: ratio_upsample
+      positive_to_negative_ratio: 0.15
+      tolerance: 0.02
+
+ema:
+  enabled: false
+  decay: 0.995
+  update_every_iterations: 1
+  warmup_iterations: 0
+
+hard_negative_mining:
+  enabled: false
+  negative_cap_per_node: null
+  negative_cap_per_graph: null
+  weighting:
+    maximum: 2.0
+    temperature: 1.0
+    score_threshold: 0.4
+    warmup_epochs: 20
+    ramp_epochs: 60
+
+topology:
+  betti_h0:
+    enabled: false
+    log_only: true
+    weight: 0.0
+    warmup_epochs: 0
+    ramp_epochs: 0
+    unmatched_weight: 1.0
+    diagonal_factor: 0.5
+    normalize: true
+  betti_h1:
+    enabled: false
+    log_only: true
+    weight: 0.0
+    warmup_epochs: 0
+    ramp_epochs: 0
+    false_positive_weight: 1.0
+    false_negative_weight: 1.0
+    diagonal_factor: 0.5
+    normalize: true
+
+evaluation:
+  interval_epochs: 5
+  save_predictions: false
+  similarity_metrics: true
+  batch_norm_calibration: false
