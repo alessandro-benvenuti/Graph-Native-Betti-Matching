@@ -38,6 +38,7 @@ augmentation:
     intensity_clamp: [-0.5, 0.5]
   plants:
     projection_depth: 5
+    padding: 5
     rotate_90:
       enabled: true
       planes: [[D, H], [D, W], [H, W]]

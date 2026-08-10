@@ -161,7 +161,7 @@ class ExistingPlantsDatasetTests(unittest.TestCase):
         print(f"\nPlants integration: {len(triplets)} evenly spaced patches")
         for raw_path, seg_path, graph_path in triplets:
             with self.subTest(sample=raw_path.name):
-                # PIL conversion matches the legacy loader's grayscale handling.
+                # PIL conversion matches the loader's grayscale handling.
                 with Image.open(raw_path) as raw_image:
                     image_array = np.array(raw_image.convert("L"), copy=True)
                 with Image.open(seg_path) as seg_image:

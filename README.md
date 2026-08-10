@@ -2,7 +2,7 @@
 
 Clean research implementation of a 3D graph-extraction pipeline with graph-native topology objectives.
 
-This repository is being reconstructed from an experimental codebase. It currently contains the reviewed augmentation implementation and the first configuration schema; the remaining modules and interfaces will be migrated incrementally.
+This repository is being reconstructed from an experimental codebase. It currently contains the reviewed augmentation implementation, configuration schema, and supported dataset loaders; the remaining modules and interfaces will be migrated incrementally.
 
 ## Intended scope
 
@@ -58,4 +58,4 @@ The future build documentation will record the tested Jean Zay modules and provi
 
 ## Status
 
-The augmentation contract, its geometry tests, and the initial configuration contract are in place. No training, model, loss, evaluation, or CUDA implementation has been migrated yet.
+The augmentation and data-loading contracts, merged/validated configuration loading, reproducible batching, and optional real-dataset checks are in place. No training, model, loss, evaluation, or CUDA implementation has been migrated yet.

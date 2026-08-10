@@ -252,7 +252,7 @@ def rotate_volume(
     volume: torch.Tensor,
     quarter_turns: Sequence[int],
 ) -> torch.Tensor:
-    """Apply sequential 90-degree rotations in the legacy axis order."""
+    """Apply sequential 90-degree rotations in the model's axis order."""
 
     _validate_volume(volume, "volume")
     turns = _normalize_quarter_turns(quarter_turns)
@@ -674,7 +674,7 @@ def apply_augmentation(
             generator=noise_generator,
         )
 
-    # The legacy MRI Compose chain always ran its final clamp, including when
+    # The MRI Compose chain always ran its final clamp, including when
     # RandGaussianNoise did not select the sample. Preserve that behavior.
     if parameters.clamp_range is not None:
         transformed_image = transformed_image.clamp(

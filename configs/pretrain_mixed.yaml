@@ -11,12 +11,15 @@ data:
       role: source
       root: "${PLANTS_DATASET}"
       train_samples: 25900
+      validation_samples: 480
       coordinate_order_on_disk: [y, x]
     synthetic_mri:
       role: target
       root: "${SYNTHETIC_MRI_DATASET}"
       train_samples: 4000
+      validation_samples: 200
       coordinate_space_on_disk: normalized
+      foreground_mean: 0.33335259556770325
 
 training:
   epochs: 50

@@ -16,7 +16,7 @@ Dataset loaders must declare whether stored graph points are already normalized 
 
 ## Preserved training policies
 
-The policies reproduce every augmentation active in the trusted pipeline.
+The policies reproduce every augmentation active in the established pipeline.
 
 ### syntheticMRI training
 
@@ -26,7 +26,7 @@ The policies reproduce every augmentation active in the trusted pipeline.
 4. As in MONAI `RandGaussianNoise`, applied standard deviation is sampled uniformly from `[0, 0.015]`.
 5. Image is clamped to `[-0.5, 0.5]` after the optional noise step. The clamp
    still runs on samples for which Gaussian noise was not selected, matching
-   the legacy transform chain.
+   the existing transform chain.
 
 Image zoom uses trilinear interpolation (`grid_sample` calls this mode `bilinear`). Segmentation zoom always uses nearest-neighbour interpolation.
 
