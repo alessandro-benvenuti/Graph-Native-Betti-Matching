@@ -30,7 +30,6 @@ Road, OCTA, MoCo, 2D pretraining, and general-transformer adapter paths will not
 │   ├── loaders/             Dataset loading and batching
 │   └── preprocessing/       Dataset creation, splitting, and normalization
 ├── models/
-│   ├── domain_adaptation/   Domain classifiers and gradient reversal
 │   └── ops/                 Custom deformable-attention extension
 │       ├── functions/       Python autograd bindings
 │       ├── modules/         PyTorch modules
@@ -38,7 +37,7 @@ Road, OCTA, MoCo, 2D pretraining, and general-transformer adapter paths will not
 │           ├── cpu/         C++ CPU implementation
 │           └── cuda/        CUDA implementation
 ├── training/
-│   ├── losses/              Detection, relation, domain, and topology losses
+│   ├── losses/              Detection, relation, and topology losses
 │   └── evaluation/          Inference, metrics, and BN calibration
 ├── metrics/                 Reusable evaluation metrics
 ├── boxes/                   Box and non-maximum-suppression operations

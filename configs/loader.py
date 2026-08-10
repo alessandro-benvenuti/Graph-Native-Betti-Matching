@@ -140,7 +140,6 @@ def validate_config(config: Mapping[str, Any]) -> None:
     valid_names = {"plants", "synthetic_mri"}
     valid_roles = {"source", "target"}
     target_count = 0
-    source_count = 0
     for name, dataset in datasets.items():
         location = f"data.datasets.{name}"
         if name not in valid_names:
@@ -152,7 +151,6 @@ def validate_config(config: Mapping[str, Any]) -> None:
         role = dataset.get("role")
         if role not in valid_roles:
             raise ConfigError(f"{location}.role must be 'source' or 'target'")
-        source_count += int(role == "source")
         target_count += int(role == "target")
         root = dataset.get("root")
         if not isinstance(root, str) or not root.strip():
@@ -179,11 +177,14 @@ def validate_config(config: Mapping[str, Any]) -> None:
 
     if target_count == 0:
         raise ConfigError("At least one target dataset is required")
-    domain_adaptation = config.get("domain_adaptation", {})
-    if not isinstance(domain_adaptation, Mapping):
-        raise ConfigError("domain_adaptation must be a mapping")
-    if bool(domain_adaptation.get("enabled")) and source_count == 0:
-        raise ConfigError("Domain adaptation requires at least one source dataset")
+
+    mixed_sampling = data.get("mixed_sampling")
+    if not isinstance(mixed_sampling, Mapping):
+        raise ConfigError("data.mixed_sampling must be a mapping")
+    if not isinstance(mixed_sampling.get("balance_source_target"), bool):
+        raise ConfigError(
+            "data.mixed_sampling.balance_source_target must be a boolean"
+        )
 
     augmentation = config.get("augmentation")
     if not isinstance(augmentation, Mapping):
@@ -251,6 +252,8 @@ def validate_config(config: Mapping[str, Any]) -> None:
     loss = config.get("loss")
     if not isinstance(loss, Mapping):
         raise ConfigError("loss must be a mapping")
+    if not isinstance(loss.get("supervise_target_graphs"), bool):
+        raise ConfigError("loss.supervise_target_graphs must be a boolean")
     try:
         edge = loss["edge"]
         classification_name = edge["classification"]["name"]

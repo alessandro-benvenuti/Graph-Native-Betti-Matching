@@ -20,9 +20,6 @@ training:
   checkpoint:
     interval_epochs: 10
 
-domain_adaptation:
-  enabled: false
-
 ema:
   enabled: true
   warmup_iterations: 1600

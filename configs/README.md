@@ -65,6 +65,13 @@ Configuration names are reorganized to describe behavior instead of preserving
 the old layout. Diameter smoothing is intentionally omitted. Inactive road,
 OCTA, MoCo, 2D, and adapter experiments are also omitted.
 
+Adversarial domain adaptation is also absent from the active schema. The
+published baseline constructed and logged its domain loss but did not include it
+in the optimized total. Source/target sampling is independently configured by
+`data.mixed_sampling.balance_source_target`, and target graph supervision by
+`loss.supervise_target_graphs`. The archived implementation and reactivation
+contract are documented in `docs/experiments/domain_adaptation.md`.
+
 CLI overrides should be restricted to operational values such as paths, batch
 size, worker count, resume checkpoint, and run name. Scientific settings such as
 the loss type or balancing mode belong in version-controlled YAML files so the

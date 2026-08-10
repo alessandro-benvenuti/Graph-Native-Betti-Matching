@@ -17,14 +17,14 @@ def compose_source_target(
     source: Dataset,
     target: Dataset,
     *,
-    upsample_target_domain: bool,
+    balance_source_target: bool,
 ) -> Tuple[ConcatDataset, Optional[WeightedRandomSampler]]:
-    """Concatenate two domains and optionally equalize their expected draws."""
+    """Concatenate source and target data and optionally equalize expected draws."""
 
     if len(source) == 0 or len(target) == 0:
         raise ValueError("Mixed training requires non-empty source and target datasets")
     dataset = ConcatDataset((source, target))
-    if not upsample_target_domain:
+    if not balance_source_target:
         return dataset, None
     target_weight = float(len(source)) / float(len(target))
     weights = torch.cat(
@@ -132,8 +132,8 @@ def build_datasets(config: Mapping):
     train_dataset, sampler = compose_source_target(
         source_train_dataset,
         target_train_dataset,
-        upsample_target_domain=bool(
-            config["domain_adaptation"]["upsample_target_domain"]
+        balance_source_target=bool(
+            config["data"]["mixed_sampling"]["balance_source_target"]
         ),
     )
     validation_dataset = ConcatDataset(

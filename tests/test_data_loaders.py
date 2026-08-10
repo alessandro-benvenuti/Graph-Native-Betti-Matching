@@ -70,6 +70,12 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config["training"]["epochs"], 50)
         self.assertEqual(config["model"]["decoder"]["object_queries"], 120)
         self.assertEqual(config["data"]["datasets"]["plants"]["root"], "/plants")
+        self.assertTrue(
+            config["data"]["mixed_sampling"]["balance_source_target"]
+        )
+        self.assertTrue(config["loss"]["supervise_target_graphs"])
+        self.assertNotIn("domain_adaptation", config)
+        self.assertNotIn("domain_lr", config["training"]["optimizer"])
 
     def test_missing_environment_variable_is_reported_at_its_location(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -267,7 +273,9 @@ class CompositionTests(unittest.TestCase):
 
     def test_target_balancing_preserves_the_original_epoch_size(self) -> None:
         dataset, sampler = compose_source_target(
-            self._SizedDataset(10), self._SizedDataset(4), upsample_target_domain=True
+            self._SizedDataset(10),
+            self._SizedDataset(4),
+            balance_source_target=True,
         )
         self.assertEqual(len(dataset), 14)
         self.assertEqual(sampler.num_samples, 20)

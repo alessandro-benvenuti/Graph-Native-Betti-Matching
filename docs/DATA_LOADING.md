@@ -67,7 +67,10 @@ selected by the established sample cap. SyntheticMRI discovery is sorted.
 Source and target datasets are concatenated. When target upsampling is enabled,
 every source item has weight `1`, every target item has weight
 `source_size / target_size`, and an epoch contains exactly `2 * source_size`
-draws. Validation is concatenated without sampling or random augmentation.
+draws. This behavior is controlled by
+`data.mixed_sampling.balance_source_target`; it balances dataset roles and does
+not enable adversarial domain adaptation. Validation is concatenated without
+sampling or random augmentation.
 
 ## Cluster verification
 
