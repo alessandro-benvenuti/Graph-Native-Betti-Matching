@@ -76,3 +76,11 @@ CLI overrides should be restricted to operational values such as paths, batch
 size, worker count, resume checkpoint, and run name. Scientific settings such as
 the loss type or balancing mode belong in version-controlled YAML files so the
 resolved configuration fully describes an experiment.
+
+## Model compatibility values
+
+`model.decoder.encoder_layers: 6` and `model.encoder.strides: [1,2,2,2]`
+describe the effective legacy architecture. The old YAML displayed 4 encoder
+layers and `[2,2,2,2]`, but its builder silently used the transformer default of
+6 and ignored the first stage stride. These corrected fields are now consumed by
+the model builder. See `docs/MODEL.md` for the complete compatibility contract.

@@ -2,7 +2,7 @@
 
 Clean research implementation of a 3D graph-extraction pipeline with graph-native topology objectives.
 
-This repository is being reconstructed from an experimental codebase. It currently contains the reviewed augmentation implementation, configuration schema, and supported dataset loaders; the remaining modules and interfaces will be migrated incrementally.
+This repository is being reconstructed from an experimental codebase. It currently contains the reviewed augmentation implementation, configuration schema, supported dataset loaders, and the checkpoint-oriented 3D RelationFormer model; the remaining training and evaluation interfaces will be migrated incrementally.
 
 ## Intended scope
 
@@ -57,4 +57,9 @@ The future build documentation will record the tested Jean Zay modules and provi
 
 ## Status
 
-The augmentation and data-loading contracts, merged/validated configuration loading, reproducible batching, and optional real-dataset checks are in place. No training, model, loss, evaluation, or CUDA implementation has been migrated yet.
+The augmentation and data-loading contracts, merged/validated configuration
+loading, reproducible batching, optional real-dataset checks, minimal 3D
+RelationFormer, PyTorch deformable-attention fallback, and CUDA extension source
+are in place. See `docs/MODEL.md` for the architecture contract and cluster
+verification commands. Training, losses, matching, and evaluation have not yet
+been migrated.

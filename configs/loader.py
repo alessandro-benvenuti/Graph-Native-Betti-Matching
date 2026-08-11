@@ -127,12 +127,78 @@ def validate_config(config: Mapping[str, Any]) -> None:
     data = config.get("data")
     if not isinstance(data, Mapping):
         raise ConfigError("data must be a mapping")
+    if data.get("spatial_dims") != 3:
+        raise ConfigError("The supported model requires data.spatial_dims=3")
     image_size = data.get("image_size")
     if not isinstance(image_size, list) or len(image_size) != 3:
         raise ConfigError("data.image_size must contain three spatial dimensions")
     for index, size in enumerate(image_size):
         _positive_int(size, f"data.image_size[{index}]")
     _positive_int(data.get("batch_size"), "data.batch_size")
+
+    model = config.get("model")
+    if not isinstance(model, Mapping):
+        raise ConfigError("model must be a mapping")
+    try:
+        encoder = model["encoder"]
+        decoder = model["decoder"]
+    except (KeyError, TypeError) as error:
+        raise ConfigError("model encoder/decoder configuration is incomplete") from error
+    _positive_int(model.get("num_classes"), "model.num_classes")
+    if encoder.get("type") != "se_resnet":
+        raise ConfigError("model.encoder.type must be se_resnet")
+    _positive_int(encoder.get("input_channels"), "model.encoder.input_channels")
+    depths = encoder.get("depths")
+    strides = encoder.get("strides")
+    if not isinstance(depths, list) or len(depths) != 4:
+        raise ConfigError("model.encoder.depths must contain four stages")
+    if not isinstance(strides, list) or len(strides) != 4:
+        raise ConfigError("model.encoder.strides must contain four stages")
+    for index, depth in enumerate(depths):
+        _positive_int(depth, f"model.encoder.depths[{index}]")
+    for index, stride in enumerate(strides):
+        _positive_int(stride, f"model.encoder.strides[{index}]")
+    if decoder.get("type") != "deformable_detr":
+        raise ConfigError("model.decoder.type must be deformable_detr")
+    hidden_dim = _positive_int(
+        decoder.get("hidden_dim"), "model.decoder.hidden_dim"
+    )
+    attention_heads = _positive_int(
+        decoder.get("attention_heads"), "model.decoder.attention_heads"
+    )
+    if hidden_dim % attention_heads:
+        raise ConfigError(
+            "model.decoder.hidden_dim must be divisible by attention_heads"
+        )
+    if attention_heads not in {6, 26}:
+        raise ConfigError("3D deformable attention supports 6 or 26 heads")
+    try:
+        decoder_dropout = float(decoder.get("dropout"))
+    except (TypeError, ValueError) as error:
+        raise ConfigError("model.decoder.dropout must be numeric") from error
+    if not 0.0 <= decoder_dropout < 1.0:
+        raise ConfigError("model.decoder.dropout must lie in [0,1)")
+    if decoder.get("activation") not in {"relu", "gelu", "glu"}:
+        raise ConfigError("model.decoder.activation must be relu, gelu, or glu")
+    for name in (
+        "encoder_layers",
+        "decoder_layers",
+        "feedforward_dim",
+        "decoder_points",
+        "encoder_points",
+        "object_queries",
+    ):
+        _positive_int(decoder.get(name), f"model.decoder.{name}")
+    if decoder.get("feature_levels") != 1:
+        raise ConfigError("The supported 3D baseline requires one feature level")
+    for name in ("relation_tokens", "dummy_tokens"):
+        _non_negative_int(decoder.get(name), f"model.decoder.{name}")
+    if not isinstance(decoder.get("relation_attention"), bool):
+        raise ConfigError("model.decoder.relation_attention must be a boolean")
+    if decoder.get("relation_attention") and decoder.get("relation_tokens", 0) == 0:
+        raise ConfigError("relation_attention requires at least one relation token")
+    if not isinstance(decoder.get("use_cuda_extension"), bool):
+        raise ConfigError("model.decoder.use_cuda_extension must be a boolean")
 
     datasets = data.get("datasets")
     if not isinstance(datasets, Mapping) or not datasets:

@@ -53,20 +53,19 @@ augmentation:
 
 model:
   num_classes: 2
-  drop_rate: 0.1
-  drop_path_rate: 0.2
-  label_smoothing: 0.1
   encoder:
     type: se_resnet
-    cell_size: 8
     input_channels: 1
     depths: [4, 4, 16, 4]
-    strides: [2, 2, 2, 2]
+    # Effective legacy behavior: the old code ignored the first configured 2.
+    strides: [1, 2, 2, 2]
   decoder:
     type: deformable_detr
     hidden_dim: 552
     attention_heads: 6
-    encoder_layers: 4
+    # Effective legacy behavior: the old builder omitted this argument and the
+    # transformer constructor therefore used its default of 6.
+    encoder_layers: 6
     decoder_layers: 4
     feedforward_dim: 1280
     dropout: 0.0
@@ -74,11 +73,11 @@ model:
     feature_levels: 1
     decoder_points: 4
     encoder_points: 4
-    two_stage: false
     object_queries: 120
     relation_tokens: 2
     dummy_tokens: 0
     relation_attention: true
+    use_cuda_extension: true
   matcher:
     type: hungarian
     class_cost: 2.0
