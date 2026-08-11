@@ -23,6 +23,7 @@ from data.loaders import (
     discover_synthetic_mri,
     image_graph_collate,
 )
+from data.loaders.mixed import _supports_keyword
 from tests.integration_helpers import node_foreground_neighbourhood_hit_rate
 
 
@@ -87,6 +88,20 @@ class ConfigurationTests(unittest.TestCase):
                     "SYNTHETIC_MRI_DATASET": "/synthetic",
                 },
             )
+
+
+class DataLoaderCompatibilityTests(unittest.TestCase):
+    def test_generator_is_only_passed_to_versions_that_support_it(self) -> None:
+        class LegacyLoader:
+            def __init__(self, dataset, batch_size=1):
+                pass
+
+        class ModernLoader:
+            def __init__(self, dataset, batch_size=1, generator=None):
+                pass
+
+        self.assertFalse(_supports_keyword(LegacyLoader.__init__, "generator"))
+        self.assertTrue(_supports_keyword(ModernLoader.__init__, "generator"))
 
 
 class DiscoveryTests(unittest.TestCase):

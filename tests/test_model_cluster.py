@@ -41,6 +41,20 @@ def _config():
     "CUDA, MONAI, and the compiled deformable-attention extension are required",
 )
 class CudaModelTests(unittest.TestCase):
+    @staticmethod
+    def _small_config():
+        config = copy.deepcopy(_config())
+        config["model"]["encoder"]["depths"] = [1, 1, 1, 1]
+        config["model"]["decoder"].update(
+            hidden_dim=48,
+            encoder_layers=1,
+            decoder_layers=1,
+            feedforward_dim=64,
+            object_queries=6,
+            relation_tokens=2,
+        )
+        return config
+
     def test_cuda_extension_matches_pytorch_fallback(self) -> None:
         torch.manual_seed(11)
         cpu_module = MSDeformAttn(48, 1, 6, 2, False).eval()
@@ -68,16 +82,7 @@ class CudaModelTests(unittest.TestCase):
     def test_small_relationformer_cuda_forward(self) -> None:
         from models import build_model
 
-        config = copy.deepcopy(_config())
-        config["model"]["encoder"]["depths"] = [1, 1, 1, 1]
-        config["model"]["decoder"].update(
-            hidden_dim=48,
-            encoder_layers=1,
-            decoder_layers=1,
-            feedforward_dim=64,
-            object_queries=6,
-            relation_tokens=2,
-        )
+        config = self._small_config()
         model = build_model(config).cuda().eval()
         with torch.no_grad():
             tokens, predictions, _ = model(
@@ -85,6 +90,80 @@ class CudaModelTests(unittest.TestCase):
             )
         self.assertEqual(tuple(tokens.shape), (1, 8, 48))
         self.assertEqual(tuple(predictions["pred_nodes"].shape), (1, 6, 6))
+
+    def test_small_relationformer_cuda_loss_backward(self) -> None:
+        from models import build_model
+        from training.losses import build_criterion
+
+        config = self._small_config()
+        model = build_model(config).cuda().train()
+        criterion = build_criterion(config, model).cuda()
+        tokens, predictions, _ = model(
+            # At 32^3 the final encoder map is 1^3. BatchNorm therefore needs
+            # at least two samples while the model is in genuine train mode.
+            torch.randn((2, 1, 32, 32, 32), device="cuda")
+        )
+        nodes = torch.tensor(
+            [[0.25, 0.30, 0.35], [0.70, 0.65, 0.60]], device="cuda"
+        )
+        edges = torch.tensor([[0, 1]], dtype=torch.long, device="cuda")
+        targets = {
+            "nodes": [nodes.clone(), nodes.clone()],
+            "edges": [edges.clone(), edges.clone()],
+        }
+        losses = criterion(tokens, predictions, targets)
+        losses["total"].backward()
+        self.assertTrue(torch.isfinite(losses["total"]))
+        self.assertIsNotNone(model.relation_embed.layers[-1].weight.grad)
+        self.assertTrue(
+            torch.isfinite(model.relation_embed.layers[-1].weight.grad).all()
+        )
+
+    def test_combined_focal_betti_cuda_backward(self) -> None:
+        from models import build_model
+        from training.losses import build_criterion
+
+        config = self._small_config()
+        config["loss"]["node"]["classification"]["name"] = "focal"
+        config["loss"]["edge"]["classification"]["name"] = "focal"
+        config["loss"]["edge"]["balancing"]["mode"] = "none"
+        config["loss"]["edge"]["candidates"].update(
+            include_unmatched=True,
+            unmatched_object_threshold=0.0,
+            max_active_unmatched=3,
+            max_unmatched_pairs_per_graph=8,
+        )
+        for name in ("betti_h0", "betti_h1"):
+            config["topology"][name].update(
+                enabled=True, log_only=False, weight=0.1
+            )
+        model = build_model(config).cuda().train()
+        criterion = build_criterion(config, model).cuda()
+        tokens, predictions, _ = model(
+            torch.randn((2, 1, 32, 32, 32), device="cuda")
+        )
+        nodes = torch.tensor(
+            [
+                [0.20, 0.25, 0.30],
+                [0.50, 0.55, 0.60],
+                [0.75, 0.70, 0.65],
+            ],
+            device="cuda",
+        )
+        edges = torch.tensor(
+            [[0, 1], [1, 2], [0, 2]], dtype=torch.long, device="cuda"
+        )
+        targets = {
+            "nodes": [nodes.clone(), nodes.clone()],
+            "edges": [edges.clone(), edges.clone()],
+        }
+        losses = criterion(tokens, predictions, targets)
+        losses["total"].backward()
+        for name in ("total", "betti_h0", "betti_h1"):
+            self.assertTrue(torch.isfinite(losses[name]))
+        self.assertTrue(
+            torch.isfinite(model.relation_embed.layers[-1].weight.grad).all()
+        )
 
 
 @unittest.skipUnless(MONAI_AVAILABLE, "MONAI is required to build RelationFormer")

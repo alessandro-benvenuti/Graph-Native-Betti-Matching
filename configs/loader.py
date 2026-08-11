@@ -314,6 +314,25 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if not isinstance(training, Mapping):
         raise ConfigError("training must be a mapping")
     _positive_int(training.get("epochs"), "training.epochs")
+    if training.get("input") not in {"image", "segmentation"}:
+        raise ConfigError("training.input must be image or segmentation")
+    optimizer = training.get("optimizer")
+    scheduler = training.get("scheduler")
+    if not isinstance(optimizer, Mapping) or optimizer.get("name") != "adamw":
+        raise ConfigError("training.optimizer.name must be adamw")
+    if not isinstance(scheduler, Mapping) or scheduler.get("name") != "polynomial":
+        raise ConfigError("training.scheduler.name must be polynomial")
+    checkpoint = training.get("checkpoint")
+    if not isinstance(checkpoint, Mapping):
+        raise ConfigError("training.checkpoint must be a mapping")
+    if checkpoint.get("policy") not in {"interval", "interval_and_best"}:
+        raise ConfigError(
+            "training.checkpoint.policy must be interval or interval_and_best"
+        )
+    _positive_int(
+        checkpoint.get("interval_epochs"),
+        "training.checkpoint.interval_epochs",
+    )
 
     loss = config.get("loss")
     if not isinstance(loss, Mapping):
@@ -321,12 +340,50 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if not isinstance(loss.get("supervise_target_graphs"), bool):
         raise ConfigError("loss.supervise_target_graphs must be a boolean")
     try:
+        node_classification = loss["node"]["classification"]
         edge = loss["edge"]
         classification_name = edge["classification"]["name"]
         candidates = edge["candidates"]
         balancing = edge["balancing"]
     except (KeyError, TypeError) as error:
         raise ConfigError("loss.edge configuration is incomplete") from error
+    for location, classification, allowed in (
+        (
+            "loss.node.classification",
+            node_classification,
+            {"weighted_cross_entropy", "focal"},
+        ),
+        (
+            "loss.edge.classification",
+            edge["classification"],
+            {"cross_entropy", "focal"},
+        ),
+    ):
+        if classification.get("name") not in allowed:
+            raise ConfigError(
+                f"{location}.name must be one of {sorted(allowed)}"
+            )
+        class_weights = classification.get("class_weights")
+        if (
+            not isinstance(class_weights, list)
+            or len(class_weights) != 2
+            or any(float(value) < 0 for value in class_weights)
+            or sum(float(value) for value in class_weights) <= 0
+        ):
+            raise ConfigError(f"{location}.class_weights must contain two non-negative values with a positive sum")
+        if float(classification.get("focal_gamma", -1)) < 0:
+            raise ConfigError(f"{location}.focal_gamma must be non-negative")
+        curriculum = classification.get("curriculum")
+        if not isinstance(curriculum, Mapping):
+            raise ConfigError(f"{location}.curriculum must be a mapping")
+        if not isinstance(curriculum.get("enabled"), bool):
+            raise ConfigError(f"{location}.curriculum.enabled must be a boolean")
+        start = float(curriculum.get("start_percent", -1))
+        end = float(curriculum.get("end_percent", -1))
+        if not 0 <= start <= end <= 100:
+            raise ConfigError(
+                f"{location}.curriculum must satisfy 0 <= start <= end <= 100"
+            )
     mode = balancing.get("mode")
     if classification_name == "focal" and mode != "none":
         raise ConfigError("Focal edge classification requires balancing.mode=none")
@@ -342,6 +399,60 @@ def validate_config(config: Mapping[str, Any]) -> None:
         _positive_int(maximum, "loss.edge.candidates.max_per_graph")
     if candidates.get("positive_cap") is not None:
         raise ConfigError("loss.edge.candidates.positive_cap must remain null")
+    include_unmatched = candidates.get("include_unmatched")
+    if not isinstance(include_unmatched, bool):
+        raise ConfigError("loss.edge.candidates.include_unmatched must be a boolean")
+    if include_unmatched and classification_name != "focal":
+        raise ConfigError("unmatched hard-negative candidates require focal edge loss")
+    threshold = float(candidates.get("unmatched_object_threshold", -1))
+    if not 0 <= threshold <= 1:
+        raise ConfigError(
+            "loss.edge.candidates.unmatched_object_threshold must lie in [0,1]"
+        )
+    for name in (
+        "max_active_unmatched",
+        "max_unmatched_pairs_per_graph",
+        "unmatched_warmup_epochs",
+        "unmatched_ramp_epochs",
+    ):
+        _non_negative_int(candidates.get(name), f"loss.edge.candidates.{name}")
+    if float(candidates.get("unmatched_weight", -1)) < 0:
+        raise ConfigError("loss.edge.candidates.unmatched_weight must be non-negative")
+
+    topology = config.get("topology")
+    if not isinstance(topology, Mapping):
+        raise ConfigError("topology must be a mapping")
+    for name in ("betti_h0", "betti_h1"):
+        topology_loss = topology.get(name)
+        location = f"topology.{name}"
+        if not isinstance(topology_loss, Mapping):
+            raise ConfigError(f"{location} must be a mapping")
+        for flag in ("enabled", "log_only", "normalize"):
+            if not isinstance(topology_loss.get(flag), bool):
+                raise ConfigError(f"{location}.{flag} must be a boolean")
+        for count_name in ("warmup_epochs", "ramp_epochs"):
+            _non_negative_int(
+                topology_loss.get(count_name), f"{location}.{count_name}"
+            )
+        value_names = ["weight", "diagonal_factor"]
+        if name == "betti_h0":
+            value_names.append("unmatched_weight")
+        else:
+            value_names.extend(
+                ("false_positive_weight", "false_negative_weight")
+            )
+        for value_name in value_names:
+            if float(topology_loss.get(value_name, -1)) < 0:
+                raise ConfigError(f"{location}.{value_name} must be non-negative")
+
+    evaluation = config.get("evaluation")
+    if not isinstance(evaluation, Mapping):
+        raise ConfigError("evaluation must be a mapping")
+    _positive_int(evaluation.get("interval_epochs"), "evaluation.interval_epochs")
+    for name in ("node_threshold", "edge_threshold"):
+        value = evaluation.get(name)
+        if value is not None and not 0.0 <= float(value) <= 1.0:
+            raise ConfigError(f"evaluation.{name} must be null or lie in [0,1]")
 
 
 def load_config(

@@ -2,7 +2,11 @@
 
 Clean research implementation of a 3D graph-extraction pipeline with graph-native topology objectives.
 
-This repository is being reconstructed from an experimental codebase. It currently contains the reviewed augmentation implementation, configuration schema, supported dataset loaders, and the checkpoint-oriented 3D RelationFormer model; the remaining training and evaluation interfaces will be migrated incrementally.
+This repository is being reconstructed from an experimental codebase. It
+contains the reviewed augmentation and loading pipeline, validated
+configuration schema, checkpoint-compatible 3D RelationFormer, and the
+baseline/Betti/focal training stack, baseline-compatible graph inference, and
+loss-based validation/checkpoint selection.
 
 ## Intended scope
 
@@ -12,10 +16,10 @@ The first supported workflow will focus on:
 - mixed plants and synthetic-MRI pretraining;
 - synthetic-MRI finetuning;
 - RelationFormer-style node and relation prediction;
-- EMA-assisted hard-negative mining;
+- focal hard-negative mining;
 - focal relation objectives;
 - graph-native Betti H0/H1 objectives;
-- BatchNorm-calibrated evaluation.
+- baseline-compatible graph inference and loss-based model selection.
 
 Diameter-smoothing losses, metrics, profiling tools, and experiment configurations are intentionally out of scope.
 
@@ -59,7 +63,8 @@ The future build documentation will record the tested Jean Zay modules and provi
 
 The augmentation and data-loading contracts, merged/validated configuration
 loading, reproducible batching, optional real-dataset checks, minimal 3D
-RelationFormer, PyTorch deformable-attention fallback, and CUDA extension source
-are in place. See `docs/MODEL.md` for the architecture contract and cluster
-verification commands. Training, losses, matching, and evaluation have not yet
-been migrated.
+RelationFormer, PyTorch deformable-attention fallback, CUDA extension source,
+Hungarian matching, modular graph losses, optimizer, scheduler, strict resume,
+training loop, inference, and baseline loss-based model selection are in place.
+See `docs/MODEL.md`, `docs/LOSSES.md`, and `docs/TRAINING.md`. The legacy SMD/AP
+research reports are deliberately separate from the training-critical path.

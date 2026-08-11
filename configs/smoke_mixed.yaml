@@ -1,0 +1,26 @@
+defaults:
+  - pretrain_mixed.yaml
+
+experiment:
+  name: smoke_mixed
+
+runtime:
+  workers: 0
+
+data:
+  batch_size: 1
+  datasets:
+    plants:
+      train_samples: 2
+      validation_samples: 1
+    synthetic_mri:
+      train_samples: 2
+      validation_samples: 1
+
+training:
+  epochs: 1
+  checkpoint:
+    interval_epochs: 1
+
+evaluation:
+  interval_epochs: 1

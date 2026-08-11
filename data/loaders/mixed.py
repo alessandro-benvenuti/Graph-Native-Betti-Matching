@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Mapping, Optional, Tuple
 
@@ -11,6 +12,15 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, WeightedRandomS
 from data.loaders.common import image_graph_collate, seed_data_worker
 from data.loaders.plants import build_plants_dataset
 from data.loaders.synthetic_mri import build_synthetic_mri_dataset
+
+
+def _supports_keyword(callable_object, keyword: str) -> bool:
+    """Return whether a callable explicitly accepts a compatibility keyword."""
+
+    try:
+        return keyword in inspect.signature(callable_object).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def compose_source_target(
@@ -158,18 +168,14 @@ def build_data_loaders(config: Mapping):
         collate_fn=image_graph_collate,
         worker_init_fn=seed_data_worker,
     )
-    train_loader = DataLoader(
-        train_dataset,
-        shuffle=sampler is None,
-        sampler=sampler,
-        generator=train_generator,
-        **common,
-    )
+    train_options = dict(shuffle=sampler is None, sampler=sampler)
+    validation_options = dict(shuffle=False)
+    if _supports_keyword(DataLoader.__init__, "generator"):
+        train_options["generator"] = train_generator
+        validation_options["generator"] = validation_generator
+    train_loader = DataLoader(train_dataset, **train_options, **common)
     validation_loader = DataLoader(
-        validation_dataset,
-        shuffle=False,
-        generator=validation_generator,
-        **common,
+        validation_dataset, **validation_options, **common
     )
     return train_loader, validation_loader
 

@@ -84,3 +84,5 @@ describe the effective legacy architecture. The old YAML displayed 4 encoder
 layers and `[2,2,2,2]`, but its builder silently used the transformer default of
 6 and ignored the first stage stride. These corrected fields are now consumed by
 the model builder. See `docs/MODEL.md` for the complete compatibility contract.
+
+See `docs/LOSSES.md` for the baseline, Betti, and focal/HNM loss contract.

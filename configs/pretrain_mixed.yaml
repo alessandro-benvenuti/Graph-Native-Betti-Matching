@@ -26,12 +26,5 @@ training:
   checkpoint:
     interval_epochs: 5
 
-ema:
-  enabled: false
-  warmup_iterations: 2080
-
-hard_negative_mining:
-  enabled: false
-
 evaluation:
   interval_epochs: 5

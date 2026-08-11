@@ -84,13 +84,10 @@ model:
     node_cost: 5.0
 
 training:
+  input: image
   start_epoch: 0
   epochs: null
-  epoch_length: null
   warmup_epochs: 1
-  gradient_clip_norm: 5.0
-  train_encoder: true
-  train_decoder: true
   optimizer:
     name: adamw
     base_lr: 7.0e-5
@@ -100,12 +97,9 @@ training:
   scheduler:
     name: polynomial
     warmup_lr: 1.0e-9
-    minimum_lr: 5.0e-6
     power: 0.9
   checkpoint:
-    resume: null
-    auto_resume: true
-    policy: interval
+    policy: interval_and_best
     interval_epochs: 5
 
 loss:
@@ -122,11 +116,19 @@ loss:
       name: weighted_cross_entropy
       class_weights: [0.25, 0.75]
       focal_gamma: 2.0
+      curriculum:
+        enabled: false
+        start_percent: 10.0
+        end_percent: 30.0
   edge:
     classification:
       name: cross_entropy
       class_weights: [1.0, 1.0]
       focal_gamma: 2.0
+      curriculum:
+        enabled: false
+        start_percent: 10.0
+        end_percent: 30.0
     candidates:
       max_per_graph: 9999
       positive_cap: null
@@ -141,23 +143,6 @@ loss:
       mode: ratio_upsample
       positive_to_negative_ratio: 0.15
       tolerance: 0.02
-
-ema:
-  enabled: false
-  decay: 0.995
-  update_every_iterations: 1
-  warmup_iterations: 0
-
-hard_negative_mining:
-  enabled: false
-  negative_cap_per_node: null
-  negative_cap_per_graph: null
-  weighting:
-    maximum: 2.0
-    temperature: 1.0
-    score_threshold: 0.4
-    warmup_epochs: 20
-    ramp_epochs: 60
 
 topology:
   betti_h0:
@@ -182,6 +167,5 @@ topology:
 
 evaluation:
   interval_epochs: 5
-  save_predictions: false
-  similarity_metrics: true
-  batch_norm_calibration: false
+  node_threshold: null
+  edge_threshold: null

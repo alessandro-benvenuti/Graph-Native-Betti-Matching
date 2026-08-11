@@ -152,3 +152,20 @@ After schema compatibility passes, the next checkpoint test should load the
 weights into both repositories and compare evaluation outputs for the same
 stored input volume. That numerical comparison requires the original and new
 CUDA extensions to be built in compatible environments.
+
+## Numerical comparison with the original repository
+
+Run the original and refactored models in isolated processes with the same
+checkpoint and deterministic input:
+
+```bash
+python scripts/compare_model_forward.py \
+  --legacy-root /absolute/path/to/3d \
+  --checkpoint "$GNBM_MRI_CHECKPOINT"
+```
+
+The script derives both architectures from `configs/pretrain_mixed.yaml`. It
+compares the complete decoder tokens, node logits, node coordinates, and
+projected encoder features. A nonzero exit status means at least one output is
+outside the reported tolerance. Each repository must have its own deformable
+attention extension built for the active PyTorch/CUDA environment.
