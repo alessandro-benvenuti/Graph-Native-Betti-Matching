@@ -133,6 +133,45 @@ def build_model(config):
             "MissingType | None",
         )
 
+    def test_no_nms_parity_installs_a_fail_fast_legacy_stub(self) -> None:
+        import boxes
+
+        original_module = sys.modules.get("boxes.nms")
+        original_attribute = getattr(boxes, "nms", None)
+        try:
+            parity._install_unused_legacy_nms_stub()
+            stub = sys.modules["boxes.nms"]
+            self.assertIs(boxes.nms, stub)
+            with self.assertRaisesRegex(RuntimeError, "no-NMS parity mode"):
+                stub.nms(torch.empty((0, 6)), torch.empty((0,)), 0.5)
+        finally:
+            if original_module is None:
+                sys.modules.pop("boxes.nms", None)
+            else:
+                sys.modules["boxes.nms"] = original_module
+            if original_attribute is None:
+                delattr(boxes, "nms")
+            else:
+                boxes.nms = original_attribute
+
+    def test_empty_legacy_and_refactored_edges_compare_after_canonicalization(self):
+        legacy_edges = parity._canonical_inference_tensor(
+            "edges", torch.empty((0, 2)), (-1, 2)
+        )
+        self.assertEqual(legacy_edges.dtype, torch.long)
+        reference = {"inference/edges": legacy_edges}
+        observed = {
+            "inference/edges": torch.empty((0, 2), dtype=torch.long)
+        }
+        result = parity.compare_outputs(
+            reference,
+            observed,
+            rtol=0.0,
+            atol=0.0,
+            keys=("inference/edges",),
+        )
+        self.assertTrue(result["inference/edges"]["compatible"])
+
     def test_worker_implementation_is_stored_in_worker_argument(self) -> None:
         arguments = parity._parser().parse_args(
             [

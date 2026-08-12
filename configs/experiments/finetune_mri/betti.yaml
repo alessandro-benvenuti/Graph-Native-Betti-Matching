@@ -1,0 +1,14 @@
+defaults:
+  - baseline.yaml
+  - ../../losses/betti.yaml
+
+experiment:
+  name: finetune_mri_betti_seed364505
+
+topology:
+  betti_h0:
+    warmup_epochs: 2
+    ramp_epochs: 5
+  betti_h1:
+    warmup_epochs: 2
+    ramp_epochs: 5

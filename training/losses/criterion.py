@@ -432,12 +432,14 @@ class GraphCriterion(nn.Module):
         topology_losses = self.loss_topology(tokens, targets["edges"], assignments)
         for name, value in topology_losses.items():
             configuration = self.topology[name]
-            weight = scheduled_candidate_weight(
-                self.epoch,
-                configuration["weight"],
-                configuration["warmup_epochs"],
-                configuration["ramp_epochs"],
-            )
+            weight = float(configuration["weight"])
+            if not self.validation:
+                weight = scheduled_candidate_weight(
+                    self.epoch,
+                    weight,
+                    configuration["warmup_epochs"],
+                    configuration["ramp_epochs"],
+                )
             losses[name] = value
             losses[name + "_weighted"] = value * weight
 

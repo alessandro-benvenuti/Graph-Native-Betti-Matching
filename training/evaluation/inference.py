@@ -29,7 +29,8 @@ def infer_graphs(
     graphs = []
     for batch in range(tokens.shape[0]):
         query_ids = torch.nonzero(valid[batch], as_tuple=False).flatten()
-        nodes = predictions["pred_nodes"][batch, query_ids, :3]
+        boxes = predictions["pred_nodes"][batch, query_ids]
+        nodes = boxes[:, :3]
         scores = node_probabilities[batch, query_ids]
         if query_ids.numel() < 2:
             pairs = torch.empty((0, 2), dtype=torch.long, device=tokens.device)
@@ -63,6 +64,7 @@ def infer_graphs(
         graphs.append(
             {
                 "nodes": nodes.detach().cpu(),
+                "boxes": boxes.detach().cpu(),
                 "node_scores": scores.detach().cpu(),
                 "edges": pairs.detach().cpu(),
                 "edge_scores": relation_scores.detach().cpu(),

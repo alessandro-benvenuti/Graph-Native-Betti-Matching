@@ -1,0 +1,18 @@
+defaults:
+  - ../../finetune_synthetic_mri.yaml
+
+# Shared non-loss settings for the short ablation pilot. This file is inherited
+# by the four runnable configurations and is not itself an experiment.
+data:
+  datasets:
+    synthetic_mri:
+      train_samples: 256
+      validation_samples: 32
+
+training:
+  epochs: 10
+  checkpoint:
+    policy: best_only
+
+evaluation:
+  interval_epochs: 1

@@ -131,7 +131,7 @@ class Trainer:
         validation_interval = int(self.config["evaluation"]["interval_epochs"])
         policy = self.config["training"]["checkpoint"]["policy"]
         best_validation = float("inf")
-        if int(start_epoch) > 0 and policy == "interval_and_best":
+        if int(start_epoch) > 0 and policy in {"best_only", "interval_and_best"}:
             resumed_validation = evaluate_loss(
                 self.model,
                 self.validation_criterion,
@@ -179,7 +179,7 @@ class Trainer:
                 )
             )
 
-            if epoch % validation_interval == 0:
+            if epoch % validation_interval == 0 or epoch == epochs:
                 validation = evaluate_loss(
                     self.model,
                     self.validation_criterion,
@@ -197,7 +197,7 @@ class Trainer:
                         self.writer.add_scalar("validation/" + name, value, epoch)
                 validation_total = validation.get("total")
                 if (
-                    policy == "interval_and_best"
+                    policy in {"best_only", "interval_and_best"}
                     and validation_total is not None
                     and validation_total < best_validation
                 ):

@@ -1,0 +1,5 @@
+defaults:
+  - pilot.yaml
+
+experiment:
+  name: finetune_mri_baseline_seed364505

@@ -146,6 +146,68 @@ class TrainingTests(unittest.TestCase):
             self.assertTrue((models / "checkpoint_epoch=1.pt").is_file())
             self.assertTrue((models / "best_checkpoint.pt").is_file())
 
+    def test_best_only_keeps_exactly_one_checkpoint(self):
+        config = _config()
+        config["training"]["epochs"] = 2
+        config["training"]["warmup_epochs"] = 0
+        config["training"]["checkpoint"]["policy"] = "best_only"
+        config["training"]["checkpoint"]["interval_epochs"] = 1
+        config["evaluation"]["interval_epochs"] = 1
+        model = TinyGraphModel()
+        criterion = GraphCriterion(config, build_matcher(config), model.relation_embed)
+        optimizer = build_optimizer(config, model)
+        scheduler = build_scheduler(config, optimizer, iterations_per_epoch=1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            config["experiment"]["output_dir"] = directory
+            config["experiment"]["name"] = "best-only-test"
+            Trainer(
+                model,
+                criterion,
+                criterion,
+                optimizer,
+                scheduler,
+                [_batch()],
+                [_batch()],
+                config,
+                torch.device("cpu"),
+            ).fit()
+            checkpoints = list(
+                (Path(directory) / "best-only-test" / "models").glob("*.pt")
+            )
+
+        self.assertEqual([path.name for path in checkpoints], ["best_checkpoint.pt"])
+
+    def test_none_policy_writes_no_checkpoint(self):
+        config = _config()
+        config["training"]["epochs"] = 1
+        config["training"]["warmup_epochs"] = 0
+        config["training"]["checkpoint"]["policy"] = "none"
+        config["evaluation"]["interval_epochs"] = 1
+        model = TinyGraphModel()
+        criterion = GraphCriterion(config, build_matcher(config), model.relation_embed)
+        optimizer = build_optimizer(config, model)
+        scheduler = build_scheduler(config, optimizer, iterations_per_epoch=1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            config["experiment"]["output_dir"] = directory
+            config["experiment"]["name"] = "no-checkpoint-test"
+            Trainer(
+                model,
+                criterion,
+                criterion,
+                optimizer,
+                scheduler,
+                [_batch()],
+                [_batch()],
+                config,
+                torch.device("cpu"),
+            ).fit()
+            models = Path(directory) / "no-checkpoint-test" / "models"
+            checkpoints = list(models.glob("*.pt")) if models.exists() else []
+
+        self.assertEqual(checkpoints, [])
+
 
 if __name__ == "__main__":
     unittest.main()

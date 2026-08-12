@@ -48,6 +48,8 @@ python train.py \
 The default checkpoint policy writes interval checkpoints and
 `best_checkpoint.pt`. As in the effective legacy evaluator, "best" means the
 lowest mean validation total loss; SMD and AP were not key checkpoint metrics.
+Storage-constrained runs may use `best_only` to overwrite a single
+`best_checkpoint.pt`, or `none` to disable checkpoint output entirely.
 
 ## Fast end-to-end cluster smoke run
 

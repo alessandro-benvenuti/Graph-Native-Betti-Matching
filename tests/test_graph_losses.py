@@ -132,6 +132,40 @@ class GraphCriterionTests(unittest.TestCase):
         losses["total"].backward()
         self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
 
+    def test_validation_uses_stationary_full_betti_weight(self):
+        config = _config()
+        config["topology"]["betti_h0"].update(
+            enabled=True,
+            log_only=False,
+            weight=0.2,
+            warmup_epochs=10,
+            ramp_epochs=20,
+        )
+        train_criterion, _ = self._criterion(config)
+        validation_relation = CountingRelationHead()
+        matcher_config = config["model"]["matcher"]
+        validation_criterion = GraphCriterion(
+            config,
+            HungarianMatcher(
+                matcher_config["class_cost"], matcher_config["node_cost"]
+            ),
+            validation_relation,
+            validation=True,
+        )
+        tokens, predictions, targets = _batch()
+        train_losses = train_criterion(tokens, predictions, targets)
+        validation_losses = validation_criterion(tokens, predictions, targets)
+
+        self.assertEqual(
+            float(train_losses["betti_h0_weighted"].detach()), 0.0
+        )
+        self.assertTrue(
+            torch.allclose(
+                validation_losses["betti_h0_weighted"],
+                validation_losses["betti_h0"] * 0.2,
+            )
+        )
+
     def test_focal_hard_negative_mode_is_finite_and_differentiable(self):
         config = _config()
         config["loss"]["node"]["classification"]["name"] = "focal"

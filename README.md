@@ -4,9 +4,10 @@ Clean research implementation of a 3D graph-extraction pipeline with graph-nativ
 
 This repository is being reconstructed from an experimental codebase. It
 contains the reviewed augmentation and loading pipeline, validated
-configuration schema, checkpoint-compatible 3D RelationFormer, and the
-baseline/Betti/focal training stack, baseline-compatible graph inference, and
-loss-based validation/checkpoint selection.
+configuration schema, checkpoint-compatible 3D RelationFormer, the
+baseline/Betti/focal training stack, graph inference, corrected baseline
+evaluation metrics, plotting/export, and loss-based validation/checkpoint
+selection.
 
 ## Intended scope
 
@@ -65,6 +66,8 @@ The augmentation and data-loading contracts, merged/validated configuration
 loading, reproducible batching, optional real-dataset checks, minimal 3D
 RelationFormer, PyTorch deformable-attention fallback, CUDA extension source,
 Hungarian matching, modular graph losses, optimizer, scheduler, strict resume,
-training loop, inference, and baseline loss-based model selection are in place.
-See `docs/MODEL.md`, `docs/LOSSES.md`, and `docs/TRAINING.md`. The legacy SMD/AP
-research reports are deliberately separate from the training-critical path.
+training loop, inference, corrected SMD/AP/topology evaluation, graph export,
+plotting, and baseline loss-based model selection are in place. See
+`docs/MODEL.md`, `docs/LOSSES.md`, `docs/TRAINING.md`, and
+`docs/EVALUATION.md`. The first controlled ablation matrix is documented in
+`docs/EXPERIMENTS.md`.

@@ -43,6 +43,8 @@ class InferenceTests(unittest.TestCase):
 
         graph = graphs[0]
         self.assertEqual(graph["query_ids"].tolist(), [0, 1])
+        self.assertEqual(graph["boxes"].shape, (2, 3))
+        self.assertTrue(torch.equal(graph["boxes"], graph["nodes"]))
         self.assertEqual(graph["edges"].tolist(), [[0, 1]])
         # Mean logits are [2.5, 2.5], hence P(edge)=0.5 exactly.
         self.assertAlmostEqual(float(graph["edge_scores"][0]), 0.5, places=6)

@@ -25,6 +25,13 @@ import torch
 
 OUTPUT_KEYS = ("tokens", "pred_logits", "pred_nodes", "projected_features")
 LOSS_KEYS = ("loss/class", "loss/nodes", "loss/boxes", "loss/cardinality", "loss/edges", "loss/total")
+INFERENCE_KEYS = (
+    "inference/nodes",
+    "inference/boxes",
+    "inference/node_scores",
+    "inference/edges",
+    "inference/edge_scores",
+)
 REMOVED_PREFIXES = (
     "backbone_domain_discriminator.",
     "instance_domain_discriminator.",
@@ -144,6 +151,13 @@ def _extract_state(checkpoint) -> dict:
     return state
 
 
+def _canonical_inference_tensor(name: str, value, shape):
+    """Normalize legacy NumPy/Tensor graph outputs for parity comparison."""
+
+    tensor = torch.as_tensor(value).reshape(shape).detach().cpu()
+    return tensor.long() if name == "edges" else tensor.float()
+
+
 def _legacy_meshgrid_wrapper(original_meshgrid):
     """Adapt an old ij-default meshgrid implementation to the newer API."""
 
@@ -220,6 +234,30 @@ def _load_legacy_losses_module(repository: Path):
     return module
 
 
+def _install_unused_legacy_nms_stub() -> None:
+    """Avoid importing legacy NMS when parity explicitly disables NMS.
+
+    Magnolia's old PyTorch does not expose ``torch.cuda.amp.autocast``, which
+    the legacy NMS module imports eagerly. ``relation_infer(...,
+    apply_nms=False)`` never calls NMS, so a fail-fast stub preserves the
+    evaluated path without changing the original checkout.
+    """
+
+    import boxes
+    from boxes import box_ops
+
+    module = ModuleType("boxes.nms")
+
+    def disabled_nms(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("Legacy NMS is unavailable in no-NMS parity mode")
+
+    module.nms = disabled_nms
+    module.box_ops = box_ops
+    sys.modules[module.__name__] = module
+    setattr(boxes, "nms", module)
+
+
 def _run_worker(args: argparse.Namespace) -> None:
     repository = Path(args.repository).resolve()
     _prepare_repository_imports(repository)
@@ -258,6 +296,51 @@ def _run_worker(args: argparse.Namespace) -> None:
         "pred_nodes": predictions["pred_nodes"].detach().cpu(),
         "projected_features": projected_features.detach().cpu(),
     }
+    if args.compare_inference:
+        decoder = config["model"]["decoder"]
+        if args.worker == "legacy":
+            _install_unused_legacy_nms_stub()
+            from training.inference import relation_infer
+
+            graph_batch = relation_infer(
+                tokens,
+                predictions,
+                model,
+                decoder["object_queries"],
+                decoder["relation_tokens"],
+                apply_nms=False,
+            )
+            graph = {
+                "nodes": graph_batch["pred_nodes"][0],
+                "boxes": graph_batch["pred_boxes"][0],
+                "node_scores": graph_batch["pred_boxes_score"][0],
+                "edges": graph_batch["pred_rels"][0],
+                "edge_scores": graph_batch["pred_rels_score"][0],
+            }
+        else:
+            from training.evaluation.inference import infer_graphs
+
+            graph = infer_graphs(
+                tokens,
+                predictions,
+                model.relation_embed,
+                object_queries=decoder["object_queries"],
+                relation_tokens=decoder["relation_tokens"],
+            )[0]
+        shapes = {
+            "nodes": (-1, 3),
+            "boxes": (-1, 6),
+            "node_scores": (-1,),
+            "edges": (-1, 2),
+            "edge_scores": (-1,),
+        }
+        for name, shape in shapes.items():
+            # Legacy relation_infer creates an empty edge tensor without a
+            # dtype, so the no-edge case is float while non-empty edge indices
+            # are integer. Canonical graph edge indices are always int64.
+            outputs["inference/" + name] = _canonical_inference_tensor(
+                name, graph[name], shape
+            )
     if args.compare_losses:
         targets = _load_torch_file(Path(args.targets))
         targets = {
@@ -305,8 +388,13 @@ def compare_outputs(reference: Mapping, observed: Mapping, rtol: float, atol: fl
             }
             continue
         difference = (expected - actual).abs()
+        compatible = (
+            torch.allclose(expected, actual, rtol=rtol, atol=atol)
+            if expected.is_floating_point()
+            else torch.equal(expected, actual)
+        )
         results[key] = {
-            "compatible": bool(torch.allclose(expected, actual, rtol=rtol, atol=atol)),
+            "compatible": bool(compatible),
             "max_abs": float(difference.max()) if difference.numel() else 0.0,
             "mean_abs": float(difference.mean()) if difference.numel() else 0.0,
         }
@@ -395,11 +483,17 @@ def _run_comparison(args: argparse.Namespace) -> int:
             ]
             if args.compare_losses:
                 command.append("--compare-losses")
+            if args.compare_inference:
+                command.append("--compare-inference")
             subprocess.run(command, check=True, cwd=str(root))
 
         reference = _load_torch_file(legacy_output)
         observed = _load_torch_file(refactored_output)
-        keys = OUTPUT_KEYS + LOSS_KEYS if args.compare_losses else OUTPUT_KEYS
+        keys = OUTPUT_KEYS
+        if args.compare_losses:
+            keys += LOSS_KEYS
+        if args.compare_inference:
+            keys += INFERENCE_KEYS
         results = compare_outputs(reference, observed, args.rtol, args.atol, keys=keys)
         print(json.dumps(results, indent=2, sort_keys=True))
         return 0 if all(item["compatible"] for item in results.values()) else 1
@@ -416,6 +510,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--input-size", type=int, default=64)
     parser.add_argument("--compare-losses", action="store_true")
+    parser.add_argument("--compare-inference", action="store_true")
     parser.add_argument("--seed", type=int, default=364505)
     parser.add_argument("--rtol", type=float, default=2.0e-4)
     parser.add_argument("--atol", type=float, default=2.0e-5)

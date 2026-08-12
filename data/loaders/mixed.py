@@ -180,4 +180,57 @@ def build_data_loaders(config: Mapping):
     return train_loader, validation_loader
 
 
-__all__ = ["build_data_loaders", "build_datasets", "compose_source_target"]
+def build_evaluation_loader(
+    config: Mapping,
+    *,
+    dataset_name: str,
+    split: str = "val",
+    max_samples: Optional[int] = None,
+):
+    """Build an unshuffled, augmentation-free loader for one configured dataset."""
+
+    split = split.strip().lower()
+    if split not in {"val", "test"}:
+        raise ValueError("Evaluation split must be 'val' or 'test'")
+    datasets = config["data"]["datasets"]
+    if dataset_name not in datasets:
+        raise ValueError(
+            "Unknown evaluation dataset {!r}; configured datasets are {}".format(
+                dataset_name, sorted(datasets)
+            )
+        )
+    settings = dict(datasets[dataset_name])
+    # Discover the complete split before applying an evaluation-only cap. In
+    # particular, Plants intentionally preserves legacy filesystem order for
+    # training, which must not make a metric smoke-test subset nondeterministic.
+    settings["validation_samples"] = None
+    dataset = _dataset_for_split(dataset_name, settings, config, split)
+    if hasattr(dataset, "records"):
+        dataset.records.sort(key=lambda record: record.sample_id)
+    if max_samples is not None:
+        if int(max_samples) <= 0:
+            raise ValueError("max_samples must be positive or None")
+        dataset.records = dataset.records[: int(max_samples)]
+    data = config["data"]
+    runtime = config["runtime"]
+    options = dict(
+        batch_size=int(data["batch_size"]),
+        shuffle=False,
+        num_workers=int(runtime["workers"]),
+        pin_memory=bool(runtime["pin_memory"]),
+        collate_fn=image_graph_collate,
+        worker_init_fn=seed_data_worker,
+    )
+    if _supports_keyword(DataLoader.__init__, "generator"):
+        options["generator"] = torch.Generator().manual_seed(
+            int(config["experiment"]["seed"]) + 1
+        )
+    return DataLoader(dataset, **options)
+
+
+__all__ = [
+    "build_data_loaders",
+    "build_datasets",
+    "build_evaluation_loader",
+    "compose_source_target",
+]

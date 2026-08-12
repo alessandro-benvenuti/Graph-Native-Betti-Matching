@@ -325,9 +325,15 @@ def validate_config(config: Mapping[str, Any]) -> None:
     checkpoint = training.get("checkpoint")
     if not isinstance(checkpoint, Mapping):
         raise ConfigError("training.checkpoint must be a mapping")
-    if checkpoint.get("policy") not in {"interval", "interval_and_best"}:
+    if checkpoint.get("policy") not in {
+        "none",
+        "best_only",
+        "interval",
+        "interval_and_best",
+    }:
         raise ConfigError(
-            "training.checkpoint.policy must be interval or interval_and_best"
+            "training.checkpoint.policy must be none, best_only, interval, "
+            "or interval_and_best"
         )
     _positive_int(
         checkpoint.get("interval_epochs"),
@@ -453,6 +459,28 @@ def validate_config(config: Mapping[str, Any]) -> None:
         value = evaluation.get(name)
         if value is not None and not 0.0 <= float(value) <= 1.0:
             raise ConfigError(f"evaluation.{name} must be null or lie in [0,1]")
+    _non_negative_int(
+        evaluation.get("bn_calibration_batches"),
+        "evaluation.bn_calibration_batches",
+    )
+    protocol = evaluation.get("protocol")
+    if not isinstance(protocol, Mapping):
+        raise ConfigError("evaluation.protocol must be a mapping")
+    thresholds = protocol.get("iou_thresholds")
+    if (
+        not isinstance(thresholds, list)
+        or not thresholds
+        or any(not 0.0 <= float(value) <= 1.0 for value in thresholds)
+        or any(float(left) >= float(right) for left, right in zip(thresholds, thresholds[1:]))
+    ):
+        raise ConfigError(
+            "evaluation.protocol.iou_thresholds must be a strictly increasing list in [0,1]"
+        )
+    for name in ("max_detections", "smd_points", "smd_iterations", "folds"):
+        _positive_int(protocol.get(name), f"evaluation.protocol.{name}")
+    for name in ("target_node_size", "edge_half_width", "smd_epsilon"):
+        if float(protocol.get(name, 0.0)) <= 0:
+            raise ConfigError(f"evaluation.protocol.{name} must be positive")
 
 
 def load_config(

@@ -18,6 +18,7 @@ from data.loaders import (
     SamplePaths,
     SyntheticMRIDataset,
     build_datasets,
+    build_evaluation_loader,
     compose_source_target,
     discover_plants,
     discover_synthetic_mri,
@@ -77,6 +78,10 @@ class ConfigurationTests(unittest.TestCase):
         self.assertTrue(config["loss"]["supervise_target_graphs"])
         self.assertNotIn("domain_adaptation", config)
         self.assertNotIn("domain_lr", config["training"]["optimizer"])
+        self.assertEqual(
+            config["evaluation"]["protocol"]["iou_thresholds"],
+            [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95],
+        )
 
     def test_missing_environment_variable_is_reported_at_its_location(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -354,6 +359,39 @@ class CompositionTests(unittest.TestCase):
             self.assertTrue(train.datasets[1].datasets[0].augment)
             self.assertFalse(validation.datasets[0].datasets[0].augment)
             self.assertFalse(validation.datasets[1].datasets[0].augment)
+
+    def test_evaluation_loader_uses_requested_split_cap_and_no_augmentation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset_root = root / "synthetic"
+            for folder in ("raw", "seg", "vtp"):
+                (dataset_root / "test" / folder).mkdir(parents=True)
+            for index in range(3):
+                sample = f"sample_{index:06d}"
+                (dataset_root / "test" / "raw" / f"{sample}_data.nii.gz").touch()
+                (dataset_root / "test" / "seg" / f"{sample}_seg.nii.gz").touch()
+                (dataset_root / "test" / "vtp" / f"{sample}_graph.vtp").touch()
+            repository = Path(__file__).resolve().parents[1]
+            config = load_config(
+                repository / "configs" / "finetune_synthetic_mri.yaml",
+                environment={
+                    "GNBM_OUTPUT_DIR": str(root / "output"),
+                    "SYNTHETIC_MRI_DATASET": str(dataset_root),
+                },
+            )
+            config["runtime"]["workers"] = 0
+            loader = build_evaluation_loader(
+                config,
+                dataset_name="synthetic_mri",
+                split="test",
+                max_samples=2,
+            )
+            self.assertEqual(len(loader.dataset), 2)
+            self.assertFalse(loader.dataset.augment)
+            self.assertEqual(
+                [record.sample_id for record in loader.dataset.records],
+                ["sample_000000", "sample_000001"],
+            )
 
 
 if __name__ == "__main__":

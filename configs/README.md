@@ -15,6 +15,19 @@ configuration before a dataset is constructed.
 - `finetune_synthetic_mri_focal.yaml`: the focal-edge variant. It differs from
   the finetuning configuration only where the experiment is intentionally
   different.
+- `experiments/finetune_mri/`: controlled baseline/focal/Betti/focal+Betti
+  finetuning matrix. See `docs/EXPERIMENTS.md` before launching it.
+- `losses/`: reusable focal and Betti overlays containing only loss changes;
+  they never modify datasets, model architecture, or optimization settings.
+- `smoke_mixed_focal_betti.yaml`: one-epoch, four-sample integration check for
+  the complete focal + topology training path.
+- `overfit_synthetic_mri_focal_betti.yaml`: ten-epoch fixed eight-sample MRI
+  overfit check with augmentation disabled and one best checkpoint.
+
+The inference thresholds and complete metric protocol are defined under
+`evaluation` in `base.yaml`. See `docs/EVALUATION.md`; changing those values
+changes the scientific evaluation protocol and belongs in a version-controlled
+configuration overlay.
 
 Dataset and output paths are environment-variable references, not machine paths.
 The loader reports an unset variable together with its configuration location.
@@ -57,6 +70,10 @@ Validation rules for loss construction:
 4. `positive_cap` must remain `null` unless a separately reviewed experiment
    introduces an explicit positive cap.
 5. Validation and test never perform edge-class balancing.
+
+Checkpoint policies are `none`, `best_only`, `interval`, and
+`interval_and_best`. Storage-constrained pilots use `best_only`, which
+overwrites `best_checkpoint.pt` and never writes epoch checkpoints.
 
 ## Compatibility decisions
 
