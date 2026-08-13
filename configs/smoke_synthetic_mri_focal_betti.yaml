@@ -1,0 +1,42 @@
+defaults:
+  - finetune_synthetic_mri.yaml
+  - losses/focal.yaml
+  - losses/betti.yaml
+
+experiment:
+  name: smoke_synthetic_mri_focal_betti
+
+runtime:
+  workers: 0
+
+data:
+  batch_size: 2
+  train_augmentation: false
+  datasets:
+    synthetic_mri:
+      train_samples: 2
+      validation_samples: 1
+
+training:
+  epochs: 1
+  checkpoint:
+    # Keep one checkpoint in the debug job; the model is approximately 1.5 GB.
+    policy: best_only
+    interval_epochs: 1
+
+loss:
+  edge:
+    candidates:
+      unmatched_warmup_epochs: 0
+      unmatched_ramp_epochs: 0
+
+topology:
+  betti_h0:
+    warmup_epochs: 0
+    ramp_epochs: 0
+  betti_h1:
+    warmup_epochs: 0
+    ramp_epochs: 0
+
+evaluation:
+  interval_epochs: 1

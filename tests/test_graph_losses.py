@@ -41,6 +41,27 @@ class CountingRelationHead(nn.Module):
         return self.linear(features)
 
 
+class RecordingRelationHead(nn.Module):
+    """Order-sensitive head that retains each orientation's logits."""
+
+    def __init__(self):
+        super().__init__()
+        self.features = []
+        self.outputs = []
+
+    def forward(self, features):
+        self.features.append(features.detach().clone())
+        left = features[:, 0]
+        right = features[:, 8]
+        # Deliberately order-sensitive, while ensuring the averaged class
+        # logits are not identical for every candidate (which would make
+        # top-k tie-breaking implementation-dependent).
+        output = torch.stack((left + 2.0 * right, 3.0 * left - right), dim=1)
+        output.retain_grad()
+        self.outputs.append(output)
+        return output
+
+
 def _batch():
     torch.manual_seed(13)
     tokens = torch.randn((1, 5, 8), requires_grad=True)
@@ -187,6 +208,48 @@ class GraphCriterionTests(unittest.TestCase):
         losses["total"].backward()
         self.assertTrue(torch.isfinite(tokens.grad).all())
         self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
+
+    def test_unmatched_focal_candidates_average_both_orientations(self):
+        config = _config()
+        config["loss"]["edge"]["candidates"].update(
+            include_unmatched=True,
+            unmatched_object_threshold=0.0,
+            max_active_unmatched=4,
+            max_unmatched_pairs_per_graph=1,
+        )
+        relation = RecordingRelationHead()
+        matcher_config = config["model"]["matcher"]
+        criterion = GraphCriterion(
+            config,
+            HungarianMatcher(
+                matcher_config["class_cost"], matcher_config["node_cost"]
+            ),
+            relation,
+        )
+        tokens, predictions, _ = _batch()
+        assignments = [(torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))]
+
+        selected = criterion._unmatched_hard_negatives(
+            tokens, predictions["pred_logits"], assignments
+        )
+
+        self.assertEqual(len(relation.outputs), 2)
+        self.assertEqual(len(selected), 1)
+        forward_features, reverse_features = relation.features
+        self.assertTrue(
+            torch.equal(forward_features[:, :8], reverse_features[:, 8:16])
+        )
+        self.assertTrue(
+            torch.equal(forward_features[:, 8:16], reverse_features[:, :8])
+        )
+        expected = 0.5 * (relation.outputs[0] + relation.outputs[1])
+        expected_index = expected.detach().softmax(-1)[:, 1].argmax()
+        self.assertTrue(torch.equal(selected[0], expected[expected_index][None]))
+
+        selected[0].sum().backward()
+        self.assertGreater(float(relation.outputs[0].grad.abs().sum()), 0.0)
+        self.assertGreater(float(relation.outputs[1].grad.abs().sum()), 0.0)
+        self.assertGreater(float(tokens.grad.abs().sum()), 0.0)
 
 
 if __name__ == "__main__":

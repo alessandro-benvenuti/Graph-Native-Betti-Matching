@@ -71,3 +71,7 @@ plotting, and baseline loss-based model selection are in place. See
 `docs/MODEL.md`, `docs/LOSSES.md`, `docs/TRAINING.md`, and
 `docs/EVALUATION.md`. The first controlled ablation matrix is documented in
 `docs/EXPERIMENTS.md`.
+
+Jean Zay environment setup, the bounded V100 development test, production
+submission, and resume instructions are documented in
+[`cluster/jean_zay/README.md`](cluster/jean_zay/README.md).

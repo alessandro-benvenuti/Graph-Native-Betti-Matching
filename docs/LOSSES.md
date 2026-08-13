@@ -50,9 +50,12 @@ loss:
 ```
 
 Active unmatched queries form candidates with matched and other active
-unmatched queries. Selection ranks detached edge probabilities but indexes the
-original logits, preserving gradients to the relation head and tokens. Caps,
-threshold, weight, warmup, and ramp are configurable.
+unmatched queries. Each candidate is evaluated in both endpoint orders and the
+two logit vectors are averaged, making hard-negative selection and focal
+supervision explicitly undirected. Selection ranks detached edge probabilities
+but indexes the original symmetric logits, preserving gradients through both
+relation-head evaluations and their endpoint tokens. Caps, threshold, weight,
+warmup, and ramp are configurable.
 
 ## Explicit exclusions
 

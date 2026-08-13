@@ -297,10 +297,19 @@ class GraphCriterion(nn.Module):
             )
             if not pairs.numel():
                 continue
-            features = self._relation_features(
+            forward_features = self._relation_features(
                 object_tokens[batch], relation_tokens[batch], pairs
             )
-            pool_logits = self.relation_embed(features)
+            reverse_features = self._relation_features(
+                object_tokens[batch], relation_tokens[batch], pairs[:, [1, 0]]
+            )
+            # Relations are undirected.  Average the two endpoint orderings at
+            # logit level so hard selection and focal supervision see the same
+            # symmetric candidate while gradients reach both evaluations.
+            pool_logits = 0.5 * (
+                self.relation_embed(forward_features)
+                + self.relation_embed(reverse_features)
+            )
             hard_logits, _ = select_hard_unmatched_relation_logits(
                 pool_logits, self.candidates["max_unmatched_pairs_per_graph"]
             )
