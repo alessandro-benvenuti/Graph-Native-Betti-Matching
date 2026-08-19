@@ -1,9 +1,9 @@
 # Exact non-PyTorch environment captured from the working Gardenia setup.
 #
 # PyTorch, torchvision, and torchaudio are intentionally absent: Jean Zay's
-# pytorch-gpu/py3/1.12.1 module supplies the ABI-compatible PyTorch/CUDA stack.
+# H100-specific pytorch-gpu/py3/2.3.1 module supplies the PyTorch/CUDA stack.
 # The local MultiScaleDeformableAttention3D package is also absent and is built
-# from models/ops on a V100 compute node.
+# from models/ops for H100 compute capability 9.0.
 absl-py==2.5.0
 addict==2.4.0
 annotated-doc==0.0.4

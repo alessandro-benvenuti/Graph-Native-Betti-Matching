@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit a single-GPU V100 training segment.
+# Submit a single-GPU H100 training segment.
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
@@ -42,11 +42,11 @@ if [[ -n "${GNBM_RESUME_CHECKPOINT:-}" && ! -f "$GNBM_RESUME_CHECKPOINT" ]]; the
   exit 2
 fi
 
-qos="${GNBM_QOS:-qos_gpu-t3}"
+qos="${GNBM_QOS:-qos_gpu_h100-t3}"
 walltime="${GNBM_WALLTIME:-20:00:00}"
 case "$qos" in
-  qos_gpu-t3|qos_gpu-t4) ;;
-  *) echo "GNBM_QOS must be qos_gpu-t3 or qos_gpu-t4." >&2; exit 2 ;;
+  qos_gpu_h100-t3|qos_gpu_h100-t4) ;;
+  *) echo "GNBM_QOS must be qos_gpu_h100-t3 or qos_gpu_h100-t4." >&2; exit 2 ;;
 esac
 if [[ ! "$walltime" =~ ^[0-9]{2,3}:[0-5][0-9]:[0-5][0-9]$ ]]; then
   echo "GNBM_WALLTIME must use HH:MM:SS (for example 20:00:00)." >&2
@@ -58,12 +58,12 @@ remainder="${walltime#*:}"
 minutes="${remainder%%:*}"
 seconds="${remainder##*:}"
 total_seconds=$((hours * 3600 + 10#$minutes * 60 + 10#$seconds))
-if [[ "$qos" == "qos_gpu-t3" && "$total_seconds" -gt 72000 ]]; then
-  echo "qos_gpu-t3 cannot exceed 20 hours; use qos_gpu-t4." >&2
+if [[ "$qos" == "qos_gpu_h100-t3" && "$total_seconds" -gt 72000 ]]; then
+  echo "qos_gpu_h100-t3 cannot exceed 20 hours; use qos_gpu_h100-t4." >&2
   exit 2
 fi
-if [[ "$qos" == "qos_gpu-t4" && "$total_seconds" -gt 360000 ]]; then
-  echo "qos_gpu-t4 cannot exceed 100 hours." >&2
+if [[ "$qos" == "qos_gpu_h100-t4" && "$total_seconds" -gt 360000 ]]; then
+  echo "qos_gpu_h100-t4 cannot exceed 100 hours." >&2
   exit 2
 fi
 
@@ -80,7 +80,7 @@ submission="$(sbatch \
   --time="$walltime" \
   --output="$log_dir/%x-%j.out" \
   --error="$log_dir/%x-%j.err" \
-  "$repo_dir/cluster/jean_zay/train_v100.slurm")"
+  "$repo_dir/cluster/jean_zay/train_h100.slurm")"
 
 echo "$submission"
 job_id="${submission##* }"

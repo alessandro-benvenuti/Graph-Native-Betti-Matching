@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=gnbm-debug
-#SBATCH --account=vnc@v100
-#SBATCH --qos=qos_gpu-dev
+#SBATCH --account=vnc@h100
+#SBATCH --partition=gpu_p6
+#SBATCH --constraint=h100
+#SBATCH --qos=qos_gpu_h100-dev
 #SBATCH --time=00:45:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -9,10 +11,14 @@
 #SBATCH --cpus-per-task=10
 #SBATCH --hint=nomultithread
 
-set -euo pipefail
+# Jean Zay's module stack runs Conda deactivation hooks while loading PyTorch.
+# Some hooks probe variables that may be unset, so enable nounset only after
+# the module-backed project environment has been initialized.
+set -eo pipefail
 
 repo_dir="${GNBM_REPO_DIR:-$SLURM_SUBMIT_DIR}"
 source "$repo_dir/cluster/jean_zay/env.sh"
+set -u
 
 echo "=== Allocation ==="
 echo "job=$SLURM_JOB_ID host=$(hostname) account=${SLURM_JOB_ACCOUNT:-unknown}"
@@ -30,6 +36,8 @@ print("CUDA runtime:", torch.version.cuda)
 print("CUDA available:", torch.cuda.is_available())
 print("GPU:", torch.cuda.get_device_name(0))
 print("Capability:", torch.cuda.get_device_capability(0))
+if torch.cuda.get_device_capability(0) != (9, 0):
+    raise SystemExit("Expected an H100 with compute capability 9.0")
 PY
 
 echo "=== Build deformable attention ==="

@@ -90,6 +90,53 @@ class ExperimentConfigTests(unittest.TestCase):
         ]
         self.assertEqual(len(names), len(set(names)))
 
+    def test_full_node_focal_matrix_changes_only_node_classification(self):
+        paths = ROOT / "configs" / "experiments" / "finetune_mri"
+        baseline = load_config(
+            paths / "baseline_400.yaml", environment=ENVIRONMENT
+        )
+        immediate = load_config(
+            paths / "node_focal_immediate_400.yaml", environment=ENVIRONMENT
+        )
+        curriculum = load_config(
+            paths / "node_focal_curriculum_400.yaml", environment=ENVIRONMENT
+        )
+
+        for config in (baseline, immediate, curriculum):
+            self.assertEqual(config["data"]["batch_size"], 32)
+            self.assertEqual(config["training"]["epochs"], 400)
+            self.assertEqual(
+                config["training"]["checkpoint"]["policy"],
+                "interval_and_best",
+            )
+            self.assertEqual(
+                config["training"]["checkpoint"]["interval_epochs"], 100
+            )
+            self.assertEqual(config["evaluation"]["interval_epochs"], 20)
+            self.assertEqual(
+                config["loss"]["edge"], baseline["loss"]["edge"]
+            )
+            self.assertFalse(
+                config["loss"]["edge"]["candidates"]["include_unmatched"]
+            )
+
+        self.assertEqual(
+            baseline["loss"]["node"]["classification"]["name"],
+            "weighted_cross_entropy",
+        )
+        for config in (immediate, curriculum):
+            classification = config["loss"]["node"]["classification"]
+            self.assertEqual(classification["name"], "focal")
+            self.assertEqual(classification["class_weights"], [0.25, 0.75])
+            self.assertEqual(classification["focal_gamma"], 2.0)
+        self.assertFalse(
+            immediate["loss"]["node"]["classification"]["curriculum"]["enabled"]
+        )
+        schedule = curriculum["loss"]["node"]["classification"]["curriculum"]
+        self.assertTrue(schedule["enabled"])
+        self.assertEqual(schedule["start_percent"], 40.0)
+        self.assertEqual(schedule["end_percent"], 70.0)
+
     def test_launcher_supports_exported_directories_without_git(self):
         launcher = (
             ROOT / "scripts" / "run_finetune_mri_experiment.sh"

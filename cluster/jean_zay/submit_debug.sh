@@ -31,7 +31,8 @@ if [[ ! -f "$GNBM_MRI_CHECKPOINT" ]]; then
   echo "Checkpoint does not exist: $GNBM_MRI_CHECKPOINT" >&2
   exit 2
 fi
-if [[ ! -x "$WORK/venvs/vascular-graph-extraction/bin/python" ]]; then
+venv="${GNBM_VENV:-$WORK/venvs/vascular-graph-extraction-h100-torch231}"
+if [[ ! -x "$venv/bin/python" ]]; then
   echo "The external environment is missing; run setup_environment.sh first." >&2
   exit 2
 fi

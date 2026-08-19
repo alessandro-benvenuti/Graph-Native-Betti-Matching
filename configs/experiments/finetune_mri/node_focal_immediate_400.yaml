@@ -1,0 +1,16 @@
+defaults:
+  - full_400.yaml
+
+experiment:
+  name: scratch_mri_node_focal_immediate_400_seed364505
+
+# Change only node classification.  Edge CE, positive ratio upsampling, and
+# the absence of unmatched-edge candidates remain exactly baseline.
+loss:
+  node:
+    classification:
+      name: focal
+      class_weights: [0.25, 0.75]
+      focal_gamma: 2.0
+      curriculum:
+        enabled: false

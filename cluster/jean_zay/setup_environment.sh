@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time login-node setup. This downloads Python wheels but does not compile
 # the CUDA extension or run GPU work.
-set -euo pipefail
+set -eo pipefail
 
 if [[ -z "${WORK:-}" || -z "${SCRATCH:-}" ]]; then
   echo "Run this script on a Jean Zay login node." >&2
@@ -9,11 +9,14 @@ if [[ -z "${WORK:-}" || -z "${SCRATCH:-}" ]]; then
 fi
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-venv="${GNBM_VENV:-$WORK/venvs/vascular-graph-extraction}"
+venv="${GNBM_VENV:-$WORK/venvs/vascular-graph-extraction-h100-torch231}"
 uv_bin="$WORK/tools/uv/uv"
 
 module purge
-module load pytorch-gpu/py3/1.12.1
+module load arch/h100
+module load pytorch-gpu/py3/2.3.1
+set -u
+export IDR_DEBUG="${IDR_DEBUG:-WARN}"
 
 if [[ ! -x "$uv_bin" ]]; then
   echo "uv is missing at $uv_bin" >&2
@@ -39,8 +42,7 @@ if [[ -L "$repo_dir/.venv" ]]; then
   linked="$(readlink -f "$repo_dir/.venv")"
   expected="$(readlink -f "$venv")"
   if [[ "$linked" != "$expected" ]]; then
-    echo ".venv points to $linked, expected $expected" >&2
-    exit 2
+    ln -sfn "$venv" "$repo_dir/.venv"
   fi
 else
   ln -s "$venv" "$repo_dir/.venv"
@@ -72,10 +74,10 @@ print("NumPy:", numpy.__version__)
 print("SciPy:", scipy.__version__)
 print("PyYAML:", yaml.__version__)
 
-if torch.__version__ != "1.12.1":
-    raise SystemExit("Expected Jean Zay PyTorch 1.12.1")
-if torch.version.cuda != "11.2":
-    raise SystemExit("Expected the Jean Zay CUDA 11.2 PyTorch build")
+if torch.__version__.split("+")[0] != "2.3.1":
+    raise SystemExit("Expected Jean Zay PyTorch 2.3.1")
+if not str(torch.version.cuda).startswith("12."):
+    raise SystemExit("Expected the Jean Zay H100 CUDA 12 PyTorch build")
 PY
 
 "$uv_bin" pip check --python "$venv/bin/python"

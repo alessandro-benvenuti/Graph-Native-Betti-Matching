@@ -1,18 +1,17 @@
 # Jean Zay setup and execution
 
-This directory targets the V100 environment that most closely reproduces the
-working Gardenia stack:
+This directory targets Jean Zay's dedicated H100 partition:
 
-- Python 3.10.4;
-- PyTorch 1.12.1 supplied by Jean Zay;
-- CUDA 11.2 supplied by Jean Zay;
-- one V100 GPU per task;
-- project account `vnc@v100`.
+- `arch/h100` architecture modules;
+- PyTorch 2.3.1 supplied by Jean Zay;
+- the CUDA 12 runtime supplied with that PyTorch module;
+- one H100 80 GB GPU per task;
+- project account `vnc@h100` on partition `gpu_p6`.
 
 The virtual environment lives outside Git at
-`$WORK/venvs/vascular-graph-extraction`; the repository `.venv` entry is only a
-symbolic link. The dataset, initial checkpoint, and outputs live under
-`$SCRATCH`.
+`$WORK/venvs/vascular-graph-extraction-h100-torch231`; the repository `.venv`
+entry is only a symbolic link. The dataset, initial checkpoint, and outputs
+live under `$SCRATCH`.
 
 ## 1. Expected paths
 
@@ -20,7 +19,7 @@ Recommended layout:
 
 ```text
 $WORK/projects/Graph-Native-Betti-Matching
-$WORK/venvs/vascular-graph-extraction
+$WORK/venvs/vascular-graph-extraction-h100-torch231
 $WORK/tools/uv
 $SCRATCH/datasets/syntheticMRI/patches/syntheticMRI
 $SCRATCH/checkpoints/model_epoch_280
@@ -47,7 +46,8 @@ bash cluster/jean_zay/setup_environment.sh
 
 This is the only step that downloads Python packages. It does not request a GPU
 or compile CUDA code. PyTorch is intentionally inherited from the
-`pytorch-gpu/py3/1.12.1` module and must not be installed into the venv.
+H100-specific `pytorch-gpu/py3/2.3.1` module and must not be installed into the
+venv.
 
 For an interactive shell after setup:
 
@@ -57,13 +57,13 @@ source cluster/jean_zay/env.sh
 
 ## 3. Bounded development test
 
-Submit exactly one 45-minute V100 development job:
+Submit exactly one 45-minute H100 development job:
 
 ```bash
 bash cluster/jean_zay/submit_debug.sh
 ```
 
-The job uses `qos_gpu-dev`, builds deformable attention for V100 (`sm_70`),
+The job uses `qos_gpu_h100-dev`, builds deformable attention for H100 (`sm_90`),
 runs CUDA forward/backward tests, checks the real checkpoint and MRI loader, and
 trains one batch with the complete focal + H0/H1 objective. It writes one
 checkpoint so resume integrity can be checked without duplicating large files.
@@ -96,10 +96,10 @@ bash cluster/jean_zay/submit_train.sh \
   finetune_mri_baseline_seed364505
 ```
 
-For a V100 job longer than 20 hours and no longer than 100 hours:
+For an H100 job longer than 20 hours and no longer than 100 hours:
 
 ```bash
-export GNBM_QOS=qos_gpu-t4
+export GNBM_QOS=qos_gpu_h100-t4
 export GNBM_WALLTIME=48:00:00
 ```
 
@@ -120,8 +120,8 @@ through `GNBM_INITIAL_WEIGHTS`.
 
 ## Accounting and development QoS
 
-The development job requests one GPU for 45 minutes. `qos_gpu-dev` is the
+The development job requests one H100 for 45 minutes. `qos_gpu_h100-dev` is the
 official QoS for code development and execution tests. It still consumes the
 project's allocated GPU time, so use it only for bounded checks and cancel a
-stuck or obviously incorrect job. Production training must use `qos_gpu-t3` or
-`qos_gpu-t4`, never `qos_gpu-dev`.
+stuck or obviously incorrect job. Production training must use
+`qos_gpu_h100-t3` or `qos_gpu_h100-t4`, never `qos_gpu_h100-dev`.
