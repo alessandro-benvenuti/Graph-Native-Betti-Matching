@@ -10,6 +10,13 @@ experiment:
 
 data:
   batch_size: 32
+  datasets:
+    plants:
+      train_samples: null
+      validation_samples: null
+    synthetic_mri:
+      train_samples: null
+      validation_samples: null
 
 training:
   epochs: 100
@@ -19,3 +26,10 @@ training:
 
 evaluation:
   interval_epochs: 10
+  training_metrics:
+    enabled: true
+    dataset: synthetic_mri
+    max_samples: null
+    selection_metric: edge_mAP
+    selection_mode: max
+    save_best_checkpoint: false

@@ -17,12 +17,29 @@ class WandbTracker:
         self.run.define_metric("train/*", step_metric="train/iteration")
         self.run.define_metric("validation/epoch")
         self.run.define_metric("validation/*", step_metric="validation/epoch")
+        self.run.define_metric("metrics/epoch")
+        self.run.define_metric("metrics/*", step_metric="metrics/epoch")
         self.run.define_metric(
             "validation/total",
             step_metric="validation/epoch",
             summary="min",
             overwrite=True,
         )
+        for name, summary in (
+            ("node_mAP", "max"),
+            ("node_mAR", "max"),
+            ("edge_mAP", "max"),
+            ("edge_mAR", "max"),
+            ("beta0_absolute_error", "min"),
+            ("beta1_absolute_error", "min"),
+            ("smd", "min"),
+        ):
+            self.run.define_metric(
+                "metrics/" + name,
+                step_metric="metrics/epoch",
+                summary=summary,
+                overwrite=True,
+            )
 
     def log_training(self, metrics, *, iteration: int, epoch: int, learning_rate: float):
         payload = {
@@ -40,6 +57,20 @@ class WandbTracker:
         }
         payload.update(
             {"validation/" + name: float(value) for name, value in metrics.items()}
+        )
+        self.run.log(payload)
+
+    def log_metrics(self, metrics, *, iteration: int, epoch: int):
+        payload = {
+            "metrics/iteration": int(iteration),
+            "metrics/epoch": int(epoch),
+        }
+        payload.update(
+            {
+                "metrics/" + name: float(value)
+                for name, value in metrics.items()
+                if isinstance(value, (int, float))
+            }
         )
         self.run.log(payload)
 

@@ -360,6 +360,50 @@ class CompositionTests(unittest.TestCase):
             self.assertFalse(validation.datasets[0].datasets[0].augment)
             self.assertFalse(validation.datasets[1].datasets[0].augment)
 
+    def test_null_sample_caps_use_every_discovered_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plants_root = root / "plants"
+            synthetic_root = root / "synthetic"
+            for dataset_root, extension in (
+                (plants_root, "png"),
+                (synthetic_root, "nii.gz"),
+            ):
+                for split in ("train", "val"):
+                    for folder in ("raw", "seg", "vtp"):
+                        (dataset_root / split / folder).mkdir(parents=True)
+                    for index in range(6):
+                        sample = f"sample_{index:06d}"
+                        (dataset_root / split / "raw" / f"{sample}_data.{extension}").touch()
+                        (dataset_root / split / "seg" / f"{sample}_seg.{extension}").touch()
+                        (dataset_root / split / "vtp" / f"{sample}_graph.vtp").touch()
+
+            repository = Path(__file__).resolve().parents[1]
+            config = load_config(
+                repository
+                / "configs"
+                / "experiments"
+                / "focal_matrix_600"
+                / "pretrain_baseline.yaml",
+                environment={
+                    "GNBM_OUTPUT_DIR": str(root / "output"),
+                    "PLANTS_DATASET": str(plants_root),
+                    "SYNTHETIC_MRI_DATASET": str(synthetic_root),
+                },
+            )
+            with patch(
+                "data.loaders.plants._build_monai_transforms",
+                return_value=(lambda x: x, lambda x: x, lambda x: x),
+            ), patch(
+                "data.loaders.synthetic_mri._build_training_intensity_transform",
+                return_value=lambda x: x,
+            ):
+                train, validation, sampler = build_datasets(config)
+            self.assertEqual(
+                (len(train), len(validation), sampler.num_samples),
+                (12, 12, 12),
+            )
+
     def test_evaluation_loader_uses_requested_split_cap_and_no_augmentation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

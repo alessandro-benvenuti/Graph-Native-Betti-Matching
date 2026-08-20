@@ -246,8 +246,14 @@ def validate_config(config: Mapping[str, Any]) -> None:
         root = dataset.get("root")
         if not isinstance(root, str) or not root.strip():
             raise ConfigError(f"{location}.root must be a non-empty path")
-        _positive_int(dataset.get("train_samples"), f"{location}.train_samples")
-        if "validation_samples" in dataset:
+        if "train_samples" not in dataset:
+            raise ConfigError(f"{location}.train_samples is required")
+        if dataset["train_samples"] is not None:
+            _positive_int(dataset["train_samples"], f"{location}.train_samples")
+        if (
+            "validation_samples" in dataset
+            and dataset["validation_samples"] is not None
+        ):
             _positive_int(
                 dataset["validation_samples"], f"{location}.validation_samples"
             )
@@ -488,6 +494,37 @@ def validate_config(config: Mapping[str, Any]) -> None:
         evaluation.get("bn_calibration_batches"),
         "evaluation.bn_calibration_batches",
     )
+    training_metrics = evaluation.get("training_metrics")
+    if not isinstance(training_metrics, Mapping):
+        raise ConfigError("evaluation.training_metrics must be a mapping")
+    for name in ("enabled", "save_best_checkpoint"):
+        if not isinstance(training_metrics.get(name), bool):
+            raise ConfigError(
+                f"evaluation.training_metrics.{name} must be a boolean"
+            )
+    metric_dataset = training_metrics.get("dataset")
+    if metric_dataset not in datasets:
+        raise ConfigError(
+            "evaluation.training_metrics.dataset must name a configured dataset"
+        )
+    metric_maximum = training_metrics.get("max_samples")
+    if metric_maximum is not None:
+        _positive_int(
+            metric_maximum, "evaluation.training_metrics.max_samples"
+        )
+    selection_metric = training_metrics.get("selection_metric")
+    if not isinstance(selection_metric, str) or not selection_metric:
+        raise ConfigError(
+            "evaluation.training_metrics.selection_metric must be a non-empty string"
+        )
+    if training_metrics.get("selection_mode") not in {"min", "max"}:
+        raise ConfigError(
+            "evaluation.training_metrics.selection_mode must be min or max"
+        )
+    if training_metrics["save_best_checkpoint"] and not training_metrics["enabled"]:
+        raise ConfigError(
+            "evaluation.training_metrics.save_best_checkpoint requires enabled=true"
+        )
     protocol = evaluation.get("protocol")
     if not isinstance(protocol, Mapping):
         raise ConfigError("evaluation.protocol must be a mapping")

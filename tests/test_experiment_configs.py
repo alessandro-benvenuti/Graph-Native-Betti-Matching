@@ -119,6 +119,21 @@ class ExperimentConfigTests(unittest.TestCase):
             )
             self.assertEqual(set(pretrain["data"]["datasets"]), {"plants", "synthetic_mri"})
             self.assertEqual(set(finetune["data"]["datasets"]), {"synthetic_mri"})
+            for dataset in pretrain["data"]["datasets"].values():
+                self.assertIsNone(dataset["train_samples"])
+                self.assertIsNone(dataset["validation_samples"])
+            self.assertIsNone(
+                finetune["data"]["datasets"]["synthetic_mri"]["train_samples"]
+            )
+            self.assertIsNone(
+                finetune["data"]["datasets"]["synthetic_mri"]["validation_samples"]
+            )
+            self.assertIsNone(
+                pretrain["evaluation"]["training_metrics"]["max_samples"]
+            )
+            self.assertIsNone(
+                finetune["evaluation"]["training_metrics"]["max_samples"]
+            )
             self.assertEqual(pretrain["training"]["epochs"], 100)
             self.assertEqual(finetune["training"]["epochs"], 600)
             self.assertEqual(pretrain["training"]["checkpoint"]["policy"], "best_only")

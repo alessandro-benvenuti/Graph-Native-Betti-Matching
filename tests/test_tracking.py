@@ -83,6 +83,11 @@ class WandbTrackingTests(unittest.TestCase):
                 learning_rate=1.0e-4,
             )
             tracker.log_validation({"total": 1.25}, iteration=8, epoch=2)
+            tracker.log_metrics(
+                {"node_mAP": 0.5, "edge_mAP": 0.25},
+                iteration=8,
+                epoch=2,
+            )
             tracker.finish(exit_code=0)
             metadata = json.loads(
                 (Path(directory) / "wandb-run.json").read_text(encoding="utf-8")
@@ -96,10 +101,12 @@ class WandbTrackingTests(unittest.TestCase):
         self.assertEqual(init["config"]["launch"]["slurm_job_id"], "42")
         self.assertIsNone(init["id"])
         self.assertIsNone(init["resume"])
-        self.assertEqual(len(fake_run.logged), 2)
+        self.assertEqual(len(fake_run.logged), 3)
         self.assertEqual(fake_run.logged[0]["train/iteration"], 7)
         self.assertEqual(fake_run.logged[0]["train/total"], 1.5)
         self.assertEqual(fake_run.logged[1]["validation/epoch"], 2)
+        self.assertEqual(fake_run.logged[2]["metrics/epoch"], 2)
+        self.assertEqual(fake_run.logged[2]["metrics/edge_mAP"], 0.25)
         self.assertEqual(fake_run.exit_codes, [0])
         self.assertEqual(metadata["id"], "run-123")
 

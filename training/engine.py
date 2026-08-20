@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import math
 from pathlib import Path
 from typing import Mapping
 
 import torch
 
 from .checkpoint import save_training_checkpoint
+from .evaluation import evaluate_model
 
 
 def _move_graph_batch(batch, device, input_name, supervise_target_graphs):
@@ -104,6 +107,7 @@ class Trainer:
         config,
         device,
         tracker=None,
+        metric_loader=None,
     ):
         self.model = model
         self.criterion = criterion
@@ -115,6 +119,7 @@ class Trainer:
         self.config = config
         self.device = torch.device(device)
         self.tracker = tracker
+        self.metric_loader = metric_loader
 
     def fit(self, start_epoch=0, start_iteration=0):
         epochs = int(self.config["training"]["epochs"])
@@ -130,6 +135,24 @@ class Trainer:
         )
         validation_interval = int(self.config["evaluation"]["interval_epochs"])
         policy = self.config["training"]["checkpoint"]["policy"]
+        metric_config = self.config["evaluation"]["training_metrics"]
+        metric_enabled = bool(metric_config["enabled"])
+        if metric_enabled and self.metric_loader is None:
+            raise ValueError(
+                "evaluation.training_metrics.enabled requires a metric loader"
+            )
+        selection_metric = str(metric_config["selection_metric"])
+        selection_mode = str(metric_config["selection_mode"])
+        save_metric_checkpoint = bool(metric_config["save_best_checkpoint"])
+        best_metric = -float("inf") if selection_mode == "max" else float("inf")
+        metric_record_path = output.parent / "best-metric.json"
+        if metric_record_path.is_file():
+            record = json.loads(metric_record_path.read_text(encoding="utf-8"))
+            if (
+                record.get("metric") == selection_metric
+                and record.get("mode") == selection_mode
+            ):
+                best_metric = float(record["value"])
         best_validation = float("inf")
         if int(start_epoch) > 0 and policy in {"best_only", "interval_and_best"}:
             resumed_validation = evaluate_loss(
@@ -218,6 +241,93 @@ class Trainer:
                         epoch,
                         global_iteration,
                     )
+
+                if metric_enabled:
+                    task_metrics, _ = evaluate_model(
+                        self.model,
+                        self.metric_loader,
+                        self.config,
+                        self.device,
+                        output_dir=None,
+                        max_visualizations=0,
+                        export_predictions=False,
+                    )
+                    selected_value = task_metrics.get(selection_metric)
+                    print(
+                        "metrics epoch={} node_mAP={:.6f} edge_mAP={:.6f} "
+                        "beta0_abs={:.6f} beta1_abs={:.6f} smd={:.6f}".format(
+                            epoch,
+                            task_metrics.get("node_mAP", float("nan")),
+                            task_metrics.get("edge_mAP", float("nan")),
+                            task_metrics.get("beta0_absolute_error", float("nan")),
+                            task_metrics.get("beta1_absolute_error", float("nan")),
+                            task_metrics.get("smd", float("nan")),
+                        )
+                    )
+                    if self.tracker is not None:
+                        self.tracker.log_metrics(
+                            task_metrics,
+                            iteration=global_iteration,
+                            epoch=epoch,
+                        )
+                    history_path = output.parent / "validation-metrics.jsonl"
+                    history_path.parent.mkdir(parents=True, exist_ok=True)
+                    history_metrics = {
+                        name: (
+                            value
+                            if not isinstance(value, float) or math.isfinite(value)
+                            else None
+                        )
+                        for name, value in task_metrics.items()
+                    }
+                    with history_path.open("a", encoding="utf-8") as handle:
+                        handle.write(
+                            json.dumps(
+                                {
+                                    "epoch": int(epoch),
+                                    "iteration": int(global_iteration),
+                                    **history_metrics,
+                                },
+                                sort_keys=True,
+                            )
+                            + "\n"
+                        )
+                    if selected_value is not None and math.isfinite(
+                        float(selected_value)
+                    ):
+                        selected_value = float(selected_value)
+                        improved = (
+                            selected_value > best_metric
+                            if selection_mode == "max"
+                            else selected_value < best_metric
+                        )
+                        if improved:
+                            best_metric = selected_value
+                            if save_metric_checkpoint:
+                                save_training_checkpoint(
+                                    output / "best_metric_checkpoint.pt",
+                                    self.model,
+                                    self.optimizer,
+                                    self.scheduler,
+                                    epoch,
+                                    global_iteration,
+                                )
+                                metric_record_path.write_text(
+                                    json.dumps(
+                                        {
+                                            "checkpoint": "models/best_metric_checkpoint.pt",
+                                            "epoch": int(epoch),
+                                            "iteration": int(global_iteration),
+                                            "metric": selection_metric,
+                                            "mode": selection_mode,
+                                            "value": selected_value,
+                                        },
+                                        indent=2,
+                                        sort_keys=True,
+                                    )
+                                    + "\n",
+                                    encoding="utf-8",
+                                )
 
             if policy in {"interval", "interval_and_best"} and (
                 epoch % interval == 0 or epoch == epochs

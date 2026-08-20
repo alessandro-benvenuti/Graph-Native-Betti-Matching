@@ -27,3 +27,5 @@ training:
 
 evaluation:
   interval_epochs: 1
+  training_metrics:
+    max_samples: 2

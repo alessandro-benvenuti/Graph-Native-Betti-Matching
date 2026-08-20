@@ -68,12 +68,16 @@ class RecordingTracker:
     def __init__(self):
         self.training = []
         self.validation = []
+        self.metrics = []
 
     def log_training(self, metrics, **context):
         self.training.append((metrics, context))
 
     def log_validation(self, metrics, **context):
         self.validation.append((metrics, context))
+
+    def log_metrics(self, metrics, **context):
+        self.metrics.append((metrics, context))
 
 
 class TrainingTests(unittest.TestCase):
@@ -135,6 +139,8 @@ class TrainingTests(unittest.TestCase):
         config["training"]["checkpoint"]["interval_epochs"] = 1
         config["training"]["checkpoint"]["policy"] = "interval_and_best"
         config["evaluation"]["interval_epochs"] = 1
+        config["evaluation"]["training_metrics"]["enabled"] = True
+        config["evaluation"]["training_metrics"]["save_best_checkpoint"] = True
         model = TinyGraphModel()
         criterion = GraphCriterion(config, build_matcher(config), model.relation_embed)
         optimizer = build_optimizer(config, model)
@@ -155,16 +161,23 @@ class TrainingTests(unittest.TestCase):
                 config,
                 torch.device("cpu"),
                 tracker,
+                [_batch()],
             ).fit()
             models = Path(directory) / "checkpoint-test" / "models"
             self.assertTrue((models / "checkpoint_epoch=1.pt").is_file())
             self.assertTrue((models / "best_checkpoint.pt").is_file())
+            self.assertTrue((models / "best_metric_checkpoint.pt").is_file())
+            metric_record = Path(directory) / "checkpoint-test" / "best-metric.json"
+            self.assertTrue(metric_record.is_file())
+            self.assertIn('"metric": "edge_mAP"', metric_record.read_text())
 
         self.assertEqual(len(tracker.training), 1)
         self.assertEqual(tracker.training[0][1]["iteration"], 1)
         self.assertIn("total", tracker.training[0][0])
         self.assertEqual(len(tracker.validation), 1)
         self.assertEqual(tracker.validation[0][1]["epoch"], 1)
+        self.assertEqual(len(tracker.metrics), 1)
+        self.assertIn("edge_mAP", tracker.metrics[0][0])
 
     def test_best_only_keeps_exactly_one_checkpoint(self):
         config = _config()

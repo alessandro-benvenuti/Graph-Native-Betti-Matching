@@ -14,7 +14,7 @@ import torch
 import yaml
 
 from configs import load_config, validate_config
-from data.loaders import build_data_loaders
+from data.loaders import build_data_loaders, build_evaluation_loader
 from models import build_model
 from models.checkpoint import load_legacy_model_checkpoint
 from training import (
@@ -85,6 +85,15 @@ def main():
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("runtime.device requests CUDA but CUDA is unavailable")
     train_loader, validation_loader = build_data_loaders(config)
+    metric_loader = None
+    metric_config = config["evaluation"]["training_metrics"]
+    if metric_config["enabled"]:
+        metric_loader = build_evaluation_loader(
+            config,
+            dataset_name=metric_config["dataset"],
+            split="val",
+            max_samples=metric_config["max_samples"],
+        )
     model = build_model(config).to(device)
     criterion = build_criterion(config, model).to(device)
     validation_config = copy.deepcopy(config)
@@ -138,6 +147,7 @@ def main():
             config,
             device,
             tracker,
+            metric_loader,
         ).fit(start_epoch=start_epoch, start_iteration=start_iteration)
     except BaseException:
         if tracker is not None:

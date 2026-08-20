@@ -17,10 +17,29 @@ negatives constructed from at most 32 unmatched queries with object
 probability at least `0.25`. These candidates have weight one from the first
 epoch in both immediate and curriculum runs; only gamma differs.
 
-All configurations store only the current validation-best checkpoint. The
-checkpoint contains model, optimizer, scheduler, epoch, and iteration state,
-so it is a valid (possibly conservative) resume point while bounding the
-matrix to fourteen large checkpoint files.
+Mixed pretraining stores its current validation-loss-best checkpoint. MRI
+specialization stores both validation-loss-best and task-metric-best
+checkpoints. Every checkpoint contains model, optimizer, scheduler, epoch, and
+iteration state, so each is a valid (possibly conservative) resume point. The
+complete matrix is therefore bounded to twenty-one large checkpoint files.
+
+At each validation interval, both stages also run the common graph metric
+protocol on the complete synthetic-MRI validation split (currently 1,000
+patches). Node/edge mAP and mAR, Betti errors, SMD, and graph counts are logged
+under the W&B `metrics/` namespace and appended to
+`validation-metrics.jsonl`. MRI specialization additionally stores
+`best_metric_checkpoint.pt`, selected by maximum validation edge mAP, alongside
+the loss-selected `best_checkpoint.pt`. Test data must not be used to choose
+between them; the metric-selected checkpoint is the primary task model and the
+loss-selected checkpoint is retained as a diagnostic.
+
+The production matrix removes all dataset caps. Mixed pretraining makes all
+25,923 Plants training patches and all 4,000 MRI training patches eligible,
+and validates on all 6,421 Plants plus all 1,000 MRI validation patches. MRI
+specialization uses all 4,000 MRI training patches and all 1,000 validation
+patches. The balanced mixed sampler draws with replacement, so every training
+record is eligible but an individual record is not guaranteed to appear in
+every epoch. Test splits remain held out from training and model selection.
 
 Submit from a Jean Zay login node after setting both dataset paths:
 
