@@ -1,0 +1,10 @@
+loss:
+  node:
+    classification:
+      name: focal
+      class_weights: [1.0, 1.0]
+      focal_gamma: 2.0
+      curriculum:
+        enabled: true
+        start_percent: 40.0
+        end_percent: 70.0

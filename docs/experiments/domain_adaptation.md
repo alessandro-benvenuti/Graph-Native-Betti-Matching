@@ -4,7 +4,7 @@
 
 Adversarial domain adaptation is not part of the active Graph-Native Betti
 Matching baseline. Its configuration, discriminator modules, gradient-reversal
-path, optimizer group, loss calculation, and TensorBoard scalar must remain
+path, optimizer group, loss calculation, and tracking metric must remain
 absent unless a new controlled experiment explicitly reintroduces them.
 
 Source and target labels remain in the model-facing batch. They describe dataset
@@ -29,7 +29,7 @@ Reference implementation:
 - backward call: <https://github.com/alexscavo/Vascular-Graph-Extraction/blob/main/3d/training/trainer.py#L318-L345>
 
 This was therefore dead training logic in the effective baseline, despite the
-adversarial flags and the `domain_loss` TensorBoard curve. Removing it preserves
+adversarial flags and the `domain_loss` curve. Removing it preserves
 the optimized objective while reducing computation, memory use, checkpoint
 size, and configuration ambiguity. Git history remains the source for the old
 implementation.

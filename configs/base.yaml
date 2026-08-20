@@ -12,6 +12,15 @@ runtime:
   workers: 4
   pin_memory: true
 
+tracking:
+  enabled: true
+  project: focal-loss
+  entity: null
+  group: null
+  tags: [gnbm]
+  mode: null
+  save_code: true
+
 data:
   spatial_dims: 3
   image_size: [64, 64, 64]

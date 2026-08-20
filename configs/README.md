@@ -17,6 +17,8 @@ configuration before a dataset is constructed.
   different.
 - `experiments/finetune_mri/`: controlled baseline/focal/Betti/focal+Betti
   finetuning matrix. See `docs/EXPERIMENTS.md` before launching it.
+- `experiments/focal_matrix_600/`: paired mixed-pretraining and 600-epoch MRI
+  specialization configurations for the seven unweighted-focal recipes.
 - `losses/`: reusable focal and Betti overlays containing only loss changes;
   they never modify datasets, model architecture, or optimization settings.
 - `smoke_mixed_focal_betti.yaml`: one-epoch, four-sample integration check for
@@ -31,6 +33,9 @@ configuration overlay.
 
 Dataset and output paths are environment-variable references, not machine paths.
 The loader reports an unset variable together with its configuration location.
+W&B defaults live under `tracking`; credentials and deployment-specific
+project, entity, group, and mode may use standard `WANDB_*` environment
+variables.
 
 ```python
 from configs import load_config

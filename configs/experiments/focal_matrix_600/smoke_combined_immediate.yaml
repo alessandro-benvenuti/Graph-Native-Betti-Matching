@@ -1,0 +1,29 @@
+defaults:
+  - pretrain_combined_immediate.yaml
+
+# Four optimizer steps exercise both mixed domains, both focal heads, hard
+# unmatched relations, validation checkpointing, and production-style W&B.
+experiment:
+  name: focal_matrix_smoke_combined_immediate
+
+runtime:
+  workers: 0
+
+data:
+  batch_size: 2
+  datasets:
+    plants:
+      train_samples: 4
+      validation_samples: 2
+    synthetic_mri:
+      train_samples: 4
+      validation_samples: 2
+
+training:
+  epochs: 1
+  checkpoint:
+    policy: best_only
+    interval_epochs: 1
+
+evaluation:
+  interval_epochs: 1

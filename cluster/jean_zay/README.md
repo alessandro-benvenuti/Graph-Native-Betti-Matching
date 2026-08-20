@@ -22,15 +22,16 @@ $WORK/projects/Graph-Native-Betti-Matching
 $WORK/venvs/vascular-graph-extraction-h100-torch231
 $WORK/tools/uv
 $SCRATCH/datasets/syntheticMRI/patches/syntheticMRI
-$SCRATCH/checkpoints/model_epoch_280
-$SCRATCH/experiments
+$SCRATCH/checkpoints/checkpoint_epoch=280.pt
+$SCRATCH/experiments/gnbm
 ```
 
 Set the real paths on the Jean Zay login node:
 
 ```bash
 export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/patches/syntheticMRI"
-export GNBM_MRI_CHECKPOINT="$SCRATCH/checkpoints/model_epoch_280"
+export GNBM_MRI_CHECKPOINT="$SCRATCH/checkpoints/checkpoint_epoch=280.pt"
+export GNBM_INITIAL_WEIGHTS="$GNBM_MRI_CHECKPOINT"
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm"
 ```
 
@@ -55,6 +56,22 @@ For an interactive shell after setup:
 source cluster/jean_zay/env.sh
 ```
 
+Log in to W&B once from the login node after activating the environment:
+
+```bash
+wandb login --verify
+```
+
+`wandb login` stores the credential outside the repository. Alternatively,
+export `WANDB_API_KEY` in the submitting shell; never put the key in YAML or a
+committed shell script. The non-secret entity and project are defined in
+`cluster/jean_zay/wandb_env.sh`, which is loaded automatically by `env.sh` in
+both interactive and batch environments. The configured project is:
+
+```text
+https://wandb.ai/alessandrobenvenuti2002-politecnico-di-torino/focal-loss
+```
+
 ## 3. Bounded development test
 
 Submit exactly one 45-minute H100 development job:
@@ -67,6 +84,7 @@ The job uses `qos_gpu_h100-dev`, builds deformable attention for H100 (`sm_90`),
 runs CUDA forward/backward tests, checks the real checkpoint and MRI loader, and
 trains one batch with the complete focal + H0/H1 objective. It writes one
 checkpoint so resume integrity can be checked without duplicating large files.
+W&B is disabled for this smoke job unless `WANDB_MODE` is explicitly supplied.
 After a successful installation, later debug jobs reuse the extension. Set
 `GNBM_FORCE_REBUILD_OPS=1` before submission only when its C++/CUDA source or
 the PyTorch/CUDA environment changes.
@@ -114,9 +132,22 @@ export GNBM_RESUME_CHECKPOINT="$GNBM_OUTPUT_DIR/RUN_NAME/models/checkpoint_epoch
 bash cluster/jean_zay/submit_train.sh CONFIG RUN_NAME
 ```
 
-`--resume` restores model, optimizer, scheduler, epoch, and iteration. A legacy
-checkpoint such as `model_epoch_280` is initialization only and must be supplied
+`--resume` restores model, optimizer, scheduler, epoch, and iteration. The
+original `checkpoint_epoch=280.pt` is initialization only and must be supplied
 through `GNBM_INITIAL_WEIGHTS`.
+
+The run directory stores `wandb-run.json` beside the resolved configuration.
+Reusing the same run name with `GNBM_RESUME_CHECKPOINT` reuses that W&B run ID,
+so online metrics continue in the original cloud run. To buffer a job locally,
+set `WANDB_MODE=offline` before submission. W&B does not support run resumption
+while offline; sync the buffered data before continuing that run online.
+Afterwards, activate the environment on the login node and upload it with:
+
+```bash
+wandb sync "$GNBM_OUTPUT_DIR/RUN_NAME/wandb/offline-run-"*
+```
+
+Use `WANDB_MODE=disabled` as an operational override for an untracked test.
 
 ## Accounting and development QoS
 

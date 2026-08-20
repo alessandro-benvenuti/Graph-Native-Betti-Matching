@@ -1,0 +1,6 @@
+defaults:
+  - pretrain_common.yaml
+  - ../../losses/edge_focal_unweighted_curriculum.yaml
+
+experiment:
+  name: pretrain_mixed_edge_focal_curriculum_unweighted_seed364505

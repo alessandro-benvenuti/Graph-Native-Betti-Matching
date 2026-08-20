@@ -12,6 +12,7 @@ module load pytorch-gpu/py3/2.3.1
 
 export GNBM_REPO_DIR="${GNBM_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 export GNBM_VENV="${GNBM_VENV:-$WORK/venvs/vascular-graph-extraction-h100-torch231}"
+source "$GNBM_REPO_DIR/cluster/jean_zay/wandb_env.sh"
 export PATH="$WORK/tools/uv:$PATH"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$WORK/.cache/uv}"
 export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-$WORK/.cache/torch-extensions/gnbm-h100-torch231-sm90}"

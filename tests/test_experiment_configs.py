@@ -33,6 +33,7 @@ class ExperimentConfigTests(unittest.TestCase):
         for section in (
             "schema_version",
             "runtime",
+            "tracking",
             "data",
             "augmentation",
             "model",
@@ -90,52 +91,124 @@ class ExperimentConfigTests(unittest.TestCase):
         ]
         self.assertEqual(len(names), len(set(names)))
 
-    def test_full_node_focal_matrix_changes_only_node_classification(self):
-        paths = ROOT / "configs" / "experiments" / "finetune_mri"
-        baseline = load_config(
-            paths / "baseline_400.yaml", environment=ENVIRONMENT
-        )
-        immediate = load_config(
-            paths / "node_focal_immediate_400.yaml", environment=ENVIRONMENT
-        )
-        curriculum = load_config(
-            paths / "node_focal_curriculum_400.yaml", environment=ENVIRONMENT
-        )
+    def test_all_experiments_share_wandb_defaults(self):
+        for config in (self.baseline, self.focal, self.betti, self.combined):
+            tracking = config["tracking"]
+            self.assertTrue(tracking["enabled"])
+            self.assertEqual(tracking["project"], "focal-loss")
+            self.assertIsNone(tracking["mode"])
 
-        for config in (baseline, immediate, curriculum):
-            self.assertEqual(config["data"]["batch_size"], 32)
-            self.assertEqual(config["training"]["epochs"], 400)
-            self.assertEqual(
-                config["training"]["checkpoint"]["policy"],
-                "interval_and_best",
+    def test_seven_recipe_matrix_has_paired_pretraining_and_finetuning(self):
+        paths = ROOT / "configs" / "experiments" / "focal_matrix_600"
+        recipes = (
+            "baseline",
+            "node_immediate",
+            "node_curriculum",
+            "edge_immediate",
+            "edge_curriculum",
+            "combined_immediate",
+            "combined_curriculum",
+        )
+        names = set()
+        for recipe in recipes:
+            pretrain = load_config(
+                paths / f"pretrain_{recipe}.yaml", environment=ENVIRONMENT
             )
-            self.assertEqual(
-                config["training"]["checkpoint"]["interval_epochs"], 100
+            finetune = load_config(
+                paths / f"finetune_{recipe}.yaml", environment=ENVIRONMENT
             )
-            self.assertEqual(config["evaluation"]["interval_epochs"], 20)
-            self.assertEqual(
-                config["loss"]["edge"], baseline["loss"]["edge"]
-            )
-            self.assertFalse(
-                config["loss"]["edge"]["candidates"]["include_unmatched"]
-            )
+            self.assertEqual(set(pretrain["data"]["datasets"]), {"plants", "synthetic_mri"})
+            self.assertEqual(set(finetune["data"]["datasets"]), {"synthetic_mri"})
+            self.assertEqual(pretrain["training"]["epochs"], 100)
+            self.assertEqual(finetune["training"]["epochs"], 600)
+            self.assertEqual(pretrain["training"]["checkpoint"]["policy"], "best_only")
+            self.assertEqual(finetune["training"]["checkpoint"]["policy"], "best_only")
+            self.assertEqual(pretrain["loss"], finetune["loss"])
+            self.assertEqual(pretrain["topology"], finetune["topology"])
+            names.update((pretrain["experiment"]["name"], finetune["experiment"]["name"]))
+        self.assertEqual(len(names), 2 * len(recipes))
 
+    def test_focal_matrix_recipe_contract(self):
+        paths = ROOT / "configs" / "experiments" / "focal_matrix_600"
+        configs = {
+            recipe: load_config(
+                paths / f"finetune_{recipe}.yaml", environment=ENVIRONMENT
+            )
+            for recipe in (
+                "baseline",
+                "node_immediate",
+                "node_curriculum",
+                "edge_immediate",
+                "edge_curriculum",
+                "combined_immediate",
+                "combined_curriculum",
+            )
+        }
+        baseline = configs["baseline"]
         self.assertEqual(
-            baseline["loss"]["node"]["classification"]["name"],
-            "weighted_cross_entropy",
+            baseline["loss"]["node"]["classification"]["class_weights"],
+            [0.25, 0.75],
         )
-        for config in (immediate, curriculum):
-            classification = config["loss"]["node"]["classification"]
-            self.assertEqual(classification["name"], "focal")
-            self.assertEqual(classification["class_weights"], [0.25, 0.75])
-            self.assertEqual(classification["focal_gamma"], 2.0)
+        self.assertEqual(
+            baseline["loss"]["edge"]["balancing"]["mode"], "ratio_upsample"
+        )
         self.assertFalse(
-            immediate["loss"]["node"]["classification"]["curriculum"]["enabled"]
+            baseline["loss"]["edge"]["candidates"]["include_unmatched"]
         )
-        schedule = curriculum["loss"]["node"]["classification"]["curriculum"]
-        self.assertTrue(schedule["enabled"])
-        self.assertEqual(schedule["start_percent"], 40.0)
-        self.assertEqual(schedule["end_percent"], 70.0)
+
+        for recipe, config in configs.items():
+            node_focal = recipe.startswith("node_") or recipe.startswith("combined_")
+            edge_focal = recipe.startswith("edge_") or recipe.startswith("combined_")
+            node = config["loss"]["node"]["classification"]
+            edge = config["loss"]["edge"]
+            self.assertEqual(node["name"], "focal" if node_focal else "weighted_cross_entropy")
+            if node_focal:
+                self.assertEqual(node["class_weights"], [1.0, 1.0])
+            self.assertEqual(edge["classification"]["name"], "focal" if edge_focal else "cross_entropy")
+            self.assertEqual(edge["balancing"]["mode"], "none" if edge_focal else "ratio_upsample")
+            self.assertEqual(edge["candidates"]["include_unmatched"], edge_focal)
+            if edge_focal:
+                self.assertEqual(edge["classification"]["class_weights"], [1.0, 1.0])
+                self.assertEqual(edge["candidates"]["unmatched_weight"], 1.0)
+                self.assertEqual(edge["candidates"]["unmatched_warmup_epochs"], 0)
+                self.assertEqual(edge["candidates"]["unmatched_ramp_epochs"], 0)
+
+            curriculum = recipe.endswith("curriculum")
+            if node_focal:
+                self.assertEqual(node["curriculum"]["enabled"], curriculum)
+                self.assertEqual(node["curriculum"]["start_percent"], 40.0)
+                self.assertEqual(node["curriculum"]["end_percent"], 70.0)
+            if edge_focal:
+                edge_schedule = edge["classification"]["curriculum"]
+                self.assertEqual(edge_schedule["enabled"], curriculum)
+                self.assertEqual(edge_schedule["start_percent"], 40.0)
+                self.assertEqual(edge_schedule["end_percent"], 70.0)
+
+    def test_focal_matrix_smoke_exercises_mixed_combined_recipe(self):
+        config = load_config(
+            ROOT
+            / "configs"
+            / "experiments"
+            / "focal_matrix_600"
+            / "smoke_combined_immediate.yaml",
+            environment=ENVIRONMENT,
+        )
+        self.assertEqual(set(config["data"]["datasets"]), {"plants", "synthetic_mri"})
+        self.assertEqual(config["runtime"]["workers"], 0)
+        self.assertEqual(config["data"]["batch_size"], 2)
+        self.assertEqual(config["training"]["epochs"], 1)
+        self.assertTrue(config["tracking"]["enabled"])
+        self.assertEqual(config["loss"]["node"]["classification"]["name"], "focal")
+        self.assertEqual(config["loss"]["edge"]["classification"]["name"], "focal")
+        self.assertTrue(config["loss"]["edge"]["candidates"]["include_unmatched"])
+
+    def test_focal_matrix_launcher_uses_wandb_run_group(self):
+        launcher = (
+            ROOT / "cluster" / "jean_zay" / "submit_focal_matrix_600.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("WANDB_RUN_GROUP", launcher)
+        self.assertNotIn("WANDB_GROUP=", launcher)
+        self.assertIn("focal-matrix-600-seed364505", launcher)
 
     def test_launcher_supports_exported_directories_without_git(self):
         launcher = (

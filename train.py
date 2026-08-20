@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import os
 from pathlib import Path
 import random
 
@@ -23,6 +24,7 @@ from training import (
     build_scheduler,
 )
 from training.checkpoint import load_training_checkpoint
+from training.tracking import build_tracker
 
 
 def _parser():
@@ -51,15 +53,6 @@ def _apply_operational_overrides(config, args):
     if args.workers is not None:
         config["runtime"]["workers"] = args.workers
     return config
-
-
-def _writer(path):
-    try:
-        from torch.utils.tensorboard import SummaryWriter
-    except ImportError:
-        print("TensorBoard is unavailable; continuing without event logging")
-        return None
-    return SummaryWriter(log_dir=str(path))
 
 
 def _enable_deterministic_algorithms():
@@ -123,19 +116,36 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
     with (run_dir / "resolved-config.yaml").open("w", encoding="utf-8") as handle:
         yaml.safe_dump(config, handle, sort_keys=False)
-    writer = _writer(run_dir / "tensorboard")
-    Trainer(
-        model,
-        criterion,
-        validation_criterion,
-        optimizer,
-        scheduler,
-        train_loader,
-        validation_loader,
+    tracker = build_tracker(
         config,
-        device,
-        writer,
-    ).fit(start_epoch=start_epoch, start_iteration=start_iteration)
+        run_dir,
+        resume=bool(args.resume),
+        launch_metadata={
+            "initial_weights": args.initial_weights,
+            "resume_checkpoint": args.resume,
+            "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+        },
+    )
+    try:
+        Trainer(
+            model,
+            criterion,
+            validation_criterion,
+            optimizer,
+            scheduler,
+            train_loader,
+            validation_loader,
+            config,
+            device,
+            tracker,
+        ).fit(start_epoch=start_epoch, start_iteration=start_iteration)
+    except BaseException:
+        if tracker is not None:
+            tracker.finish(exit_code=1)
+        raise
+    else:
+        if tracker is not None:
+            tracker.finish(exit_code=0)
 
 
 if __name__ == "__main__":

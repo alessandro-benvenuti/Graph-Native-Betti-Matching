@@ -1,0 +1,20 @@
+defaults:
+  - ../../finetune_synthetic_mri.yaml
+
+# MRI specialization begins from the corresponding mixed-pretraining best
+# checkpoint.  Best-only storage bounds the seven-recipe matrix to one
+# checkpoint per stage and recipe; that checkpoint contains full resume state.
+experiment:
+  name: focal_matrix_finetune_placeholder
+
+data:
+  batch_size: 32
+
+training:
+  epochs: 600
+  checkpoint:
+    policy: best_only
+    interval_epochs: 600
+
+evaluation:
+  interval_epochs: 20

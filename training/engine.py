@@ -103,7 +103,7 @@ class Trainer:
         validation_loader,
         config,
         device,
-        writer=None,
+        tracker=None,
     ):
         self.model = model
         self.criterion = criterion
@@ -114,7 +114,7 @@ class Trainer:
         self.validation_loader = validation_loader
         self.config = config
         self.device = torch.device(device)
-        self.writer = writer
+        self.tracker = tracker
 
     def fit(self, start_epoch=0, start_iteration=0):
         epochs = int(self.config["training"]["epochs"])
@@ -160,14 +160,19 @@ class Trainer:
                 )
                 if losses is None:
                     continue
+                scalars = {}
                 for name, value in losses.items():
                     if torch.is_tensor(value) and value.numel() == 1:
                         scalar = float(value.detach().cpu())
+                        scalars[name] = scalar
                         sums[name] = sums.get(name, 0.0) + scalar
-                        if self.writer is not None:
-                            self.writer.add_scalar(
-                                "train/" + name, scalar, global_iteration
-                            )
+                if self.tracker is not None:
+                    self.tracker.log_training(
+                        scalars,
+                        iteration=global_iteration,
+                        epoch=epoch,
+                        learning_rate=self.optimizer.param_groups[0]["lr"],
+                    )
                 batches += 1
             means = {name: value / max(1, batches) for name, value in sums.items()}
             print(
@@ -192,9 +197,12 @@ class Trainer:
                         epoch, validation.get("total", float("nan"))
                     )
                 )
-                if self.writer is not None:
-                    for name, value in validation.items():
-                        self.writer.add_scalar("validation/" + name, value, epoch)
+                if self.tracker is not None:
+                    self.tracker.log_validation(
+                        validation,
+                        iteration=global_iteration,
+                        epoch=epoch,
+                    )
                 validation_total = validation.get("total")
                 if (
                     policy in {"best_only", "interval_and_best"}
@@ -222,8 +230,4 @@ class Trainer:
                     epoch,
                     global_iteration,
                 )
-        if self.writer is not None:
-            self.writer.flush()
-
-
 __all__ = ["Trainer", "evaluate_loss", "train_step"]

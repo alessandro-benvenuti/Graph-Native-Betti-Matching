@@ -86,8 +86,9 @@ samples, runs for 10 epochs, validates every epoch, and uses
 `checkpoint.policy: best_only`. Consequently each run directory contains at
 most one approximately 1.5 GB checkpoint. Four completed pilots require about
 6 GB for checkpoints rather than tens of gigabytes. The launcher also archives
-stdout/stderr in `train.log`, which is the loss-curve record when TensorBoard is
-unavailable.
+stdout/stderr in `train.log`. W&B is the primary loss-curve record; `train.log`
+remains the independent cluster record and fallback when tracking is offline or
+disabled.
 
 Run each experiment as a separate cluster job. Do not run the four pilot jobs
 sequentially inside one allocation unless that allocation was sized for the
@@ -102,6 +103,7 @@ Archive the following together for every run:
 - `resolved-config.yaml`;
 - the single best checkpoint;
 - stdout/stderr and cluster job metadata;
+- W&B run ID from `wandb-run.json`;
 - validation total loss at each validation epoch.
 
 Validation total loss is suitable for checkpoint selection within a run. It is

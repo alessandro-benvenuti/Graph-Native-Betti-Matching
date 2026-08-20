@@ -20,6 +20,9 @@ repo_dir="${GNBM_REPO_DIR:-$SLURM_SUBMIT_DIR}"
 source "$repo_dir/cluster/jean_zay/env.sh"
 set -u
 
+# Debug allocations verify the training path without creating cloud runs.
+export WANDB_MODE="${WANDB_MODE:-disabled}"
+
 echo "=== Allocation ==="
 echo "job=$SLURM_JOB_ID host=$(hostname) account=${SLURM_JOB_ACCOUNT:-unknown}"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
@@ -42,6 +45,9 @@ PY
 
 echo "=== Build deformable attention ==="
 scripts/build_deformable_attention.sh
+
+echo "=== Configuration and W&B tests ==="
+python -m unittest -v tests.test_tracking tests.test_experiment_configs
 
 echo "=== CUDA/model tests ==="
 python -m unittest -v tests.test_model_cluster.CudaModelTests

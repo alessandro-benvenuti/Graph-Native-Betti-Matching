@@ -1,5 +1,0 @@
-defaults:
-  - full_400.yaml
-
-experiment:
-  name: scratch_mri_baseline_400_seed364505

@@ -64,6 +64,18 @@ def _batch():
     return [images, segmentations, nodes, edges, [0], torch.tensor([1])]
 
 
+class RecordingTracker:
+    def __init__(self):
+        self.training = []
+        self.validation = []
+
+    def log_training(self, metrics, **context):
+        self.training.append((metrics, context))
+
+    def log_validation(self, metrics, **context):
+        self.validation.append((metrics, context))
+
+
 class TrainingTests(unittest.TestCase):
     def test_training_step_updates_model_and_scheduler(self):
         config = _config()
@@ -127,6 +139,7 @@ class TrainingTests(unittest.TestCase):
         criterion = GraphCriterion(config, build_matcher(config), model.relation_embed)
         optimizer = build_optimizer(config, model)
         scheduler = build_scheduler(config, optimizer, iterations_per_epoch=1)
+        tracker = RecordingTracker()
 
         with tempfile.TemporaryDirectory() as directory:
             config["experiment"]["output_dir"] = directory
@@ -141,10 +154,17 @@ class TrainingTests(unittest.TestCase):
                 [_batch()],
                 config,
                 torch.device("cpu"),
+                tracker,
             ).fit()
             models = Path(directory) / "checkpoint-test" / "models"
             self.assertTrue((models / "checkpoint_epoch=1.pt").is_file())
             self.assertTrue((models / "best_checkpoint.pt").is_file())
+
+        self.assertEqual(len(tracker.training), 1)
+        self.assertEqual(tracker.training[0][1]["iteration"], 1)
+        self.assertIn("total", tracker.training[0][0])
+        self.assertEqual(len(tracker.validation), 1)
+        self.assertEqual(tracker.validation[0][1]["epoch"], 1)
 
     def test_best_only_keeps_exactly_one_checkpoint(self):
         config = _config()

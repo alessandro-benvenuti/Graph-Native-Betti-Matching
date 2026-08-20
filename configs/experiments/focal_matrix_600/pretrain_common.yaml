@@ -1,0 +1,21 @@
+defaults:
+  - ../../pretrain_mixed.yaml
+
+# Mixed Plants + synthetic-MRI initialization for one complete loss recipe.
+# The historical stage used 50 epochs; 100 epochs provides room to verify that
+# the new focal objectives have converged without conflating this stage with
+# the much smaller 600-epoch MRI-only specialization epochs.
+experiment:
+  name: focal_matrix_pretrain_placeholder
+
+data:
+  batch_size: 32
+
+training:
+  epochs: 100
+  checkpoint:
+    policy: best_only
+    interval_epochs: 100
+
+evaluation:
+  interval_epochs: 10

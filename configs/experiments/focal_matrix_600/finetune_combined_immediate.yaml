@@ -1,0 +1,7 @@
+defaults:
+  - finetune_common.yaml
+  - ../../losses/node_focal_unweighted_immediate.yaml
+  - ../../losses/edge_focal_unweighted_immediate.yaml
+
+experiment:
+  name: finetune_mri600_combined_focal_immediate_unweighted_seed364505

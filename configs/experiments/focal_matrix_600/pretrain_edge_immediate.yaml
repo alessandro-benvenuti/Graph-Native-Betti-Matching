@@ -1,0 +1,6 @@
+defaults:
+  - pretrain_common.yaml
+  - ../../losses/edge_focal_unweighted_immediate.yaml
+
+experiment:
+  name: pretrain_mixed_edge_focal_immediate_unweighted_seed364505

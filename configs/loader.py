@@ -124,6 +124,31 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ConfigError("runtime must be a mapping")
     _non_negative_int(runtime.get("workers"), "runtime.workers")
 
+    tracking = config.get("tracking")
+    if not isinstance(tracking, Mapping):
+        raise ConfigError("tracking must be a mapping")
+    if not isinstance(tracking.get("enabled"), bool):
+        raise ConfigError("tracking.enabled must be a boolean")
+    project = tracking.get("project")
+    if not isinstance(project, str) or not project.strip():
+        raise ConfigError("tracking.project must be a non-empty string")
+    for name in ("entity", "group"):
+        value = tracking.get(name)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ConfigError(f"tracking.{name} must be null or a non-empty string")
+    mode = tracking.get("mode")
+    if mode not in {None, "online", "offline", "disabled", "shared"}:
+        raise ConfigError(
+            "tracking.mode must be null, online, offline, disabled, or shared"
+        )
+    tags = tracking.get("tags")
+    if not isinstance(tags, list) or not all(
+        isinstance(tag, str) and tag.strip() for tag in tags
+    ):
+        raise ConfigError("tracking.tags must be a list of non-empty strings")
+    if not isinstance(tracking.get("save_code"), bool):
+        raise ConfigError("tracking.save_code must be a boolean")
+
     data = config.get("data")
     if not isinstance(data, Mapping):
         raise ConfigError("data must be a mapping")

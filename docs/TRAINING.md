@@ -25,6 +25,37 @@ Operational overrides are limited to device, output directory, run name, batch
 size, worker count, and checkpoint paths. The fully resolved YAML is written to
 the run directory.
 
+## Experiment tracking
+
+W&B tracking is enabled by `tracking` in `configs/base.yaml`. Training logs all
+loss components and learning rate against `train/iteration`, and validation
+losses against `validation/epoch`. Each call records the metrics for one
+training iteration together, avoiding artificial steps between loss components.
+TensorBoard is not used.
+
+Set credentials and operational destinations through the environment:
+
+```bash
+wandb login
+source cluster/jean_zay/wandb_env.sh
+export WANDB_RUN_GROUP=finetune-mri-ablation  # optional
+```
+
+The repository W&B destination is
+`alessandrobenvenuti2002-politecnico-di-torino/focal-loss`. The shared shell
+file contains no API key and may be overridden with `WANDB_ENTITY` or
+`WANDB_PROJECT` before it is sourced.
+
+Do not store `WANDB_API_KEY` in configuration files. `WANDB_MODE=offline`
+buffers a run for later `wandb sync`; `WANDB_MODE=disabled` suppresses tracking
+for a smoke test.
+
+When `--resume` targets the same run directory, `wandb-run.json` supplies the
+original W&B run ID and online metrics continue in that run. W&B does not
+support resuming while offline; sync an offline run before continuing it
+online. Training state still comes exclusively from the checkpoint passed to
+`--resume`.
+
 ## Checkpoints
 
 Every saved training checkpoint contains strict model, optimizer, scheduler,

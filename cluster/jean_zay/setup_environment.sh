@@ -50,12 +50,18 @@ fi
 
 source "$venv/bin/activate"
 
-# This is a complete freeze of the non-PyTorch Gardenia environment. --no-deps
-# prevents MONAI from installing another PyTorch build over the cluster module.
+# Install the frozen training stack without resolving dependencies. This keeps
+# MONAI from installing another PyTorch build over the cluster module.
 "$uv_bin" pip install \
   --python "$venv/bin/python" \
   --no-deps \
   --requirements "$repo_dir/requirements/jean-zay.txt"
+
+# W&B is kept separate because it needs its own pure-Python dependencies. It
+# does not depend on PyTorch, so normal dependency resolution is safe here.
+"$uv_bin" pip install \
+  --python "$venv/bin/python" \
+  "wandb==0.28.1"
 
 python - <<'PY'
 import sys
@@ -63,6 +69,7 @@ import torch
 import monai
 import numpy
 import scipy
+import wandb
 import yaml
 
 print("Python executable:", sys.executable)
@@ -72,12 +79,15 @@ print("PyTorch CUDA runtime:", torch.version.cuda)
 print("MONAI:", monai.__version__)
 print("NumPy:", numpy.__version__)
 print("SciPy:", scipy.__version__)
+print("W&B:", wandb.__version__)
 print("PyYAML:", yaml.__version__)
 
 if torch.__version__.split("+")[0] != "2.3.1":
     raise SystemExit("Expected Jean Zay PyTorch 2.3.1")
 if not str(torch.version.cuda).startswith("12."):
     raise SystemExit("Expected the Jean Zay H100 CUDA 12 PyTorch build")
+if wandb.__version__ != "0.28.1":
+    raise SystemExit("Expected W&B 0.28.1")
 PY
 
 "$uv_bin" pip check --python "$venv/bin/python"

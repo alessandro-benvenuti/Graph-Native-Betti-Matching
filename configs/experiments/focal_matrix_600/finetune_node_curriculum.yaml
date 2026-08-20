@@ -1,0 +1,6 @@
+defaults:
+  - finetune_common.yaml
+  - ../../losses/node_focal_unweighted_curriculum.yaml
+
+experiment:
+  name: finetune_mri600_node_focal_curriculum_unweighted_seed364505

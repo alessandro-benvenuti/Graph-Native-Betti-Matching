@@ -41,5 +41,6 @@ fi
 
 echo "job=$SLURM_JOB_ID host=$(hostname)"
 echo "config=$GNBM_CONFIG run=$GNBM_RUN_NAME output=$GNBM_OUTPUT_DIR"
+echo "wandb_entity=${WANDB_ENTITY:-default} wandb_project=${WANDB_PROJECT:-focal-loss} wandb_mode=${WANDB_MODE:-online}"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 srun --ntasks=1 python -u train.py "${args[@]}"

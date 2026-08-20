@@ -1,0 +1,5 @@
+defaults:
+  - pretrain_common.yaml
+
+experiment:
+  name: pretrain_mixed_baseline_seed364505
