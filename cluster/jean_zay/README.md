@@ -141,6 +141,8 @@ Reusing the same run name with `GNBM_RESUME_CHECKPOINT` reuses that W&B run ID,
 so online metrics continue in the original cloud run. To buffer a job locally,
 set `WANDB_MODE=offline` before submission. W&B does not support run resumption
 while offline; sync the buffered data before continuing that run online.
+The focal-matrix launchers always select offline mode because Jean Zay H100
+compute nodes cannot reach wandb.ai.
 Afterwards, activate the environment on the login node and upload it with:
 
 ```bash

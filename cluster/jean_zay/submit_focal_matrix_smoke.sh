@@ -34,6 +34,9 @@ export GNBM_REPO_DIR="$repo_dir"
 export GNBM_CONFIG="$config"
 export GNBM_RUN_NAME="$run_name"
 export WANDB_RUN_GROUP="focal-matrix-600-smoke"
+# Jean Zay compute nodes have no external network access. Buffer locally and
+# upload from a login node after the job completes.
+export WANDB_MODE=offline
 unset GNBM_INITIAL_WEIGHTS GNBM_RESUME_CHECKPOINT
 
 log_dir="$WORK/logs/graph-native-betti-matching"
@@ -54,4 +57,4 @@ echo "Run:   $run_name"
 echo "Queue: squeue -j $job_id"
 echo "Log:   $log_dir/gnbm-matrix-smoke-$job_id.out"
 echo "Error: $log_dir/gnbm-matrix-smoke-$job_id.err"
-echo "W&B:   entity=${WANDB_ENTITY:-from-wandb_env.sh} project=${WANDB_PROJECT:-from-wandb_env.sh} group=$WANDB_RUN_GROUP"
+echo "W&B:   mode=$WANDB_MODE entity=${WANDB_ENTITY:-from-wandb_env.sh} project=${WANDB_PROJECT:-from-wandb_env.sh} group=$WANDB_RUN_GROUP"

@@ -38,14 +38,19 @@ path with one 45-minute development job:
 
 ```bash
 wandb login --verify
-unset WANDB_MODE
 bash cluster/jean_zay/submit_focal_matrix_smoke.sh
 ```
 
 The smoke run uses its own `focal-matrix-600-smoke` W&B group and therefore is
 not one of the fourteen scientific runs. A successful run performs four
 optimizer steps, validates on four samples, writes `best_checkpoint.pt` and
-`wandb-run.json`, and exits normally.
+`wandb-run.json`, and exits normally. Jean Zay compute nodes have no external
+network access, so both matrix launchers force `WANDB_MODE=offline`. Upload
+completed runs from a login node with:
+
+```bash
+bash cluster/jean_zay/sync_wandb_offline.sh "$GNBM_OUTPUT_DIR"
+```
 
 `env.sh` loads the non-secret W&B entity and project from
 `cluster/jean_zay/wandb_env.sh`. The matrix launcher assigns every pretraining

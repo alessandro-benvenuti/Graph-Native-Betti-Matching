@@ -112,6 +112,9 @@ done
 log_dir="$WORK/logs/graph-native-betti-matching"
 mkdir -p "$log_dir" "$GNBM_OUTPUT_DIR"
 export WANDB_RUN_GROUP="${WANDB_RUN_GROUP:-focal-matrix-600-seed364505}"
+# Jean Zay compute nodes cannot contact wandb.ai. Buffer each complete run for
+# upload from a login node after training.
+export WANDB_MODE=offline
 
 submit_stage() {
   local stage="$1"
