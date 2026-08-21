@@ -23,6 +23,21 @@ class FocalLossTests(unittest.TestCase):
         expected = F.cross_entropy(logits, targets, weight=torch.tensor(weights))
         self.assertTrue(torch.allclose(observed, expected))
 
+    def test_fractional_gamma_has_finite_gradient_for_saturated_logits(self):
+        logits = torch.tensor(
+            [[100.0, -100.0], [-100.0, 100.0]], requires_grad=True
+        )
+        targets = torch.tensor([0, 1])
+        loss = softmax_focal_loss(
+            logits,
+            targets,
+            class_weights=[1.0, 1.0],
+            gamma=0.5,
+        )
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        self.assertTrue(torch.isfinite(logits.grad).all())
+
     def test_hard_selection_retains_gradient_connection(self):
         logits = torch.tensor(
             [[2.0, -1.0], [0.0, 2.0], [-1.0, 3.0]], requires_grad=True

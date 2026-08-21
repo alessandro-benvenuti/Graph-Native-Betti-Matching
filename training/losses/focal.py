@@ -25,7 +25,15 @@ def softmax_focal_loss(
         -1, targets.long().unsqueeze(-1)
     ).squeeze(-1)
     target_prob = target_log_prob.exp()
-    loss = -(1.0 - target_prob).pow(float(gamma)) * target_log_prob
+    # During a gamma curriculum, 0 < gamma < 1.  If a correct prediction has
+    # saturated to target_prob == 1, pow(0, gamma) has an infinite derivative
+    # and produces NaN gradients even though the scalar loss is zero.  Clamp
+    # the modulating base away from zero; the clamp's flat saturated branch
+    # preserves a zero loss/gradient for an exactly confident prediction.
+    modulation_base = (1.0 - target_prob).clamp_min(
+        torch.finfo(logits.dtype).eps
+    )
+    loss = -modulation_base.pow(float(gamma)) * target_log_prob
 
     alpha_t = None
     if class_weights is not None:
