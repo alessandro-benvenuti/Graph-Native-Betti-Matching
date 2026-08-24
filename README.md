@@ -69,7 +69,8 @@ Hungarian matching, modular graph losses, optimizer, scheduler, strict resume,
 training loop, inference, corrected SMD/AP/topology evaluation, graph export,
 plotting, and baseline loss-based model selection are in place. See
 `docs/MODEL.md`, `docs/LOSSES.md`, `docs/TRAINING.md`, and
-`docs/EVALUATION.md`. The first controlled ablation matrix is documented in
+`docs/EVALUATION.md`. The read-only SyntheticMRI source/grid audit is documented
+in `docs/DATA_AUDIT.md`. The first controlled ablation matrix is documented in
 `docs/EXPERIMENTS.md`.
 
 Jean Zay H100 environment setup, the bounded H100 development test, production
