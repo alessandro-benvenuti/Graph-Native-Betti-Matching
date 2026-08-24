@@ -1,0 +1,7 @@
+defaults:
+  - pretrain_common.yaml
+  - ../../losses/edge_ce_unmatched_hardpool.yaml
+
+experiment:
+  name: pretrain_mixed_nodece_edgece_unmatched_seed364505
+

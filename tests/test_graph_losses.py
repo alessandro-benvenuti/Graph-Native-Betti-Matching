@@ -209,6 +209,24 @@ class GraphCriterionTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(tokens.grad).all())
         self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
 
+    def test_ce_ratio_upsampling_with_hard_negatives_is_differentiable(self):
+        config = _config()
+        config["loss"]["edge"]["candidates"].update(
+            include_unmatched=True,
+            unmatched_object_threshold=0.0,
+            max_active_unmatched=4,
+            max_unmatched_pairs_per_graph=8,
+            unmatched_weight=1.0,
+        )
+        criterion, relation = self._criterion(config)
+        tokens, predictions, targets = _batch()
+        losses = criterion(tokens, predictions, targets)
+        self.assertTrue(torch.isfinite(losses["total"]))
+        self.assertGreaterEqual(relation.calls, 3)
+        losses["total"].backward()
+        self.assertTrue(torch.isfinite(tokens.grad).all())
+        self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
+
     def test_unmatched_focal_candidates_average_both_orientations(self):
         config = _config()
         config["loss"]["edge"]["candidates"].update(

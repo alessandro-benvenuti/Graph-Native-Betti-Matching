@@ -1,0 +1,8 @@
+defaults:
+  - pretrain_common.yaml
+  - ../../losses/node_focal_unweighted_immediate.yaml
+  - ../../losses/edge_ce_unmatched_hardpool.yaml
+
+experiment:
+  name: pretrain_mixed_nodefocal_edgece_unmatched_seed364505
+

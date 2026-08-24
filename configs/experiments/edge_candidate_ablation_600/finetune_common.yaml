@@ -1,0 +1,6 @@
+defaults:
+  - ../focal_matrix_600/finetune_common.yaml
+
+experiment:
+  name: edge_candidate_ablation_finetune_placeholder
+

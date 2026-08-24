@@ -225,6 +225,60 @@ class ExperimentConfigTests(unittest.TestCase):
         self.assertNotIn("WANDB_GROUP=", launcher)
         self.assertIn("focal-matrix-600-seed364505", launcher)
 
+    def test_edge_candidate_ablation_completes_missing_recipe_cells(self):
+        paths = ROOT / "configs" / "experiments" / "edge_candidate_ablation_600"
+        expectations = {
+            "nodece_edgefocal_mm": (False, "focal", False, "none"),
+            "nodefocal_edgefocal_mm": (True, "focal", False, "none"),
+            "nodece_edgece_all": (False, "cross_entropy", True, "ratio_upsample"),
+            "nodefocal_edgece_all": (True, "cross_entropy", True, "ratio_upsample"),
+        }
+        names = set()
+        for recipe, expected in expectations.items():
+            pretrain = load_config(
+                paths / f"pretrain_{recipe}.yaml", environment=ENVIRONMENT
+            )
+            finetune = load_config(
+                paths / f"finetune_{recipe}.yaml", environment=ENVIRONMENT
+            )
+            node_focal, edge_name, include_unmatched, balancing = expected
+            self.assertEqual(pretrain["training"]["epochs"], 100)
+            self.assertEqual(finetune["training"]["epochs"], 600)
+            self.assertEqual(pretrain["loss"], finetune["loss"])
+            self.assertEqual(pretrain["topology"], finetune["topology"])
+            self.assertEqual(
+                finetune["loss"]["node"]["classification"]["name"],
+                "focal" if node_focal else "weighted_cross_entropy",
+            )
+            edge = finetune["loss"]["edge"]
+            self.assertEqual(edge["classification"]["name"], edge_name)
+            self.assertEqual(
+                edge["candidates"]["include_unmatched"], include_unmatched
+            )
+            self.assertEqual(edge["balancing"]["mode"], balancing)
+            self.assertEqual(edge["candidates"]["unmatched_weight"], 1.0)
+            self.assertFalse(finetune["topology"]["betti_h0"]["enabled"])
+            self.assertFalse(finetune["topology"]["betti_h1"]["enabled"])
+            names.update((pretrain["experiment"]["name"], finetune["experiment"]["name"]))
+        self.assertEqual(len(names), 2 * len(expectations))
+
+    def test_edge_candidate_ablation_launcher_contract(self):
+        launcher = (
+            ROOT
+            / "cluster"
+            / "jean_zay"
+            / "submit_edge_candidate_ablation_600.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("WANDB_RUN_GROUP", launcher)
+        self.assertIn("edge-candidate-ablation-600-seed364505", launcher)
+        for recipe in (
+            "nodece_edgefocal_mm",
+            "nodefocal_edgefocal_mm",
+            "nodece_edgece_all",
+            "nodefocal_edgece_all",
+        ):
+            self.assertIn(recipe, launcher)
+
     def test_launcher_supports_exported_directories_without_git(self):
         launcher = (
             ROOT / "scripts" / "run_finetune_mri_experiment.sh"

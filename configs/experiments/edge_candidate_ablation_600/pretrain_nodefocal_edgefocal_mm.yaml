@@ -1,0 +1,8 @@
+defaults:
+  - pretrain_common.yaml
+  - ../../losses/node_focal_unweighted_immediate.yaml
+  - ../../losses/edge_focal_unweighted_immediate_matched_only.yaml
+
+experiment:
+  name: pretrain_mixed_nodefocal_edgefocal_matchedonly_seed364505
+

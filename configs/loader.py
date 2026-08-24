@@ -439,8 +439,6 @@ def validate_config(config: Mapping[str, Any]) -> None:
     include_unmatched = candidates.get("include_unmatched")
     if not isinstance(include_unmatched, bool):
         raise ConfigError("loss.edge.candidates.include_unmatched must be a boolean")
-    if include_unmatched and classification_name != "focal":
-        raise ConfigError("unmatched hard-negative candidates require focal edge loss")
     threshold = float(candidates.get("unmatched_object_threshold", -1))
     if not 0 <= threshold <= 1:
         raise ConfigError(
