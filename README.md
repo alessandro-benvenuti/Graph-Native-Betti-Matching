@@ -71,7 +71,10 @@ plotting, and baseline loss-based model selection are in place. See
 `docs/MODEL.md`, `docs/LOSSES.md`, `docs/TRAINING.md`, and
 `docs/EVALUATION.md`. The read-only SyntheticMRI source/grid audit is documented
 in `docs/DATA_AUDIT.md`. The first controlled ablation matrix is documented in
-`docs/EXPERIMENTS.md`.
+`docs/EXPERIMENTS.md`. The completed SyntheticMRI dataset findings and proposed
+decisions are recorded in `docs/SYNTHETIC_MRI_DATASET_REPORT.md`.
+The safe, resumable v2 split and patch generator is documented in
+`docs/DATA_GENERATION.md`.
 
 Jean Zay H100 environment setup, the bounded H100 development test, production
 submission, and resume instructions are documented in

@@ -41,6 +41,7 @@ class GridAuditTests(unittest.TestCase):
         cropped = graph.crop(np.asarray(((0.0, 10.0),) * 3))
         self.assertEqual(len(cropped.positions), 2)
         self.assertEqual(cropped.edge_count, 1)
+        np.testing.assert_array_equal(cropped.edges, np.asarray(((0, 1),)))
 
     def test_graph_crop_adds_boundary_node_for_truncated_edge(self):
         graph = SourceGraph(
@@ -61,6 +62,7 @@ class GridAuditTests(unittest.TestCase):
         self.assertEqual(len(cropped.positions), 2)
         self.assertEqual(cropped.edge_count, 1)
         np.testing.assert_array_equal(cropped.positions[-1], np.asarray((8.0, 2.0, 2.0)))
+        np.testing.assert_array_equal(cropped.edges, np.asarray(((1, 0),)))
 
     def test_graph_crop_adds_segment_when_both_endpoints_are_outside(self):
         graph = SourceGraph(
@@ -85,6 +87,7 @@ class GridAuditTests(unittest.TestCase):
         self.assertEqual(cropped.edge_count, 1)
         np.testing.assert_array_equal(cropped.positions[0], np.asarray((1.0, 2.0, 2.0)))
         np.testing.assert_array_equal(cropped.positions[1], np.asarray((8.0, 2.0, 2.0)))
+        np.testing.assert_array_equal(cropped.edges, np.asarray(((0, 1),)))
 
     def test_inherited_rejection_priority(self):
         common = dict(

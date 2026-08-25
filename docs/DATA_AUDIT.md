@@ -1,5 +1,8 @@
 # SyntheticMRI candidate-grid audit
 
+The completed results, interpretation, and questions for supervision are
+recorded in [`SYNTHETIC_MRI_DATASET_REPORT.md`](SYNTHETIC_MRI_DATASET_REPORT.md).
+
 `scripts/audit_synthetic_mri_grid.py` reads the original SyntheticMRI
 `raw/`, `seg/`, `graphs/`, and split CSV without modifying them. It writes
 only reports and never creates image or graph patches.

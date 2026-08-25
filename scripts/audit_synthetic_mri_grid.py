@@ -134,7 +134,11 @@ class CenterlineEdge:
 @dataclass(frozen=True)
 class CroppedGraph:
     positions: np.ndarray
-    edge_count: int
+    edges: np.ndarray
+
+    @property
+    def edge_count(self) -> int:
+        return int(len(self.edges))
 
 
 class SourceGraph:
@@ -250,13 +254,20 @@ class SourceGraph:
             ).all(axis=1)
             kept_ids = set(self.node_ids[inside_mask].tolist())
             positions = [position.copy() for position in self.node_positions[inside_mask]]
+            kept_indices = {
+                int(node_id): index
+                for index, node_id in enumerate(self.node_ids[inside_mask].tolist())
+            }
         else:
             kept_ids = set()
             positions = []
+            kept_indices = {}
 
-        edge_count = sum(
-            int(left in kept_ids and right in kept_ids) for left, right in self.edges
-        )
+        edges = [
+            (kept_indices[left], kept_indices[right])
+            for left, right in self.edges
+            if left in kept_ids and right in kept_ids
+        ]
 
         for edge in self.centerlines:
             node1_inside = edge.node1 in kept_ids
@@ -264,20 +275,24 @@ class SourceGraph:
             if node1_inside and not node2_inside:
                 boundary = self._first_exit(edge.positions, bounds)
                 if boundary is not None:
+                    boundary_index = len(positions)
                     positions.append(boundary.copy())
-                    edge_count += 1
+                    edges.append((boundary_index, kept_indices[edge.node1]))
             elif node2_inside and not node1_inside:
                 boundary = self._first_exit(tuple(reversed(edge.positions)), bounds)
                 if boundary is not None:
+                    boundary_index = len(positions)
                     positions.append(boundary.copy())
-                    edge_count += 1
+                    edges.append((boundary_index, kept_indices[edge.node2]))
             elif not node1_inside and not node2_inside:
                 for start, end in self._inside_segments(edge.positions, bounds):
+                    start_index = len(positions)
                     positions.extend((start.copy(), end.copy()))
-                    edge_count += 1
+                    edges.append((start_index, start_index + 1))
 
         array = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
-        return CroppedGraph(positions=array, edge_count=int(edge_count))
+        edge_array = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
+        return CroppedGraph(positions=array, edges=edge_array)
 
 
 def _stem_id(path: Path) -> str:
