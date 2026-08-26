@@ -123,6 +123,8 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if not isinstance(runtime, Mapping):
         raise ConfigError("runtime must be a mapping")
     _non_negative_int(runtime.get("workers"), "runtime.workers")
+    if not isinstance(runtime.get("distributed", False), bool):
+        raise ConfigError("runtime.distributed must be a boolean")
 
     tracking = config.get("tracking")
     if not isinstance(tracking, Mapping):
@@ -160,6 +162,10 @@ def validate_config(config: Mapping[str, Any]) -> None:
     for index, size in enumerate(image_size):
         _positive_int(size, f"data.image_size[{index}]")
     _positive_int(data.get("batch_size"), "data.batch_size")
+    if "validation_batch_size" in data:
+        _positive_int(
+            data.get("validation_batch_size"), "data.validation_batch_size"
+        )
 
     model = config.get("model")
     if not isinstance(model, Mapping):
@@ -370,6 +376,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
         checkpoint.get("interval_epochs"),
         "training.checkpoint.interval_epochs",
     )
+    if "latest_interval_epochs" in checkpoint:
+        _positive_int(
+            checkpoint.get("latest_interval_epochs"),
+            "training.checkpoint.latest_interval_epochs",
+        )
 
     loss = config.get("loss")
     if not isinstance(loss, Mapping):

@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Mapping
 
 import torch
+import torch.distributed as dist
 
-from .checkpoint import save_training_checkpoint
+from .checkpoint import capture_runtime_state, save_training_checkpoint
 from .evaluation import evaluate_model
 
 
@@ -108,8 +109,13 @@ class Trainer:
         device,
         tracker=None,
         metric_loader=None,
+        *,
+        evaluation_model=None,
+        rank: int = 0,
+        world_size: int = 1,
     ):
         self.model = model
+        self.evaluation_model = evaluation_model or model
         self.criterion = criterion
         self.validation_criterion = validation_criterion
         self.optimizer = optimizer
@@ -120,8 +126,55 @@ class Trainer:
         self.device = torch.device(device)
         self.tracker = tracker
         self.metric_loader = metric_loader
+        self.rank = int(rank)
+        self.world_size = int(world_size)
 
-    def fit(self, start_epoch=0, start_iteration=0):
+    @property
+    def is_primary(self):
+        return self.rank == 0
+
+    def _distributed(self):
+        return self.world_size > 1 and dist.is_initialized()
+
+    def _reduce_epoch_totals(self, sums, batches):
+        if not self._distributed():
+            return sums, batches
+        names = sorted(sums)
+        values = torch.tensor(
+            [*(sums[name] for name in names), float(batches)],
+            dtype=torch.float64,
+            device=self.device,
+        )
+        dist.all_reduce(values, op=dist.ReduceOp.SUM)
+        return (
+            {name: float(values[index].item()) for index, name in enumerate(names)},
+            int(values[-1].item()),
+        )
+
+    def _save_checkpoints(self, paths, epoch, iteration, trainer_state):
+        if not paths:
+            return
+        generator = getattr(self.train_loader, "generator", None)
+        local_state = capture_runtime_state(generator)
+        if self._distributed():
+            gathered = [None] * self.world_size if self.is_primary else None
+            dist.gather_object(local_state, gathered, dst=0)
+        else:
+            gathered = [local_state]
+        if self.is_primary:
+            for path in paths:
+                save_training_checkpoint(
+                    path,
+                    self.evaluation_model,
+                    self.optimizer,
+                    self.scheduler,
+                    epoch,
+                    iteration,
+                    runtime_states=gathered,
+                    trainer_state=trainer_state,
+                )
+
+    def fit(self, start_epoch=0, start_iteration=0, trainer_state=None):
         epochs = int(self.config["training"]["epochs"])
         total_iterations = epochs * len(self.train_loader)
         global_iteration = int(start_iteration)
@@ -133,18 +186,27 @@ class Trainer:
         interval = int(
             self.config["training"]["checkpoint"]["interval_epochs"]
         )
+        latest_interval = int(
+            self.config["training"]["checkpoint"].get(
+                "latest_interval_epochs", interval
+            )
+        )
         validation_interval = int(self.config["evaluation"]["interval_epochs"])
         policy = self.config["training"]["checkpoint"]["policy"]
         metric_config = self.config["evaluation"]["training_metrics"]
         metric_enabled = bool(metric_config["enabled"])
-        if metric_enabled and self.metric_loader is None:
+        if metric_enabled and self.metric_loader is None and self.is_primary:
             raise ValueError(
                 "evaluation.training_metrics.enabled requires a metric loader"
             )
         selection_metric = str(metric_config["selection_metric"])
         selection_mode = str(metric_config["selection_mode"])
         save_metric_checkpoint = bool(metric_config["save_best_checkpoint"])
-        best_metric = -float("inf") if selection_mode == "max" else float("inf")
+        trainer_state = dict(trainer_state or {})
+        best_metric = trainer_state.get(
+            "best_metric",
+            -float("inf") if selection_mode == "max" else float("inf"),
+        )
         metric_record_path = output.parent / "best-metric.json"
         if metric_record_path.is_file():
             record = json.loads(metric_record_path.read_text(encoding="utf-8"))
@@ -153,18 +215,12 @@ class Trainer:
                 and record.get("mode") == selection_mode
             ):
                 best_metric = float(record["value"])
-        best_validation = float("inf")
-        if int(start_epoch) > 0 and policy in {"best_only", "interval_and_best"}:
-            resumed_validation = evaluate_loss(
-                self.model,
-                self.validation_criterion,
-                self.validation_loader,
-                self.config,
-                self.device,
-            )
-            best_validation = resumed_validation.get("total", best_validation)
+        best_validation = float(trainer_state.get("best_validation", float("inf")))
 
         for epoch in range(int(start_epoch) + 1, epochs + 1):
+            sampler = getattr(self.train_loader, "sampler", None)
+            if hasattr(sampler, "set_epoch"):
+                sampler.set_epoch(epoch)
             sums = {}
             batches = 0
             for batch in self.train_loader:
@@ -189,7 +245,7 @@ class Trainer:
                         scalar = float(value.detach().cpu())
                         scalars[name] = scalar
                         sums[name] = sums.get(name, 0.0) + scalar
-                if self.tracker is not None:
+                if self.tracker is not None and self.is_primary:
                     self.tracker.log_training(
                         scalars,
                         iteration=global_iteration,
@@ -197,54 +253,54 @@ class Trainer:
                         learning_rate=self.optimizer.param_groups[0]["lr"],
                     )
                 batches += 1
+            sums, batches = self._reduce_epoch_totals(sums, batches)
             means = {name: value / max(1, batches) for name, value in sums.items()}
-            print(
-                "epoch={}/{} total={:.6f} lr={:.8g}".format(
-                    epoch,
-                    epochs,
-                    means.get("total", float("nan")),
-                    self.optimizer.param_groups[0]["lr"],
-                )
-            )
-
-            if epoch % validation_interval == 0 or epoch == epochs:
-                validation = evaluate_loss(
-                    self.model,
-                    self.validation_criterion,
-                    self.validation_loader,
-                    self.config,
-                    self.device,
-                )
+            if self.is_primary:
                 print(
-                    "validation epoch={} total={:.6f}".format(
-                        epoch, validation.get("total", float("nan"))
+                    "epoch={}/{} total={:.6f} lr={:.8g}".format(
+                        epoch,
+                        epochs,
+                        means.get("total", float("nan")),
+                        self.optimizer.param_groups[0]["lr"],
                     )
                 )
-                if self.tracker is not None:
-                    self.tracker.log_validation(
-                        validation,
-                        iteration=global_iteration,
-                        epoch=epoch,
-                    )
-                validation_total = validation.get("total")
-                if (
-                    policy in {"best_only", "interval_and_best"}
-                    and validation_total is not None
-                    and validation_total < best_validation
-                ):
-                    best_validation = validation_total
-                    save_training_checkpoint(
-                        output / "best_checkpoint.pt",
-                        self.model,
-                        self.optimizer,
-                        self.scheduler,
-                        epoch,
-                        global_iteration,
-                    )
 
-                if metric_enabled:
+            save_best_validation = False
+            save_best_metric = False
+            if epoch % validation_interval == 0 or epoch == epochs:
+                if self._distributed():
+                    dist.barrier()
+                if self.is_primary:
+                    validation = evaluate_loss(
+                        self.evaluation_model,
+                        self.validation_criterion,
+                        self.validation_loader,
+                        self.config,
+                        self.device,
+                    )
+                    print(
+                        "validation epoch={} total={:.6f}".format(
+                            epoch, validation.get("total", float("nan"))
+                        )
+                    )
+                    if self.tracker is not None:
+                        self.tracker.log_validation(
+                            validation,
+                            iteration=global_iteration,
+                            epoch=epoch,
+                        )
+                    validation_total = validation.get("total")
+                    if (
+                        policy in {"best_only", "interval_and_best"}
+                        and validation_total is not None
+                        and validation_total < best_validation
+                    ):
+                        best_validation = validation_total
+                        save_best_validation = True
+
+                if metric_enabled and self.is_primary:
                     task_metrics, _ = evaluate_model(
-                        self.model,
+                        self.evaluation_model,
                         self.metric_loader,
                         self.config,
                         self.device,
@@ -304,14 +360,7 @@ class Trainer:
                         if improved:
                             best_metric = selected_value
                             if save_metric_checkpoint:
-                                save_training_checkpoint(
-                                    output / "best_metric_checkpoint.pt",
-                                    self.model,
-                                    self.optimizer,
-                                    self.scheduler,
-                                    epoch,
-                                    global_iteration,
-                                )
+                                save_best_metric = True
                                 metric_record_path.write_text(
                                     json.dumps(
                                         {
@@ -329,15 +378,42 @@ class Trainer:
                                     encoding="utf-8",
                                 )
 
+                if self._distributed():
+                    flags = torch.tensor(
+                        [save_best_validation, save_best_metric],
+                        dtype=torch.uint8,
+                        device=self.device,
+                    )
+                    dist.broadcast(flags, src=0)
+                    save_best_validation, save_best_metric = (
+                        bool(value) for value in flags.tolist()
+                    )
+
+            paths = []
+            if save_best_validation:
+                paths.append(output / "best_checkpoint.pt")
+            if save_best_metric:
+                paths.append(output / "best_metric_checkpoint.pt")
             if policy in {"interval", "interval_and_best"} and (
                 epoch % interval == 0 or epoch == epochs
             ):
-                save_training_checkpoint(
-                    output / "checkpoint_epoch={}.pt".format(epoch),
-                    self.model,
-                    self.optimizer,
-                    self.scheduler,
-                    epoch,
-                    global_iteration,
-                )
+                paths.append(output / "checkpoint_epoch={}.pt".format(epoch))
+            if policy != "none" and (
+                epoch % latest_interval == 0 or epoch == epochs
+            ):
+                paths.append(output / "latest_checkpoint.pt")
+            self._save_checkpoints(
+                paths,
+                epoch,
+                global_iteration,
+                {
+                    "best_validation": best_validation,
+                    "best_metric": best_metric,
+                    "selection_metric": selection_metric,
+                    "selection_mode": selection_mode,
+                    "world_size": self.world_size,
+                },
+            )
+            if self._distributed():
+                dist.barrier()
 __all__ = ["Trainer", "evaluate_loss", "train_step"]

@@ -110,6 +110,8 @@ training:
   checkpoint:
     policy: interval_and_best
     interval_epochs: 5
+    # A replace-in-place full-state checkpoint for interruption recovery.
+    latest_interval_epochs: 1
 
 loss:
   enabled: [boxes, class, cardinality, nodes, edges]

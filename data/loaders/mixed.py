@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import Mapping, Optional, Tuple
 
 import torch
-from torch.utils.data import ConcatDataset, DataLoader, Dataset, WeightedRandomSampler
+from torch.utils.data import (
+    ConcatDataset,
+    DataLoader,
+    Dataset,
+    DistributedSampler,
+    Sampler,
+    WeightedRandomSampler,
+)
 
 from data.loaders.common import image_graph_collate, seed_data_worker
 from data.loaders.plants import build_plants_dataset
@@ -21,6 +28,52 @@ def _supports_keyword(callable_object, keyword: str) -> bool:
         return keyword in inspect.signature(callable_object).parameters
     except (TypeError, ValueError):
         return False
+
+
+class DistributedWeightedSampler(Sampler[int]):
+    """Deterministically shard a global weighted sample across DDP ranks."""
+
+    def __init__(
+        self,
+        weights,
+        num_samples: int,
+        *,
+        num_replicas: int,
+        rank: int,
+        seed: int,
+        replacement: bool = True,
+    ):
+        if num_replicas <= 0 or not 0 <= rank < num_replicas:
+            raise ValueError("invalid distributed sampler rank/world size")
+        self.weights = torch.as_tensor(weights, dtype=torch.double)
+        self.global_num_samples = int(num_samples)
+        self.num_replicas = int(num_replicas)
+        self.rank = int(rank)
+        self.seed = int(seed)
+        self.replacement = bool(replacement)
+        self.epoch = 0
+        self.num_samples = (
+            self.global_num_samples + self.num_replicas - 1
+        ) // self.num_replicas
+        self.total_size = self.num_samples * self.num_replicas
+
+    def __iter__(self):
+        generator = torch.Generator().manual_seed(self.seed + self.epoch)
+        indices = torch.multinomial(
+            self.weights,
+            self.global_num_samples,
+            self.replacement,
+            generator=generator,
+        ).tolist()
+        if len(indices) < self.total_size:
+            indices.extend(indices[: self.total_size - len(indices)])
+        return iter(indices[self.rank : self.total_size : self.num_replicas])
+
+    def __len__(self):
+        return self.num_samples
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
 
 
 def compose_source_target(
@@ -152,30 +205,55 @@ def build_datasets(config: Mapping):
     return train_dataset, validation_dataset, sampler
 
 
-def build_data_loaders(config: Mapping):
+def build_data_loaders(config: Mapping, *, rank: int = 0, world_size: int = 1):
     """Construct reproducibly seeded PyTorch train and validation loaders."""
 
     train_dataset, validation_dataset, sampler = build_datasets(config)
     data = config["data"]
     runtime = config["runtime"]
     seed = int(config["experiment"]["seed"])
-    train_generator = torch.Generator().manual_seed(seed)
+    train_generator = torch.Generator().manual_seed(seed + rank)
     validation_generator = torch.Generator().manual_seed(seed + 1)
     common = dict(
-        batch_size=int(data["batch_size"]),
         num_workers=int(runtime["workers"]),
         pin_memory=bool(runtime["pin_memory"]),
         collate_fn=image_graph_collate,
         worker_init_fn=seed_data_worker,
     )
+    if world_size > 1:
+        if sampler is None:
+            sampler = DistributedSampler(
+                train_dataset,
+                num_replicas=world_size,
+                rank=rank,
+                shuffle=True,
+                seed=seed,
+            )
+        else:
+            sampler = DistributedWeightedSampler(
+                sampler.weights,
+                sampler.num_samples,
+                num_replicas=world_size,
+                rank=rank,
+                seed=seed,
+                replacement=sampler.replacement,
+            )
     train_options = dict(shuffle=sampler is None, sampler=sampler)
     validation_options = dict(shuffle=False)
     if _supports_keyword(DataLoader.__init__, "generator"):
         train_options["generator"] = train_generator
         validation_options["generator"] = validation_generator
-    train_loader = DataLoader(train_dataset, **train_options, **common)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=int(data["batch_size"]),
+        **train_options,
+        **common,
+    )
     validation_loader = DataLoader(
-        validation_dataset, **validation_options, **common
+        validation_dataset,
+        batch_size=int(data.get("validation_batch_size", data["batch_size"])),
+        **validation_options,
+        **common,
     )
     return train_loader, validation_loader
 
@@ -214,7 +292,7 @@ def build_evaluation_loader(
     data = config["data"]
     runtime = config["runtime"]
     options = dict(
-        batch_size=int(data["batch_size"]),
+        batch_size=int(data.get("validation_batch_size", data["batch_size"])),
         shuffle=False,
         num_workers=int(runtime["workers"]),
         pin_memory=bool(runtime["pin_memory"]),
@@ -229,6 +307,7 @@ def build_evaluation_loader(
 
 
 __all__ = [
+    "DistributedWeightedSampler",
     "build_data_loaders",
     "build_datasets",
     "build_evaluation_loader",

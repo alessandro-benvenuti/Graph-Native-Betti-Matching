@@ -1,0 +1,42 @@
+defaults:
+  - ../../pretrain_mixed.yaml
+  - ../../losses/node_focal_unweighted_immediate.yaml
+
+experiment:
+  name: pretrain_full_mixed_node_focal_seed364505
+
+data:
+  # Per-GPU batch. Four GPUs give the historical global batch of 32.
+  batch_size: 8
+  validation_batch_size: 32
+  mixed_sampling:
+    # Traverse every Plants and MRI sample once per epoch. Weighted replacement
+    # sampling would not guarantee coverage of the 91k MRI patches.
+    balance_source_target: false
+  datasets:
+    plants:
+      train_samples: null
+      validation_samples: null
+    synthetic_mri:
+      train_samples: null
+      validation_samples: null
+
+training:
+  epochs: 50
+  checkpoint:
+    policy: best_only
+    interval_epochs: 50
+    latest_interval_epochs: 2
+
+evaluation:
+  interval_epochs: 5
+  training_metrics:
+    enabled: true
+    dataset: synthetic_mri
+    max_samples: null
+    selection_metric: edge_mAP
+    selection_mode: max
+    save_best_checkpoint: true
+
+tracking:
+  tags: [gnbm, full-data, mixed-pretrain, node-focal, ddp]

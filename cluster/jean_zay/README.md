@@ -5,7 +5,7 @@ This directory targets Jean Zay's dedicated H100 partition:
 - `arch/h100` architecture modules;
 - PyTorch 2.3.1 supplied by Jean Zay;
 - the CUDA 12 runtime supplied with that PyTorch module;
-- one H100 80 GB GPU per task;
+- one to eight H100 GPUs through torchrun/DDP;
 - project account `vnc@h100` on partition `gpu_p6`.
 
 The virtual environment lives outside Git at
@@ -121,20 +121,44 @@ export GNBM_QOS=qos_gpu_h100-t4
 export GNBM_WALLTIME=48:00:00
 ```
 
-then invoke the same submission command. Long jobs should use a configuration
-with interval checkpoints; `best_only` is not interruption-safe.
+then invoke the same submission command. Long jobs should configure
+`training.checkpoint.latest_interval_epochs`. This writes an atomic,
+replace-in-place `latest_checkpoint.pt` independently of best-model selection.
+
+Choose the total GPU count before submission. Four GPUs use one node; eight
+GPUs use two four-GPU nodes:
+
+```bash
+export GNBM_GPUS=4
+```
+
+`data.batch_size` and `GNBM_BATCH_SIZE` are per GPU. When comparing against a
+global batch of 32, use 8 per GPU on four GPUs or 4 per GPU on eight GPUs.
 
 Resume a complete project checkpoint in a new job:
 
 ```bash
 unset GNBM_INITIAL_WEIGHTS
-export GNBM_RESUME_CHECKPOINT="$GNBM_OUTPUT_DIR/RUN_NAME/models/checkpoint_epoch=EPOCH.pt"
+export GNBM_RESUME_CHECKPOINT="$GNBM_OUTPUT_DIR/RUN_NAME/models/latest_checkpoint.pt"
 bash cluster/jean_zay/submit_train.sh CONFIG RUN_NAME
 ```
 
 `--resume` restores model, optimizer, scheduler, epoch, and iteration. The
 original `checkpoint_epoch=280.pt` is initialization only and must be supplied
 through `GNBM_INITIAL_WEIGHTS`.
+
+Alternatively, reuse the same run name and let the launcher select its latest
+checkpoint:
+
+```bash
+unset GNBM_INITIAL_WEIGHTS GNBM_RESUME_CHECKPOINT
+export GNBM_AUTO_RESUME=1
+bash cluster/jean_zay/submit_train.sh CONFIG RUN_NAME
+```
+
+New checkpoints also preserve per-rank Python, NumPy, PyTorch, CUDA, and loader
+generator states plus best-metric selection state. Resume with the same GPU
+count and global batch size for the closest continuation.
 
 The run directory stores `wandb-run.json` beside the resolved configuration.
 Reusing the same run name with `GNBM_RESUME_CHECKPOINT` reuses that W&B run ID,

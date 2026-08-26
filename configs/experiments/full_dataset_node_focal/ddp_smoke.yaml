@@ -1,0 +1,34 @@
+defaults:
+  - pretrain.yaml
+
+experiment:
+  name: full_dataset_node_focal_ddp_smoke
+
+runtime:
+  workers: 0
+
+tracking:
+  enabled: false
+
+data:
+  batch_size: 2
+  validation_batch_size: 2
+  datasets:
+    plants:
+      train_samples: 8
+      validation_samples: 2
+    synthetic_mri:
+      train_samples: 8
+      validation_samples: 2
+
+training:
+  epochs: 1
+  checkpoint:
+    policy: best_only
+    interval_epochs: 1
+    latest_interval_epochs: 1
+
+evaluation:
+  interval_epochs: 1
+  training_metrics:
+    max_samples: 2

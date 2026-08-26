@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit a single-GPU H100 training segment.
+# Submit a one- or multi-GPU H100 training segment.
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
@@ -44,6 +44,23 @@ fi
 
 qos="${GNBM_QOS:-qos_gpu_h100-t3}"
 walltime="${GNBM_WALLTIME:-20:00:00}"
+gpus="${GNBM_GPUS:-1}"
+case "$gpus" in
+  1|2|4|8) ;;
+  *) echo "GNBM_GPUS must be one of 1, 2, 4, or 8." >&2; exit 2 ;;
+esac
+# Jean Zay H100 nodes expose four GPUs. Eight-GPU jobs span two nodes.
+if (( gpus > 4 )); then
+  nodes=2
+  gpus_per_node=4
+else
+  nodes=1
+  gpus_per_node="$gpus"
+fi
+if (( gpus % nodes != 0 )); then
+  echo "GNBM_GPUS must divide evenly across the requested nodes." >&2
+  exit 2
+fi
 case "$qos" in
   qos_gpu_h100-t3|qos_gpu_h100-t4) ;;
   *) echo "GNBM_QOS must be qos_gpu_h100-t3 or qos_gpu_h100-t4." >&2; exit 2 ;;
@@ -70,12 +87,19 @@ fi
 export GNBM_REPO_DIR="$repo_dir"
 export GNBM_CONFIG="$config"
 export GNBM_RUN_NAME="$run_name"
+export GNBM_GPUS="$gpus"
+export GNBM_GPUS_PER_NODE="$gpus_per_node"
 
 log_dir="$WORK/logs/graph-native-betti-matching"
 mkdir -p "$log_dir" "$GNBM_OUTPUT_DIR"
 
 submission="$(sbatch \
   --chdir="$repo_dir" \
+  --nodes="$nodes" \
+  --ntasks="$nodes" \
+  --ntasks-per-node=1 \
+  --gres="gpu:$gpus_per_node" \
+  --cpus-per-task="$((10 * gpus_per_node))" \
   --qos="$qos" \
   --time="$walltime" \
   --output="$log_dir/%x-%j.out" \
@@ -86,3 +110,4 @@ echo "$submission"
 job_id="${submission##* }"
 echo "Queue: squeue -j $job_id"
 echo "Log:   $log_dir/gnbm-train-$job_id.out"
+echo "GPUs:  $gpus ($nodes node(s), $gpus_per_node GPU(s)/node)"

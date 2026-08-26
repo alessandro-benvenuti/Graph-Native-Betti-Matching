@@ -14,6 +14,7 @@ from torch.utils.data import Dataset
 from configs import ConfigError, load_config
 from data.augmentations import coordinates_to_voxel_indices, scale_intensity
 from data.loaders import (
+    DistributedWeightedSampler,
     PlantsDataset,
     SamplePaths,
     SyntheticMRIDataset,
@@ -107,6 +108,33 @@ class DataLoaderCompatibilityTests(unittest.TestCase):
 
         self.assertFalse(_supports_keyword(LegacyLoader.__init__, "generator"))
         self.assertTrue(_supports_keyword(ModernLoader.__init__, "generator"))
+
+    def test_distributed_weighted_sampler_shards_one_global_draw(self) -> None:
+        samplers = [
+            DistributedWeightedSampler(
+                [1.0, 2.0, 3.0, 4.0],
+                7,
+                num_replicas=2,
+                rank=rank,
+                seed=19,
+            )
+            for rank in range(2)
+        ]
+        shards = [list(sampler) for sampler in samplers]
+        self.assertEqual([len(shard) for shard in shards], [4, 4])
+        interleaved = [value for pair in zip(*shards) for value in pair]
+
+        reference = torch.multinomial(
+            torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.double),
+            7,
+            replacement=True,
+            generator=torch.Generator().manual_seed(19),
+        ).tolist()
+        self.assertEqual(interleaved[:7], reference)
+
+        for sampler in samplers:
+            sampler.set_epoch(1)
+        self.assertNotEqual(shards, [list(sampler) for sampler in samplers])
 
 
 class DiscoveryTests(unittest.TestCase):

@@ -339,6 +339,11 @@ class GraphCriterion(nn.Module):
             if labels.numel()
             else tokens.sum() * 0.0
         )
+        # Keep relation-head parameters in every DDP backward graph, including
+        # the rare batch where no graph contains a valid node pair.
+        matched_loss = matched_loss + sum(
+            parameter.sum() * 0.0 for parameter in self.relation_embed.parameters()
+        )
 
         hard_chunks = self._unmatched_hard_negatives(tokens, node_logits, assignments)
         if not hard_chunks:

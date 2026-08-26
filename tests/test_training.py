@@ -179,7 +179,7 @@ class TrainingTests(unittest.TestCase):
         self.assertEqual(len(tracker.metrics), 1)
         self.assertIn("edge_mAP", tracker.metrics[0][0])
 
-    def test_best_only_keeps_exactly_one_checkpoint(self):
+    def test_best_only_keeps_best_and_replaceable_latest_checkpoint(self):
         config = _config()
         config["training"]["epochs"] = 2
         config["training"]["warmup_epochs"] = 0
@@ -209,7 +209,10 @@ class TrainingTests(unittest.TestCase):
                 (Path(directory) / "best-only-test" / "models").glob("*.pt")
             )
 
-        self.assertEqual([path.name for path in checkpoints], ["best_checkpoint.pt"])
+        self.assertEqual(
+            sorted(path.name for path in checkpoints),
+            ["best_checkpoint.pt", "latest_checkpoint.pt"],
+        )
 
     def test_none_policy_writes_no_checkpoint(self):
         config = _config()

@@ -225,6 +225,24 @@ class ExperimentConfigTests(unittest.TestCase):
         self.assertNotIn("WANDB_GROUP=", launcher)
         self.assertIn("focal-matrix-600-seed364505", launcher)
 
+    def test_full_dataset_node_focal_pipeline_has_no_sample_caps(self):
+        paths = ROOT / "configs" / "experiments" / "full_dataset_node_focal"
+        pretrain = load_config(paths / "pretrain.yaml", environment=ENVIRONMENT)
+        finetune = load_config(paths / "finetune.yaml", environment=ENVIRONMENT)
+        self.assertFalse(pretrain["data"]["mixed_sampling"]["balance_source_target"])
+        for dataset in pretrain["data"]["datasets"].values():
+            self.assertIsNone(dataset["train_samples"])
+            self.assertIsNone(dataset["validation_samples"])
+        self.assertIsNone(
+            finetune["data"]["datasets"]["synthetic_mri"]["train_samples"]
+        )
+        self.assertEqual(pretrain["training"]["epochs"], 50)
+        self.assertEqual(finetune["training"]["epochs"], 100)
+        for config in (pretrain, finetune):
+            self.assertEqual(config["loss"]["node"]["classification"]["name"], "focal")
+            self.assertEqual(config["loss"]["edge"]["classification"]["name"], "cross_entropy")
+            self.assertEqual(config["training"]["checkpoint"]["latest_interval_epochs"], 2)
+
     def test_edge_candidate_ablation_completes_missing_recipe_cells(self):
         paths = ROOT / "configs" / "experiments" / "edge_candidate_ablation_600"
         expectations = {

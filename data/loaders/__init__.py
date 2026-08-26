@@ -3,6 +3,7 @@
 from data.loaders.common import DatasetSample, SamplePaths, image_graph_collate
 from data.loaders.discovery import discover_plants, discover_synthetic_mri
 from data.loaders.mixed import (
+    DistributedWeightedSampler,
     build_data_loaders,
     build_datasets,
     build_evaluation_loader,
@@ -13,6 +14,7 @@ from data.loaders.synthetic_mri import SyntheticMRIDataset, build_synthetic_mri_
 
 __all__ = [
     "DatasetSample",
+    "DistributedWeightedSampler",
     "PlantsDataset",
     "SamplePaths",
     "SyntheticMRIDataset",

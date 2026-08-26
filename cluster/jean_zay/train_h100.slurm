@@ -33,14 +33,35 @@ if [[ -n "${GNBM_WORKERS:-}" ]]; then
   args+=(--workers "$GNBM_WORKERS")
 fi
 
+latest_checkpoint="$GNBM_OUTPUT_DIR/$GNBM_RUN_NAME/models/latest_checkpoint.pt"
 if [[ -n "${GNBM_RESUME_CHECKPOINT:-}" ]]; then
   args+=(--resume "$GNBM_RESUME_CHECKPOINT")
+elif [[ "${GNBM_AUTO_RESUME:-0}" == "1" && -f "$latest_checkpoint" ]]; then
+  echo "Auto-resuming $latest_checkpoint"
+  args+=(--resume "$latest_checkpoint")
 elif [[ -n "${GNBM_INITIAL_WEIGHTS:-}" ]]; then
   args+=(--initial-weights "$GNBM_INITIAL_WEIGHTS")
 fi
 
-echo "job=$SLURM_JOB_ID host=$(hostname)"
+gpus="${GNBM_GPUS:-1}"
+gpus_per_node="${GNBM_GPUS_PER_NODE:-$gpus}"
+echo "job=$SLURM_JOB_ID host=$(hostname) nodes=$SLURM_NNODES gpus=$gpus"
 echo "config=$GNBM_CONFIG run=$GNBM_RUN_NAME output=$GNBM_OUTPUT_DIR"
 echo "wandb_entity=${WANDB_ENTITY:-default} wandb_project=${WANDB_PROJECT:-focal-loss} wandb_mode=${WANDB_MODE:-online}"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
-srun --ntasks=1 python -u train.py "${args[@]}"
+if (( gpus == 1 )); then
+  srun --ntasks=1 python -u train.py "${args[@]}"
+else
+  master_addr="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
+  export MASTER_ADDR="$master_addr"
+  export MASTER_PORT="${GNBM_MASTER_PORT:-$((20000 + SLURM_JOB_ID % 10000))}"
+  export GNBM_TRAIN_ARGS="$(printf ' %q' "${args[@]}")"
+  srun --nodes="$SLURM_NNODES" --ntasks="$SLURM_NNODES" --ntasks-per-node=1 \
+    bash -c 'torchrun \
+      --nnodes="$SLURM_NNODES" \
+      --nproc_per_node="$GNBM_GPUS_PER_NODE" \
+      --node_rank="$SLURM_NODEID" \
+      --rdzv_backend=c10d \
+      --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+      train.py --distributed $GNBM_TRAIN_ARGS'
+fi
