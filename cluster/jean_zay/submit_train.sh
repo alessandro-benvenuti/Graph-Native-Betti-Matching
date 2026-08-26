@@ -56,6 +56,11 @@ for split in train val; do
     fi
   done
 done
+echo "Running configuration and dataset preflight on the login node..."
+(
+  cd "$repo_dir"
+  "$python_bin" cluster/jean_zay/preflight_training.py --config "$config"
+)
 if [[ -n "${GNBM_INITIAL_WEIGHTS:-}" && ! -f "$GNBM_INITIAL_WEIGHTS" ]]; then
   echo "Initial checkpoint does not exist: $GNBM_INITIAL_WEIGHTS" >&2
   exit 2

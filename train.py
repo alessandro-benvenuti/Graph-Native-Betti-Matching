@@ -25,7 +25,12 @@ from training import (
     build_scheduler,
 )
 from training.checkpoint import load_training_checkpoint
-from training.distributed import barrier, cleanup_distributed, initialize_distributed
+from training.distributed import (
+    barrier,
+    cleanup_distributed,
+    initialize_distributed,
+    prepare_model_for_distributed,
+)
 from training.tracking import build_tracker
 
 
@@ -115,7 +120,7 @@ def main():
     if world_size > 1:
         # Per-rank batches become small when the fixed global batch is split.
         # Synchronizing BatchNorm preserves global-batch statistics.
-        raw_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(raw_model)
+        raw_model = prepare_model_for_distributed(raw_model)
     raw_model = raw_model.to(device)
     criterion = build_criterion(config, raw_model).to(device)
     validation_config = copy.deepcopy(config)

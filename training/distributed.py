@@ -8,6 +8,19 @@ import torch
 import torch.distributed as dist
 
 
+def prepare_model_for_distributed(model: torch.nn.Module) -> torch.nn.Module:
+    """Convert BatchNorm safely for one-process-per-GPU DDP execution."""
+
+    model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    # SyncBatchNorm uses custom autograd.  Avoid view/in-place conflicts in
+    # both the local encoder stem and MONAI's nested residual blocks.  This
+    # does not alter model parameters, state-dict keys, or activation values.
+    for module in model.modules():
+        if isinstance(module, torch.nn.ReLU):
+            module.inplace = False
+    return model
+
+
 def initialize_distributed(enabled: bool):
     """Initialize the process group and return ``(rank, world_size, local_rank)``."""
 
@@ -40,4 +53,9 @@ def cleanup_distributed() -> None:
         dist.destroy_process_group()
 
 
-__all__ = ["barrier", "cleanup_distributed", "initialize_distributed"]
+__all__ = [
+    "barrier",
+    "cleanup_distributed",
+    "initialize_distributed",
+    "prepare_model_for_distributed",
+]

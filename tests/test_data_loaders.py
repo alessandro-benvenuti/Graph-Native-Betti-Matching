@@ -97,6 +97,32 @@ class ConfigurationTests(unittest.TestCase):
 
 
 class DataLoaderCompatibilityTests(unittest.TestCase):
+    def test_collation_removes_tensor_subclass_metadata(self) -> None:
+        class MetadataTensor(torch.Tensor):
+            @staticmethod
+            def wrap(value):
+                return torch.Tensor._make_subclass(
+                    MetadataTensor, value, value.requires_grad
+                )
+
+            def as_tensor(self):
+                return self.as_subclass(torch.Tensor)
+
+        image = MetadataTensor.wrap(torch.ones((1, 3, 3, 3)))
+        item = (
+            [image],
+            [image.clone()],
+            [torch.zeros((1, 3))],
+            [torch.empty((0, 2), dtype=torch.long)],
+            [None],
+            [1],
+        )
+
+        images, segmentations, *_ = image_graph_collate([item])
+
+        self.assertIs(type(images), torch.Tensor)
+        self.assertIs(type(segmentations), torch.Tensor)
+
     def test_generator_is_only_passed_to_versions_that_support_it(self) -> None:
         class LegacyLoader:
             def __init__(self, dataset, batch_size=1):
