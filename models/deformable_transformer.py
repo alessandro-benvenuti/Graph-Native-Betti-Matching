@@ -256,6 +256,12 @@ class DeformableTransformerDecoderLayer(nn.Module):
             self.cross_attn2 = nn.MultiheadAttention(d_model, n_heads, dropout=dropout)
             self.dropout12 = nn.Dropout(dropout)
             self.norm12 = nn.LayerNorm(d_model)
+            # The legacy relation-token cross-attention block is intentionally
+            # disabled in forward() below.  Preserve its tensors and names for
+            # strict checkpoint compatibility, but do not present permanently
+            # unused parameters to DDP or the optimizer.
+            self.cross_attn2.requires_grad_(False)
+            self.norm12.requires_grad_(False)
         else:
             self.cross_attn = MSDeformAttn(
                 d_model, n_levels, n_heads, n_points, use_cuda_extension

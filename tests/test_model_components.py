@@ -205,6 +205,32 @@ class RelationFormerHeadTests(unittest.TestCase):
             any("domain_discriminator" in key for key in model.state_dict())
         )
 
+    def test_disabled_relation_cross_attention_is_checkpointed_but_frozen(self) -> None:
+        transformer = DeformableTransformer(
+            d_model=48,
+            nhead=6,
+            num_encoder_layers=1,
+            num_decoder_layers=2,
+            dim_feedforward=64,
+            dropout=0.0,
+            num_feature_levels=1,
+            dec_n_points=2,
+            enc_n_points=2,
+            rln_attn=True,
+            use_cuda_extension=False,
+        )
+
+        state_names = tuple(transformer.state_dict())
+        self.assertTrue(any("cross_attn2" in name for name in state_names))
+        self.assertTrue(any("norm12" in name for name in state_names))
+        dormant = {
+            name: parameter
+            for name, parameter in transformer.named_parameters()
+            if "cross_attn2" in name or "norm12" in name
+        }
+        self.assertEqual(len(dormant), 12)
+        self.assertTrue(all(not parameter.requires_grad for parameter in dormant.values()))
+
 
 @unittest.skipUnless(MONAI_AVAILABLE, "MONAI is required for the SE-ResNet model")
 class RelationFormerForwardTests(unittest.TestCase):
