@@ -23,6 +23,11 @@ if [[ ! -f "$repo_dir/$config" && ! -f "$config" ]]; then
   echo "Configuration does not exist: $config" >&2
   exit 2
 fi
+if ! python -c 'import medpy, nibabel, pyvista' >/dev/null 2>&1; then
+  echo "The active Jean-Zay environment is missing dataset reader dependencies." >&2
+  echo "Run cluster/jean_zay/setup_environment.sh, then source env.sh again." >&2
+  exit 2
+fi
 if [[ -n "${GNBM_INITIAL_WEIGHTS:-}" && -n "${GNBM_RESUME_CHECKPOINT:-}" ]]; then
   echo "Set only one of GNBM_INITIAL_WEIGHTS and GNBM_RESUME_CHECKPOINT." >&2
   exit 2

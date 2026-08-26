@@ -67,6 +67,7 @@ python - <<'PY'
 import sys
 import torch
 import monai
+import medpy
 import numpy
 import scipy
 import wandb
@@ -77,6 +78,7 @@ print("Python:", sys.version.split()[0])
 print("PyTorch:", torch.__version__)
 print("PyTorch CUDA runtime:", torch.version.cuda)
 print("MONAI:", monai.__version__)
+print("MedPy:", medpy.__version__)
 print("NumPy:", numpy.__version__)
 print("SciPy:", scipy.__version__)
 print("W&B:", wandb.__version__)

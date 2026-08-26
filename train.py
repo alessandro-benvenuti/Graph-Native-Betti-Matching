@@ -218,7 +218,9 @@ def main():
     else:
         if tracker is not None:
             tracker.finish(exit_code=0)
-    finally:
+        # On failure, let process exit tear down NCCL. Destroying the process
+        # group before PyTorch's distributed excepthook runs hides the original
+        # traceback behind "default process group has not been initialized".
         cleanup_distributed()
 
 
