@@ -10,7 +10,13 @@ from torch import nn
 
 from configs import load_config
 from models.matcher import build_matcher
-from training.checkpoint import load_training_checkpoint, save_training_checkpoint
+from training.checkpoint import (
+    alias_training_checkpoint,
+    load_runtime_state,
+    load_training_checkpoint,
+    save_runtime_state,
+    save_training_checkpoint,
+)
 from training.engine import Trainer, train_step
 from training.losses import GraphCriterion
 from training.optim import build_optimizer, build_scheduler
@@ -81,6 +87,22 @@ class RecordingTracker:
 
 
 class TrainingTests(unittest.TestCase):
+    def test_runtime_state_files_and_checkpoint_aliases_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime_path = root / ".runtime_states" / "rank=1.pt"
+            state = {"rank": 1, "rng": torch.arange(4)}
+            save_runtime_state(runtime_path, state)
+            restored = load_runtime_state(runtime_path)
+            self.assertEqual(restored["rank"], 1)
+            self.assertTrue(torch.equal(restored["rng"], state["rng"]))
+
+            checkpoint = root / "best_checkpoint.pt"
+            checkpoint.write_bytes(b"checkpoint-payload")
+            latest = root / "latest_checkpoint.pt"
+            alias_training_checkpoint(checkpoint, latest)
+            self.assertEqual(latest.read_bytes(), checkpoint.read_bytes())
+
     def test_training_step_updates_model_and_scheduler(self):
         config = _config()
         config["training"]["warmup_epochs"] = 0

@@ -10,7 +10,13 @@ from typing import Mapping
 import torch
 import torch.distributed as dist
 
-from .checkpoint import capture_runtime_state, save_training_checkpoint
+from .checkpoint import (
+    alias_training_checkpoint,
+    capture_runtime_state,
+    load_runtime_state,
+    save_runtime_state,
+    save_training_checkpoint,
+)
 from .evaluation import evaluate_model
 
 
@@ -154,25 +160,51 @@ class Trainer:
     def _save_checkpoints(self, paths, epoch, iteration, trainer_state):
         if not paths:
             return
+        paths = list(dict.fromkeys(Path(path) for path in paths))
         generator = getattr(self.train_loader, "generator", None)
         local_state = capture_runtime_state(generator)
         if self._distributed():
-            gathered = [None] * self.world_size if self.is_primary else None
-            dist.gather_object(local_state, gathered, dst=0)
+            # Do not use gather_object with an NCCL process group here.  Object
+            # collectives create an extra CUDA-side communication path and have
+            # proved capable of hanging at the first checkpoint on Jean-Zay.
+            # The run directory is shared by all ranks, so exchange these small
+            # per-rank states through atomic files and keep NCCL for tensors.
+            runtime_directory = paths[0].parent / ".runtime_states"
+            runtime_path = runtime_directory / "rank={}.pt".format(self.rank)
+            save_runtime_state(runtime_path, local_state)
+            dist.barrier()
+            gathered = None
+            if self.is_primary:
+                gathered = [
+                    load_runtime_state(
+                        runtime_directory / "rank={}.pt".format(rank)
+                    )
+                    for rank in range(self.world_size)
+                ]
         else:
             gathered = [local_state]
         if self.is_primary:
-            for path in paths:
-                save_training_checkpoint(
-                    path,
-                    self.evaluation_model,
-                    self.optimizer,
-                    self.scheduler,
-                    epoch,
-                    iteration,
-                    runtime_states=gathered,
-                    trainer_state=trainer_state,
-                )
+            save_training_checkpoint(
+                paths[0],
+                self.evaluation_model,
+                self.optimizer,
+                self.scheduler,
+                epoch,
+                iteration,
+                runtime_states=gathered,
+                trainer_state=trainer_state,
+            )
+            for path in paths[1:]:
+                alias_training_checkpoint(paths[0], path)
+            if self._distributed():
+                for rank in range(self.world_size):
+                    (runtime_directory / "rank={}.pt".format(rank)).unlink(
+                        missing_ok=True
+                    )
+                try:
+                    runtime_directory.rmdir()
+                except OSError:
+                    pass
 
     def fit(self, start_epoch=0, start_iteration=0, trainer_state=None):
         epochs = int(self.config["training"]["epochs"])

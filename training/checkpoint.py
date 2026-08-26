@@ -6,6 +6,7 @@ import inspect
 import os
 from pathlib import Path
 import random
+import shutil
 from typing import Mapping
 
 import numpy as np
@@ -64,6 +65,43 @@ def save_training_checkpoint(
     os.replace(temporary, path)
 
 
+def save_runtime_state(path, state):
+    """Atomically persist one rank's small RNG/runtime state."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    torch.save(state, str(temporary))
+    os.replace(temporary, path)
+
+
+def load_runtime_state(path):
+    options = {"map_location": "cpu"}
+    if "weights_only" in inspect.signature(torch.load).parameters:
+        options["weights_only"] = False
+    return torch.load(str(Path(path)), **options)
+
+
+def alias_training_checkpoint(source, destination):
+    """Atomically make another name for an identical checkpoint payload.
+
+    A hard link avoids serializing and storing the same multi-gigabyte payload
+    several times when best/latest/interval checkpoints coincide.  The copy
+    fallback covers filesystems that do not support hard links.
+    """
+    source = Path(source)
+    destination = Path(destination)
+    if source == destination:
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".tmp")
+    temporary.unlink(missing_ok=True)
+    try:
+        os.link(source, temporary)
+    except OSError:
+        shutil.copy2(source, temporary)
+    os.replace(temporary, destination)
+
+
 def load_training_checkpoint(
     path,
     model,
@@ -100,8 +138,11 @@ def load_training_checkpoint(
 
 
 __all__ = [
+    "alias_training_checkpoint",
     "capture_runtime_state",
+    "load_runtime_state",
     "load_training_checkpoint",
     "restore_runtime_state",
+    "save_runtime_state",
     "save_training_checkpoint",
 ]
