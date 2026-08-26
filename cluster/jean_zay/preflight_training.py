@@ -4,6 +4,15 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
+import sys
+
+# Executing this file by path sets sys.path[0] to cluster/jean_zay rather than
+# the repository root.  Resolve imports independently of the caller's cwd so
+# both manual preflight and submit_train.sh behave identically.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 import torch
 
