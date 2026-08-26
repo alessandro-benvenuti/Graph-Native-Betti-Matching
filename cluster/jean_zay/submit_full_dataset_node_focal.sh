@@ -32,8 +32,8 @@ done
 
 gpus="${GNBM_GPUS:-4}"
 case "$gpus" in
-  1|2|4|8) ;;
-  *) echo "GNBM_GPUS must be one of 1, 2, 4, or 8." >&2; exit 2 ;;
+  1|2|4) ;;
+  *) echo "GNBM_GPUS must be 1, 2, or 4 (one H100 node)." >&2; exit 2 ;;
 esac
 qos="${GNBM_QOS:-qos_gpu_h100-t4}"
 walltime="${GNBM_WALLTIME:-48:00:00}"
@@ -78,12 +78,12 @@ finetune_submission="$(sbatch \
   --time="$walltime" \
   --output="$log_dir/%x-%j.out" \
   --error="$log_dir/%x-%j.err" \
-  --nodes="$((gpus > 4 ? 2 : 1))" \
-  --ntasks="$((gpus > 4 ? 2 : 1))" \
+  --nodes=1 \
+  --ntasks=1 \
   --ntasks-per-node=1 \
-  --gres="gpu:$((gpus > 4 ? 4 : gpus))" \
-  --cpus-per-task="$((10 * (gpus > 4 ? 4 : gpus)))" \
-  --export=ALL,GNBM_CONFIG="$finetune_config",GNBM_RUN_NAME="$finetune_run",GNBM_GPUS="$gpus",GNBM_GPUS_PER_NODE="$((gpus > 4 ? 4 : gpus))" \
+  --gres="gpu:$gpus" \
+  --cpus-per-task="$((10 * gpus))" \
+  --export=ALL,GNBM_CONFIG="$finetune_config",GNBM_RUN_NAME="$finetune_run",GNBM_GPUS="$gpus",GNBM_GPUS_PER_NODE="$gpus" \
   "$repo_dir/cluster/jean_zay/train_h100.slurm")"
 
 printf '%s\n' "$pretrain_submission"

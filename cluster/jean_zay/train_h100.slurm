@@ -50,22 +50,20 @@ echo "config=$GNBM_CONFIG run=$GNBM_RUN_NAME output=$GNBM_OUTPUT_DIR"
 echo "wandb_entity=${WANDB_ENTITY:-default} wandb_project=${WANDB_PROJECT:-focal-loss} wandb_mode=${WANDB_MODE:-online}"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 if (( gpus == 1 )); then
-  # PyTorch uses c10d/NCCL, not Slurm's PMIx/OpenMPI integration. Explicitly
-  # disable the MPI plugin; Jean Zay otherwise attempts MPI_Init_thread before
-  # Python starts and aborts the step on a NULL communicator.
-  srun --mpi=none --ntasks=1 python -u train.py "${args[@]}"
+  # The batch shell already owns the allocated GPU. Avoid wrapping Python in
+  # srun: Jean Zay's OpenMPI stack interprets the resulting step metadata as a
+  # direct MPI launch even though this project uses no MPI.
+  python -u train.py "${args[@]}"
 else
-  master_addr="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
-  export MASTER_ADDR="$master_addr"
-  export MASTER_PORT="${GNBM_MASTER_PORT:-$((20000 + SLURM_JOB_ID % 10000))}"
-  export GNBM_TRAIN_ARGS="$(printf ' %q' "${args[@]}")"
-  srun --mpi=none \
-    --nodes="$SLURM_NNODES" --ntasks="$SLURM_NNODES" --ntasks-per-node=1 \
-    bash -c 'torchrun \
-      --nnodes="$SLURM_NNODES" \
-      --nproc_per_node="$GNBM_GPUS_PER_NODE" \
-      --node_rank="$SLURM_NODEID" \
-      --rdzv_backend=c10d \
-      --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-      train.py --distributed $GNBM_TRAIN_ARGS'
+  if (( SLURM_NNODES != 1 )); then
+    echo "This launcher currently supports multi-GPU training on one node only." >&2
+    exit 2
+  fi
+  # torchrun creates one process per visible H100 and uses c10d/NCCL. Running
+  # directly from the batch shell avoids all PMIx/OpenMPI initialization.
+  torchrun \
+    --standalone \
+    --nnodes=1 \
+    --nproc_per_node="$gpus" \
+    train.py --distributed "${args[@]}"
 fi

@@ -5,7 +5,7 @@ This directory targets Jean Zay's dedicated H100 partition:
 - `arch/h100` architecture modules;
 - PyTorch 2.3.1 supplied by Jean Zay;
 - the CUDA 12 runtime supplied with that PyTorch module;
-- one to eight H100 GPUs through torchrun/DDP;
+- one to four H100 GPUs on one node through torchrun/DDP;
 - project account `vnc@h100` on partition `gpu_p6`.
 
 The virtual environment lives outside Git at
@@ -125,15 +125,15 @@ then invoke the same submission command. Long jobs should configure
 `training.checkpoint.latest_interval_epochs`. This writes an atomic,
 replace-in-place `latest_checkpoint.pt` independently of best-model selection.
 
-Choose the total GPU count before submission. Four GPUs use one node; eight
-GPUs use two four-GPU nodes:
+Choose the total GPU count before submission. The validated launcher supports
+one, two, or four GPUs on one node:
 
 ```bash
 export GNBM_GPUS=4
 ```
 
 `data.batch_size` and `GNBM_BATCH_SIZE` are per GPU. When comparing against a
-global batch of 32, use 8 per GPU on four GPUs or 4 per GPU on eight GPUs.
+global batch of 32, use 8 per GPU on four GPUs.
 
 Resume a complete project checkpoint in a new job:
 
@@ -182,3 +182,7 @@ official QoS for code development and execution tests. It still consumes the
 project's allocated GPU time, so use it only for bounded checks and cancel a
 stuck or obviously incorrect job. Production training must use
 `qos_gpu_h100-t3` or `qos_gpu_h100-t4`, never `qos_gpu_h100-dev`.
+
+The generic training wrapper also accepts `qos_gpu_h100-dev` for bounded DDP
+smoke tests, with a local safety limit of two H100s and two hours. Full-data
+training continues to require `t3` or `t4`.

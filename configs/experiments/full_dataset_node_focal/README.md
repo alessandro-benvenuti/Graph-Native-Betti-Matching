@@ -11,7 +11,7 @@ visited once per epoch.
 
 The configured batch size is per process. The production launcher defaults to
 four H100s and automatically selects `32 / GNBM_GPUS` per process, preserving
-a global batch of 32 for supported one-, two-, four-, and eight-GPU launches.
+a global batch of 32 for supported one-, two-, and four-GPU launches.
 
 `SYNTHETIC_MRI_DATASET` must point directly to the generated `new_patches`
 directory. Its sibling `new_split.csv` records the patient-level assignment;

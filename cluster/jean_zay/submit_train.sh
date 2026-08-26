@@ -46,24 +46,17 @@ qos="${GNBM_QOS:-qos_gpu_h100-t3}"
 walltime="${GNBM_WALLTIME:-20:00:00}"
 gpus="${GNBM_GPUS:-1}"
 case "$gpus" in
-  1|2|4|8) ;;
-  *) echo "GNBM_GPUS must be one of 1, 2, 4, or 8." >&2; exit 2 ;;
+  1|2|4) ;;
+  *) echo "GNBM_GPUS must be 1, 2, or 4 (one H100 node)." >&2; exit 2 ;;
 esac
-# Jean Zay H100 nodes expose four GPUs. Eight-GPU jobs span two nodes.
-if (( gpus > 4 )); then
-  nodes=2
-  gpus_per_node=4
-else
-  nodes=1
-  gpus_per_node="$gpus"
-fi
-if (( gpus % nodes != 0 )); then
-  echo "GNBM_GPUS must divide evenly across the requested nodes." >&2
-  exit 2
-fi
+nodes=1
+gpus_per_node="$gpus"
 case "$qos" in
-  qos_gpu_h100-t3|qos_gpu_h100-t4) ;;
-  *) echo "GNBM_QOS must be qos_gpu_h100-t3 or qos_gpu_h100-t4." >&2; exit 2 ;;
+  qos_gpu_h100-dev|qos_gpu_h100-t3|qos_gpu_h100-t4) ;;
+  *)
+    echo "GNBM_QOS must be qos_gpu_h100-dev, qos_gpu_h100-t3, or qos_gpu_h100-t4." >&2
+    exit 2
+    ;;
 esac
 if [[ ! "$walltime" =~ ^[0-9]{2,3}:[0-5][0-9]:[0-5][0-9]$ ]]; then
   echo "GNBM_WALLTIME must use HH:MM:SS (for example 20:00:00)." >&2
@@ -75,6 +68,16 @@ remainder="${walltime#*:}"
 minutes="${remainder%%:*}"
 seconds="${remainder##*:}"
 total_seconds=$((hours * 3600 + 10#$minutes * 60 + 10#$seconds))
+if [[ "$qos" == "qos_gpu_h100-dev" ]]; then
+  if (( gpus > 2 )); then
+    echo "Development jobs are deliberately limited here to at most 2 H100s." >&2
+    exit 2
+  fi
+  if (( total_seconds > 7200 )); then
+    echo "qos_gpu_h100-dev cannot exceed 2 hours." >&2
+    exit 2
+  fi
+fi
 if [[ "$qos" == "qos_gpu_h100-t3" && "$total_seconds" -gt 72000 ]]; then
   echo "qos_gpu_h100-t3 cannot exceed 20 hours; use qos_gpu_h100-t4." >&2
   exit 2
