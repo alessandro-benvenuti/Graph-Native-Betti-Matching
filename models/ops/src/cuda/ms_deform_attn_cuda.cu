@@ -13,6 +13,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -25,6 +26,10 @@ at::Tensor ms_deform_attn_cuda_forward(
     const at::Tensor &attn_weight,
     const int im2col_step)
 {
+    // Autograd may execute a rank's backward work on a worker thread whose
+    // current CUDA device is still zero.  Always launch on the device owning
+    // the tensors; otherwise rank > 0 kernels receive cross-device pointers.
+    const c10::cuda::CUDAGuard device_guard(value.device());
     AT_ASSERTM(value.is_contiguous(), "value tensor has to be contiguous");
     AT_ASSERTM(spatial_shapes.is_contiguous(), "spatial_shapes tensor has to be contiguous");
     AT_ASSERTM(level_start_index.is_contiguous(), "level_start_index tensor has to be contiguous");
@@ -36,6 +41,10 @@ at::Tensor ms_deform_attn_cuda_forward(
     AT_ASSERTM(level_start_index.type().is_cuda(), "level_start_index must be a CUDA tensor");
     AT_ASSERTM(sampling_loc.type().is_cuda(), "sampling_loc must be a CUDA tensor");
     AT_ASSERTM(attn_weight.type().is_cuda(), "attn_weight must be a CUDA tensor");
+    TORCH_CHECK(spatial_shapes.device() == value.device(), "spatial_shapes must be on the value device");
+    TORCH_CHECK(level_start_index.device() == value.device(), "level_start_index must be on the value device");
+    TORCH_CHECK(sampling_loc.device() == value.device(), "sampling_loc must be on the value device");
+    TORCH_CHECK(attn_weight.device() == value.device(), "attn_weight must be on the value device");
 
     const int batch = value.size(0);        // N
     const int spatial_size = value.size(1); // S
@@ -89,6 +98,7 @@ std::vector<at::Tensor> ms_deform_attn_cuda_backward(
     const at::Tensor &grad_output,
     const int im2col_step)
 {
+    const c10::cuda::CUDAGuard device_guard(value.device());
 
     AT_ASSERTM(value.is_contiguous(), "value tensor has to be contiguous");
     AT_ASSERTM(spatial_shapes.is_contiguous(), "spatial_shapes tensor has to be contiguous");
@@ -103,6 +113,11 @@ std::vector<at::Tensor> ms_deform_attn_cuda_backward(
     AT_ASSERTM(sampling_loc.type().is_cuda(), "sampling_loc must be a CUDA tensor");
     AT_ASSERTM(attn_weight.type().is_cuda(), "attn_weight must be a CUDA tensor");
     AT_ASSERTM(grad_output.type().is_cuda(), "grad_output must be a CUDA tensor");
+    TORCH_CHECK(spatial_shapes.device() == value.device(), "spatial_shapes must be on the value device");
+    TORCH_CHECK(level_start_index.device() == value.device(), "level_start_index must be on the value device");
+    TORCH_CHECK(sampling_loc.device() == value.device(), "sampling_loc must be on the value device");
+    TORCH_CHECK(attn_weight.device() == value.device(), "attn_weight must be on the value device");
+    TORCH_CHECK(grad_output.device() == value.device(), "grad_output must be on the value device");
 
     const int batch = value.size(0);        // N
     const int spatial_size = value.size(1); // S

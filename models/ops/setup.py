@@ -40,7 +40,7 @@ def get_extension() -> CUDAExtension:
 
 setup(
     name="MultiScaleDeformableAttention3D",
-    version="1.0.0",
+    version="1.0.1",
     packages=find_packages(),
     ext_modules=[get_extension()],
     cmdclass={"build_ext": BuildExtension},

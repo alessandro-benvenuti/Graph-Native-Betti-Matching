@@ -65,6 +65,8 @@ else
     echo "This launcher currently supports multi-GPU training on one node only." >&2
     exit 2
   fi
+  echo "Checking the custom CUDA operator on all $gpus visible GPUs..."
+  "$python_bin" cluster/jean_zay/check_multi_gpu_ops.py --devices "$gpus"
   # torchrun creates one process per visible H100 and uses c10d/NCCL. Running
   # directly from the batch shell avoids all PMIx/OpenMPI initialization.
   # Do not call the module-provided `torchrun` console script: its shebang

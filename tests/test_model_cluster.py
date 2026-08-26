@@ -79,6 +79,36 @@ class CudaModelTests(unittest.TestCase):
             msg=f"maximum absolute difference: {(observed - expected).abs().max()}",
         )
 
+    @unittest.skipUnless(
+        torch.cuda.device_count() >= 2,
+        "two CUDA devices are required for the non-default-device regression",
+    )
+    def test_cuda_extension_backward_honors_tensor_device(self) -> None:
+        original_device = torch.cuda.current_device()
+        try:
+            # Keep device zero current while every operator tensor lives on
+            # device one.  Missing CUDAGuard handling used to launch the custom
+            # kernel on zero with device-one pointers and corrupt rank 1.
+            torch.cuda.set_device(0)
+            device = torch.device("cuda:1")
+            module = MSDeformAttn(48, 1, 6, 2, True).to(device).train()
+            query = torch.randn((2, 3, 48), device=device, requires_grad=True)
+            values = torch.randn((2, 8, 48), device=device, requires_grad=True)
+            shapes = torch.tensor([[2, 2, 2]], dtype=torch.long, device=device)
+            starts = torch.tensor([0], dtype=torch.long, device=device)
+            references = torch.rand((2, 3, 1, 3), device=device)
+
+            output = module(query, references, values, shapes, starts)
+            output.square().mean().backward()
+            torch.cuda.synchronize(device)
+
+            self.assertEqual(output.device, device)
+            self.assertTrue(torch.isfinite(query.grad).all())
+            self.assertTrue(torch.isfinite(values.grad).all())
+            self.assertEqual(torch.cuda.current_device(), 0)
+        finally:
+            torch.cuda.set_device(original_device)
+
     def test_small_relationformer_cuda_forward(self) -> None:
         from models import build_model
 
