@@ -1,0 +1,9 @@
+defaults:
+  - finetune_common.yaml
+
+experiment:
+  name: finetune_full_mri_baseline_seed364505
+
+tracking:
+  tags: [gnbm, full-data, mri-finetune, baseline, ddp]
+

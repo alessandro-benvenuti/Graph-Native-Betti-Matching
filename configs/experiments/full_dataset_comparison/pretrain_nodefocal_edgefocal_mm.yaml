@@ -1,0 +1,11 @@
+defaults:
+  - pretrain_common.yaml
+  - ../../losses/node_focal_unweighted_immediate.yaml
+  - ../../losses/edge_focal_unweighted_immediate_matched_only.yaml
+
+experiment:
+  name: pretrain_full_mixed_nodefocal_edgefocal_mm_seed364505
+
+tracking:
+  tags: [gnbm, full-data, mixed-pretrain, node-focal, edge-focal-mm, ddp]
+

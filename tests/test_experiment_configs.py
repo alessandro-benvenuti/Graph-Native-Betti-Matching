@@ -243,6 +243,61 @@ class ExperimentConfigTests(unittest.TestCase):
             self.assertEqual(config["loss"]["edge"]["classification"]["name"], "cross_entropy")
             self.assertEqual(config["training"]["checkpoint"]["latest_interval_epochs"], 2)
 
+    def test_full_dataset_comparisons_are_controlled_and_uncapped(self):
+        paths = ROOT / "configs" / "experiments" / "full_dataset_comparison"
+        expectations = {
+            "baseline": ("weighted_cross_entropy", "cross_entropy", "ratio_upsample"),
+            "nodefocal_edgefocal_mm": ("focal", "focal", "none"),
+        }
+        names = set()
+        for recipe, expected in expectations.items():
+            pretrain = load_config(
+                paths / f"pretrain_{recipe}.yaml", environment=ENVIRONMENT
+            )
+            finetune = load_config(
+                paths / f"finetune_{recipe}.yaml", environment=ENVIRONMENT
+            )
+            node_name, edge_name, balancing = expected
+            self.assertFalse(
+                pretrain["data"]["mixed_sampling"]["balance_source_target"]
+            )
+            for dataset in pretrain["data"]["datasets"].values():
+                self.assertIsNone(dataset["train_samples"])
+                self.assertIsNone(dataset["validation_samples"])
+            self.assertIsNone(
+                finetune["data"]["datasets"]["synthetic_mri"]["train_samples"]
+            )
+            self.assertEqual(pretrain["training"]["epochs"], 50)
+            self.assertEqual(finetune["training"]["epochs"], 100)
+            for config in (pretrain, finetune):
+                self.assertEqual(
+                    config["loss"]["node"]["classification"]["name"], node_name
+                )
+                edge = config["loss"]["edge"]
+                self.assertEqual(edge["classification"]["name"], edge_name)
+                self.assertEqual(edge["balancing"]["mode"], balancing)
+                self.assertFalse(edge["candidates"]["include_unmatched"])
+                self.assertEqual(
+                    config["training"]["checkpoint"]["latest_interval_epochs"],
+                    2,
+                )
+            names.update(
+                (pretrain["experiment"]["name"], finetune["experiment"]["name"])
+            )
+        self.assertEqual(len(names), 2 * len(expectations))
+
+    def test_full_dataset_comparison_launcher_contract(self):
+        launcher = (
+            ROOT
+            / "cluster"
+            / "jean_zay"
+            / "submit_full_dataset_comparisons.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("WANDB_RUN_GROUP", launcher)
+        self.assertIn("afterok:", launcher)
+        self.assertIn("baseline", launcher)
+        self.assertIn("nodefocal_edgefocal_mm", launcher)
+
     def test_edge_candidate_ablation_completes_missing_recipe_cells(self):
         paths = ROOT / "configs" / "experiments" / "edge_candidate_ablation_600"
         expectations = {
