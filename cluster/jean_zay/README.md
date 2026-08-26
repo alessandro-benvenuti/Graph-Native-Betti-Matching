@@ -21,7 +21,7 @@ Recommended layout:
 $WORK/projects/Graph-Native-Betti-Matching
 $WORK/venvs/vascular-graph-extraction-h100-torch231
 $WORK/tools/uv
-$SCRATCH/datasets/syntheticMRI/patches/syntheticMRI
+$SCRATCH/datasets/syntheticMRI/new_patches
 $SCRATCH/checkpoints/checkpoint_epoch=280.pt
 $SCRATCH/experiments/gnbm
 ```
@@ -29,7 +29,7 @@ $SCRATCH/experiments/gnbm
 Set the real paths on the Jean Zay login node:
 
 ```bash
-export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/patches/syntheticMRI"
+export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches"
 export GNBM_MRI_CHECKPOINT="$SCRATCH/checkpoints/checkpoint_epoch=280.pt"
 export GNBM_INITIAL_WEIGHTS="$GNBM_MRI_CHECKPOINT"
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm"

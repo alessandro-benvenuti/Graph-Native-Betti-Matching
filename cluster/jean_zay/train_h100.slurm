@@ -50,13 +50,17 @@ echo "config=$GNBM_CONFIG run=$GNBM_RUN_NAME output=$GNBM_OUTPUT_DIR"
 echo "wandb_entity=${WANDB_ENTITY:-default} wandb_project=${WANDB_PROJECT:-focal-loss} wandb_mode=${WANDB_MODE:-online}"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 if (( gpus == 1 )); then
-  srun --ntasks=1 python -u train.py "${args[@]}"
+  # PyTorch uses c10d/NCCL, not Slurm's PMIx/OpenMPI integration. Explicitly
+  # disable the MPI plugin; Jean Zay otherwise attempts MPI_Init_thread before
+  # Python starts and aborts the step on a NULL communicator.
+  srun --mpi=none --ntasks=1 python -u train.py "${args[@]}"
 else
   master_addr="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
   export MASTER_ADDR="$master_addr"
   export MASTER_PORT="${GNBM_MASTER_PORT:-$((20000 + SLURM_JOB_ID % 10000))}"
   export GNBM_TRAIN_ARGS="$(printf ' %q' "${args[@]}")"
-  srun --nodes="$SLURM_NNODES" --ntasks="$SLURM_NNODES" --ntasks-per-node=1 \
+  srun --mpi=none \
+    --nodes="$SLURM_NNODES" --ntasks="$SLURM_NNODES" --ntasks-per-node=1 \
     bash -c 'torchrun \
       --nnodes="$SLURM_NNODES" \
       --nproc_per_node="$GNBM_GPUS_PER_NODE" \
