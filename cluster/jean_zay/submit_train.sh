@@ -45,6 +45,17 @@ for name in SYNTHETIC_MRI_DATASET GNBM_OUTPUT_DIR; do
     exit 2
   fi
 done
+for split in train val; do
+  for folder in raw seg vtp; do
+    required_path="$SYNTHETIC_MRI_DATASET/$split/$folder"
+    if [[ ! -d "$required_path" ]]; then
+      echo "Invalid SYNTHETIC_MRI_DATASET: $SYNTHETIC_MRI_DATASET" >&2
+      echo "Missing required training path: $required_path" >&2
+      echo "For the full dataset, point it directly to syntheticMRI/new_patches." >&2
+      exit 2
+    fi
+  done
+done
 if [[ -n "${GNBM_INITIAL_WEIGHTS:-}" && ! -f "$GNBM_INITIAL_WEIGHTS" ]]; then
   echo "Initial checkpoint does not exist: $GNBM_INITIAL_WEIGHTS" >&2
   exit 2
