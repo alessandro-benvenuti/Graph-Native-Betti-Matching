@@ -241,6 +241,19 @@ class ExperimentConfigTests(unittest.TestCase):
             pretrain["data"]["datasets"]["synthetic_mri"]["validation_samples"],
             200,
         )
+        self.assertEqual(
+            pretrain["data"]["datasets"]["synthetic_mri"][
+                "sample_cap_selection"
+            ],
+            "seeded_random",
+        )
+        self.assertEqual(
+            pretrain["data"]["datasets"]["synthetic_mri"]["sample_cap_seed"],
+            364505,
+        )
+        self.assertEqual(
+            pretrain["evaluation"]["training_metrics"]["max_samples"], 200
+        )
         self.assertIsNone(
             finetune["data"]["datasets"]["synthetic_mri"]["train_samples"]
         )
@@ -283,6 +296,22 @@ class ExperimentConfigTests(unittest.TestCase):
                 pretrain["data"]["datasets"]["synthetic_mri"][
                     "validation_samples"
                 ],
+                200,
+            )
+            self.assertEqual(
+                pretrain["data"]["datasets"]["synthetic_mri"][
+                    "sample_cap_selection"
+                ],
+                "seeded_random",
+            )
+            self.assertEqual(
+                pretrain["data"]["datasets"]["synthetic_mri"][
+                    "sample_cap_seed"
+                ],
+                364505,
+            )
+            self.assertEqual(
+                pretrain["evaluation"]["training_metrics"]["max_samples"],
                 200,
             )
             self.assertIsNone(

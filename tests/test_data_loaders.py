@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -20,7 +21,9 @@ from data.loaders import (
     SyntheticMRIDataset,
     build_datasets,
     build_evaluation_loader,
+    build_synthetic_mri_dataset,
     compose_source_target,
+    dataset_sample_manifest,
     discover_plants,
     discover_synthetic_mri,
     image_graph_collate,
@@ -195,6 +198,41 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(len(discover_plants(root, "val")), 1)
             with self.assertRaises(FileNotFoundError):
                 discover_plants(root, "val", allow_direct=False)
+
+    def test_seeded_mri_cap_has_stable_random_membership(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            leaf = self._folders(root)
+            sample_ids = [f"sample_{index:03d}" for index in range(20)]
+            for sample_id in sample_ids:
+                (leaf / "raw" / f"{sample_id}_data.nii.gz").touch()
+                (leaf / "seg" / f"{sample_id}_seg.nii.gz").touch()
+                (leaf / "vtp" / f"{sample_id}_graph.vtp").touch()
+
+            options = dict(
+                root=root,
+                split="train",
+                max_samples=5,
+                sample_cap_selection="seeded_random",
+                sample_cap_seed=364505,
+                augment=False,
+            )
+            first = build_synthetic_mri_dataset(**options)
+            second = build_synthetic_mri_dataset(**options)
+            selected = [record.sample_id for record in first.records]
+            self.assertEqual(
+                selected, [record.sample_id for record in second.records]
+            )
+
+            def key(sample_id):
+                payload = f"364505\0train\0{sample_id}".encode("utf-8")
+                return (hashlib.sha256(payload).digest(), sample_id)
+
+            expected = sorted(sorted(sample_ids, key=key)[:5])
+            self.assertEqual(selected, expected)
+            self.assertNotEqual(selected, sample_ids[:5])
+            manifest = dataset_sample_manifest(first)
+            self.assertEqual(manifest[0]["sample_ids"], expected)
 
 
 class SyntheticMRILoaderTests(unittest.TestCase):

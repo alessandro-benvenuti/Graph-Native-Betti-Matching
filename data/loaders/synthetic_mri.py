@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import random
 from typing import Optional, Sequence
@@ -20,6 +21,34 @@ from data.augmentations import (
 from data.loaders.common import DatasetSample, SamplePaths
 from data.loaders.discovery import discover_synthetic_mri
 from data.loaders.io import read_nifti, read_vtp_graph
+
+
+def select_capped_records(
+    records: Sequence[SamplePaths],
+    max_samples: Optional[int],
+    *,
+    mode: str = "first",
+    seed: int = 0,
+    split: str = "train",
+):
+    """Select a stable capped subset without depending on filesystem order."""
+    records = list(records)
+    if max_samples is None:
+        return records
+    if max_samples <= 0:
+        raise ValueError("max_samples must be positive or None")
+    if mode == "first":
+        return records[:max_samples]
+    if mode != "seeded_random":
+        raise ValueError("sample_cap_selection must be first or seeded_random")
+
+    def ranking_key(record: SamplePaths):
+        payload = "{}\0{}\0{}".format(int(seed), split, record.sample_id)
+        return (hashlib.sha256(payload.encode("utf-8")).digest(), record.sample_id)
+
+    selected = sorted(records, key=ranking_key)[:max_samples]
+    # Dataset order remains predictable; randomness affects membership only.
+    return sorted(selected, key=lambda record: record.sample_id)
 
 
 def _build_training_intensity_transform(
@@ -164,6 +193,8 @@ def build_synthetic_mri_dataset(
     *,
     split: str,
     max_samples: Optional[int] = None,
+    sample_cap_selection: str = "first",
+    sample_cap_seed: int = 0,
     image_size=(64, 64, 64),
     foreground_mean: float = 0.33335259556770325,
     coordinate_space: str = "normalized",
@@ -175,10 +206,13 @@ def build_synthetic_mri_dataset(
     records = discover_synthetic_mri(
         Path(root), split, allow_direct=allow_direct_root
     )
-    if max_samples is not None:
-        if max_samples <= 0:
-            raise ValueError("max_samples must be positive or None")
-        records = records[:max_samples]
+    records = select_capped_records(
+        records,
+        max_samples,
+        mode=sample_cap_selection,
+        seed=sample_cap_seed,
+        split=split.strip().lower(),
+    )
     return SyntheticMRIDataset(
         records,
         image_size=image_size,
@@ -190,4 +224,8 @@ def build_synthetic_mri_dataset(
     )
 
 
-__all__ = ["SyntheticMRIDataset", "build_synthetic_mri_dataset"]
+__all__ = [
+    "SyntheticMRIDataset",
+    "build_synthetic_mri_dataset",
+    "select_capped_records",
+]

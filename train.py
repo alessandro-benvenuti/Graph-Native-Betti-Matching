@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import json
 import os
 from pathlib import Path
 import random
@@ -15,7 +16,11 @@ from torch.nn.parallel import DistributedDataParallel
 import yaml
 
 from configs import load_config, validate_config
-from data.loaders import build_data_loaders, build_evaluation_loader
+from data.loaders import (
+    build_data_loaders,
+    build_evaluation_loader,
+    dataset_sample_manifest,
+)
 from models import build_model
 from models.checkpoint import load_legacy_model_checkpoint
 from training import (
@@ -183,6 +188,22 @@ def main():
         run_dir.mkdir(parents=True, exist_ok=True)
         with (run_dir / "resolved-config.yaml").open("w", encoding="utf-8") as handle:
             yaml.safe_dump(config, handle, sort_keys=False)
+        (run_dir / "dataset-manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "experiment_seed": seed,
+                    "train": dataset_sample_manifest(train_loader.dataset),
+                    "validation": dataset_sample_manifest(
+                        validation_loader.dataset
+                    ),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         tracker = build_tracker(
             config,
             run_dir,

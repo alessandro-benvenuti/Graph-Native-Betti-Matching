@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 import sys
 
@@ -18,7 +19,7 @@ import torch
 
 from configs import load_config, validate_config
 from data.loaders.common import image_graph_collate
-from data.loaders.mixed import build_datasets
+from data.loaders.mixed import build_datasets, dataset_sample_manifest
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -57,6 +58,22 @@ def _check_item(dataset, index: int, label: str) -> None:
     )
 
 
+def _print_manifest_fingerprints(dataset, label: str) -> None:
+    for index, leaf in enumerate(dataset_sample_manifest(dataset)):
+        payload = "\n".join(leaf["sample_ids"]).encode("utf-8")
+        digest = hashlib.sha256(payload).hexdigest()[:16]
+        print(
+            "preflight manifest {}[{}]: type={} domain={} count={} sha256={}".format(
+                label,
+                index,
+                leaf["dataset_type"],
+                leaf["domain_label"],
+                leaf["count"],
+                digest,
+            )
+        )
+
+
 def main() -> None:
     args = _parser().parse_args()
     config = load_config(args.config)
@@ -66,6 +83,8 @@ def main() -> None:
         f"preflight datasets: train={len(train)} validation={len(validation)} "
         f"sampling={'weighted' if sampler is not None else 'complete'}"
     )
+    _print_manifest_fingerprints(train, "train")
+    _print_manifest_fingerprints(validation, "val")
     for name, dataset in (("train", train), ("val", validation)):
         if len(dataset) == 0:
             raise ValueError(f"{name}: dataset is empty")

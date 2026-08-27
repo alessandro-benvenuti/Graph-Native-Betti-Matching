@@ -12,3 +12,7 @@ epochs, followed by 100 epochs on the complete new MRI split. The default
 launcher uses one H100 for pretraining and four H100s for specialization while
 preserving a global batch of 32. The MRI stage starts from the pretraining
 checkpoint selected by validation edge mAP.
+
+The 4,000/200 MRI subset is selected reproducibly by a SHA-256 ranking seeded
+with `364505`. All recipes therefore use identical subset membership, recorded
+in each run's `dataset-manifest.json`.

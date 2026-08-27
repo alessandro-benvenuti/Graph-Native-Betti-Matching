@@ -18,7 +18,10 @@ from torch.utils.data import (
 
 from data.loaders.common import image_graph_collate, seed_data_worker
 from data.loaders.plants import build_plants_dataset
-from data.loaders.synthetic_mri import build_synthetic_mri_dataset
+from data.loaders.synthetic_mri import (
+    build_synthetic_mri_dataset,
+    select_capped_records,
+)
 
 
 def _supports_keyword(callable_object, keyword: str) -> bool:
@@ -161,9 +164,39 @@ def _dataset_for_split(
             ),
             gaussian_noise_max_std=float(noise["std_range"][1]),
             clamp_range=tuple(mri_augmentation["intensity_clamp"]),
+            sample_cap_selection=str(
+                settings.get("sample_cap_selection", "first")
+            ),
+            sample_cap_seed=int(settings.get("sample_cap_seed", 0)),
             **common,
         )
     raise ValueError(f"Unsupported dataset: {name}")
+
+
+def dataset_sample_manifest(dataset: Dataset):
+    """Return sample IDs for every concrete dataset below a concatenation."""
+    leaves = []
+
+    def visit(current):
+        if isinstance(current, ConcatDataset):
+            for child in current.datasets:
+                visit(child)
+            return
+        records = getattr(current, "records", None)
+        if records is None:
+            return
+        sample_ids = [str(record.sample_id) for record in records]
+        leaves.append(
+            {
+                "dataset_type": type(current).__name__,
+                "domain_label": int(getattr(current, "domain_label", -1)),
+                "count": len(sample_ids),
+                "sample_ids": sample_ids,
+            }
+        )
+
+    visit(dataset)
+    return leaves
 
 
 def build_datasets(config: Mapping):
@@ -288,7 +321,13 @@ def build_evaluation_loader(
     if max_samples is not None:
         if int(max_samples) <= 0:
             raise ValueError("max_samples must be positive or None")
-        dataset.records = dataset.records[: int(max_samples)]
+        dataset.records = select_capped_records(
+            dataset.records,
+            int(max_samples),
+            mode=str(settings.get("sample_cap_selection", "first")),
+            seed=int(settings.get("sample_cap_seed", 0)),
+            split=split,
+        )
     data = config["data"]
     runtime = config["runtime"]
     options = dict(
@@ -312,4 +351,5 @@ __all__ = [
     "build_datasets",
     "build_evaluation_loader",
     "compose_source_target",
+    "dataset_sample_manifest",
 ]

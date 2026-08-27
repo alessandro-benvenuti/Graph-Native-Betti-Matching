@@ -9,7 +9,9 @@ selected by validation edge mAP.
 Both stages use unweighted node focal loss from epoch zero and the baseline
 matched-node edge cross-entropy objective. Dataset caps are disabled only for
 MRI specialization; pretraining deliberately retains the historical caps of
-480 Plants and 200 MRI validation samples.
+480 Plants and 200 MRI validation samples. MRI cap membership is selected by a
+stable SHA-256 ranking seeded with `364505`, shared by every loss recipe. Each
+run writes the resulting IDs to `dataset-manifest.json`.
 
 The launcher defaults to one H100 for pretraining and four H100s for MRI
 specialization. It automatically selects `32 / stage GPUs` per process, keeping

@@ -19,6 +19,8 @@ data:
     synthetic_mri:
       train_samples: 4000
       validation_samples: 200
+      sample_cap_selection: seeded_random
+      sample_cap_seed: 364505
 
 training:
   epochs: 50
@@ -32,7 +34,7 @@ evaluation:
   training_metrics:
     enabled: true
     dataset: synthetic_mri
-    max_samples: null
+    max_samples: 200
     selection_metric: edge_mAP
     selection_mode: max
     save_best_checkpoint: true

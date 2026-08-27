@@ -277,6 +277,16 @@ def validate_config(config: Mapping[str, Any]) -> None:
                 float(dataset["foreground_mean"])
             except (KeyError, TypeError, ValueError) as error:
                 raise ConfigError(f"{location}.foreground_mean must be numeric") from error
+            selection = dataset.get("sample_cap_selection", "first")
+            if selection not in {"first", "seeded_random"}:
+                raise ConfigError(
+                    f"{location}.sample_cap_selection must be first or seeded_random"
+                )
+            if selection == "seeded_random":
+                _non_negative_int(
+                    dataset.get("sample_cap_seed"),
+                    f"{location}.sample_cap_seed",
+                )
 
     if target_count == 0:
         raise ConfigError("At least one target dataset is required")

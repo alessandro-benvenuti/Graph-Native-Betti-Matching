@@ -8,9 +8,14 @@ from data.loaders.mixed import (
     build_datasets,
     build_evaluation_loader,
     compose_source_target,
+    dataset_sample_manifest,
 )
 from data.loaders.plants import PlantsDataset, build_plants_dataset
-from data.loaders.synthetic_mri import SyntheticMRIDataset, build_synthetic_mri_dataset
+from data.loaders.synthetic_mri import (
+    SyntheticMRIDataset,
+    build_synthetic_mri_dataset,
+    select_capped_records,
+)
 
 __all__ = [
     "DatasetSample",
@@ -24,7 +29,9 @@ __all__ = [
     "build_plants_dataset",
     "build_synthetic_mri_dataset",
     "compose_source_target",
+    "dataset_sample_manifest",
     "discover_plants",
     "discover_synthetic_mri",
     "image_graph_collate",
+    "select_capped_records",
 ]
