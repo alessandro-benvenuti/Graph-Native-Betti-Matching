@@ -9,15 +9,16 @@ data:
   batch_size: 8
   validation_batch_size: 32
   mixed_sampling:
-    # Visit every Plants and MRI sample once per epoch.
-    balance_source_target: false
+    # Reproduce the original source/target pretraining regime with a limited
+    # target-domain subset and balanced domain sampling.
+    balance_source_target: true
   datasets:
     plants:
-      train_samples: null
-      validation_samples: null
+      train_samples: 25900
+      validation_samples: 480
     synthetic_mri:
-      train_samples: null
-      validation_samples: null
+      train_samples: 4000
+      validation_samples: 200
 
 training:
   epochs: 50
@@ -35,4 +36,3 @@ evaluation:
     selection_metric: edge_mAP
     selection_mode: max
     save_best_checkpoint: true
-

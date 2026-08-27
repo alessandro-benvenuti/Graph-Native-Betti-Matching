@@ -225,16 +225,27 @@ class ExperimentConfigTests(unittest.TestCase):
         self.assertNotIn("WANDB_GROUP=", launcher)
         self.assertIn("focal-matrix-600-seed364505", launcher)
 
-    def test_full_dataset_node_focal_pipeline_has_no_sample_caps(self):
+    def test_full_dataset_node_focal_uses_limited_mri_pretraining(self):
         paths = ROOT / "configs" / "experiments" / "full_dataset_node_focal"
         pretrain = load_config(paths / "pretrain.yaml", environment=ENVIRONMENT)
         finetune = load_config(paths / "finetune.yaml", environment=ENVIRONMENT)
-        self.assertFalse(pretrain["data"]["mixed_sampling"]["balance_source_target"])
-        for dataset in pretrain["data"]["datasets"].values():
-            self.assertIsNone(dataset["train_samples"])
-            self.assertIsNone(dataset["validation_samples"])
+        self.assertTrue(pretrain["data"]["mixed_sampling"]["balance_source_target"])
+        self.assertEqual(
+            pretrain["data"]["datasets"]["plants"]["train_samples"], 25900
+        )
+        self.assertEqual(
+            pretrain["data"]["datasets"]["synthetic_mri"]["train_samples"],
+            4000,
+        )
+        self.assertEqual(
+            pretrain["data"]["datasets"]["synthetic_mri"]["validation_samples"],
+            200,
+        )
         self.assertIsNone(
             finetune["data"]["datasets"]["synthetic_mri"]["train_samples"]
+        )
+        self.assertIsNone(
+            finetune["data"]["datasets"]["synthetic_mri"]["validation_samples"]
         )
         self.assertEqual(pretrain["training"]["epochs"], 50)
         self.assertEqual(finetune["training"]["epochs"], 100)
@@ -243,7 +254,7 @@ class ExperimentConfigTests(unittest.TestCase):
             self.assertEqual(config["loss"]["edge"]["classification"]["name"], "cross_entropy")
             self.assertEqual(config["training"]["checkpoint"]["latest_interval_epochs"], 2)
 
-    def test_full_dataset_comparisons_are_controlled_and_uncapped(self):
+    def test_full_dataset_comparisons_limit_only_pretraining_mri(self):
         paths = ROOT / "configs" / "experiments" / "full_dataset_comparison"
         expectations = {
             "baseline": ("weighted_cross_entropy", "cross_entropy", "ratio_upsample"),
@@ -258,14 +269,29 @@ class ExperimentConfigTests(unittest.TestCase):
                 paths / f"finetune_{recipe}.yaml", environment=ENVIRONMENT
             )
             node_name, edge_name, balancing = expected
-            self.assertFalse(
+            self.assertTrue(
                 pretrain["data"]["mixed_sampling"]["balance_source_target"]
             )
-            for dataset in pretrain["data"]["datasets"].values():
-                self.assertIsNone(dataset["train_samples"])
-                self.assertIsNone(dataset["validation_samples"])
+            self.assertEqual(
+                pretrain["data"]["datasets"]["plants"]["train_samples"], 25900
+            )
+            self.assertEqual(
+                pretrain["data"]["datasets"]["synthetic_mri"]["train_samples"],
+                4000,
+            )
+            self.assertEqual(
+                pretrain["data"]["datasets"]["synthetic_mri"][
+                    "validation_samples"
+                ],
+                200,
+            )
             self.assertIsNone(
                 finetune["data"]["datasets"]["synthetic_mri"]["train_samples"]
+            )
+            self.assertIsNone(
+                finetune["data"]["datasets"]["synthetic_mri"][
+                    "validation_samples"
+                ]
             )
             self.assertEqual(pretrain["training"]["epochs"], 50)
             self.assertEqual(finetune["training"]["epochs"], 100)
@@ -295,6 +321,9 @@ class ExperimentConfigTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("WANDB_RUN_GROUP", launcher)
         self.assertIn("afterok:", launcher)
+        self.assertIn("GNBM_PRETRAIN_GPUS", launcher)
+        self.assertIn("GNBM_FINETUNE_GPUS", launcher)
+        self.assertIn("GNBM_FINETUNE_WALLTIME", launcher)
         self.assertIn("baseline", launcher)
         self.assertIn("nodefocal_edgefocal_mm", launcher)
 

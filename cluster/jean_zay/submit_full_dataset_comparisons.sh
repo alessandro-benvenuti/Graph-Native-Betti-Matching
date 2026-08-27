@@ -19,21 +19,25 @@ for split in train val test; do
   done
 done
 
-gpus="${GNBM_GPUS:-4}"
-case "$gpus" in
-  1|2|4) ;;
-  *) echo "GNBM_GPUS must be 1, 2, or 4." >&2; exit 2 ;;
-esac
+pretrain_gpus="${GNBM_PRETRAIN_GPUS:-1}"
+finetune_gpus="${GNBM_FINETUNE_GPUS:-4}"
+for gpus in "$pretrain_gpus" "$finetune_gpus"; do
+  case "$gpus" in
+    1|2|4) ;;
+    *) echo "Stage GPU counts must be 1, 2, or 4." >&2; exit 2 ;;
+  esac
+done
 qos="${GNBM_QOS:-qos_gpu_h100-t4}"
-walltime="${GNBM_WALLTIME:-48:00:00}"
+pretrain_walltime="${GNBM_PRETRAIN_WALLTIME:-48:00:00}"
+finetune_walltime="${GNBM_FINETUNE_WALLTIME:-100:00:00}"
 group="${WANDB_RUN_GROUP:-full-data-loss-comparison-seed364505}"
 log_dir="$WORK/logs/graph-native-betti-matching"
 config_root="configs/experiments/full_dataset_comparison"
 
-export GNBM_GPUS="$gpus"
-export GNBM_BATCH_SIZE="$((32 / gpus))"
+export GNBM_GPUS="$pretrain_gpus"
+export GNBM_BATCH_SIZE="$((32 / pretrain_gpus))"
 export GNBM_QOS="$qos"
-export GNBM_WALLTIME="$walltime"
+export GNBM_WALLTIME="$pretrain_walltime"
 export WANDB_RUN_GROUP="$group"
 export WANDB_MODE="${WANDB_MODE:-offline}"
 unset GNBM_INITIAL_WEIGHTS GNBM_RESUME_CHECKPOINT GNBM_AUTO_RESUME
@@ -78,20 +82,21 @@ for index in "${!recipes[@]}"; do
     --chdir="$repo_dir" \
     --job-name="gnbm-ft-full-${recipe}" \
     --qos="$qos" \
-    --time="$walltime" \
+    --time="$finetune_walltime" \
     --output="$log_dir/%x-%j.out" \
     --error="$log_dir/%x-%j.err" \
     --nodes=1 \
     --ntasks=1 \
     --ntasks-per-node=1 \
-    --gres="gpu:$gpus" \
-    --cpus-per-task="$((10 * gpus))" \
-    --export=ALL,GNBM_CONFIG="$finetune_config",GNBM_RUN_NAME="$finetune_run",GNBM_GPUS="$gpus",GNBM_GPUS_PER_NODE="$gpus",GNBM_INITIAL_WEIGHTS="$pretrain_checkpoint" \
+    --gres="gpu:$finetune_gpus" \
+    --cpus-per-task="$((10 * finetune_gpus))" \
+    --export=ALL,GNBM_CONFIG="$finetune_config",GNBM_RUN_NAME="$finetune_run",GNBM_GPUS="$finetune_gpus",GNBM_GPUS_PER_NODE="$finetune_gpus",GNBM_BATCH_SIZE="$((32 / finetune_gpus))",GNBM_WALLTIME="$finetune_walltime",GNBM_INITIAL_WEIGHTS="$pretrain_checkpoint" \
     "$repo_dir/cluster/jean_zay/train_h100.slurm")"
 
   printf '%s\n' "$pretrain_submission"
   printf '%s\n' "$finetune_submission"
-  echo "$recipe: pretraining job $pretrain_job, followed by MRI specialization"
+  echo "$recipe: pretraining job $pretrain_job ($pretrain_gpus H100, $pretrain_walltime)"
+  echo "$recipe: dependent MRI specialization ($finetune_gpus H100, $finetune_walltime)"
 done
 
 echo "Queue: squeue -u $USER"
