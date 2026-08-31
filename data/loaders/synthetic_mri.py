@@ -88,7 +88,7 @@ class SyntheticMRIDataset(Dataset):
         zoom_range=(0.6, 1.0),
         gaussian_noise_probability: float = 0.35,
         gaussian_noise_max_std: float = 0.015,
-        clamp_range=(-0.5, 0.5),
+        clamp_range=None,
         domain_label: int = 1,
         volume_reader=read_nifti,
         graph_reader=read_vtp_graph,

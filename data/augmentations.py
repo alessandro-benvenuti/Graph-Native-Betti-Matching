@@ -546,7 +546,7 @@ SYNTHETIC_MRI_TRAIN_POLICY = AugmentationPolicy(
     gaussian_noise_probability=0.35,
     gaussian_noise_mean=0.0,
     gaussian_noise_max_std=0.015,
-    clamp_range=(-0.5, 0.5),
+    clamp_range=None,
 )
 
 PLANTS_TRAIN_POLICY = AugmentationPolicy(
@@ -674,8 +674,7 @@ def apply_augmentation(
             generator=noise_generator,
         )
 
-    # The MRI Compose chain always ran its final clamp, including when
-    # RandGaussianNoise did not select the sample. Preserve that behavior.
+    # Explicit legacy clipping remains possible; current MRI policies disable it.
     if parameters.clamp_range is not None:
         transformed_image = transformed_image.clamp(
             float(parameters.clamp_range[0]),

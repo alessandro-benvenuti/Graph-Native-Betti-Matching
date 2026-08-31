@@ -351,12 +351,12 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ConfigError("SyntheticMRI Gaussian-noise std range is invalid")
     if not 0.0 <= noise_probability <= 1.0:
         raise ConfigError("SyntheticMRI Gaussian-noise probability must lie in [0,1]")
-    if (
+    if clamp_range is not None and (
         not isinstance(clamp_range, list)
         or len(clamp_range) != 2
         or float(clamp_range[1]) <= float(clamp_range[0])
     ):
-        raise ConfigError("SyntheticMRI intensity clamp is invalid")
+        raise ConfigError("SyntheticMRI intensity clamp must be null or an increasing pair")
 
     training = config.get("training")
     if not isinstance(training, Mapping):

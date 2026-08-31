@@ -163,7 +163,11 @@ def _dataset_for_split(
                 float(noise["probability"]) if bool(noise["enabled"]) else 0.0
             ),
             gaussian_noise_max_std=float(noise["std_range"][1]),
-            clamp_range=tuple(mri_augmentation["intensity_clamp"]),
+            clamp_range=(
+                tuple(mri_augmentation["intensity_clamp"])
+                if mri_augmentation["intensity_clamp"] is not None
+                else None
+            ),
             sample_cap_selection=str(
                 settings.get("sample_cap_selection", "first")
             ),

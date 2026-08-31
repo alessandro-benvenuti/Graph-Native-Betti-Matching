@@ -46,7 +46,8 @@ augmentation:
       enabled: true
       probability: 0.35
       std_range: [0.0, 0.015]
-    intensity_clamp: [-0.5, 0.5]
+    # Do not saturate centered MRI intensities (or augmented noise tails).
+    intensity_clamp: null
   plants:
     projection_depth: 5
     padding: 5

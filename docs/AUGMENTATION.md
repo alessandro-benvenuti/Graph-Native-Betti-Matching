@@ -14,9 +14,11 @@ The maximum valid value on an axis of size `S` is `(S - 1) / S`. Values equal to
 
 Dataset loaders must declare whether stored graph points are already normalized or are voxel coordinates. They must not infer the convention by looking at the coordinate range.
 
-## Preserved training policies
+## Training policies
 
-The policies reproduce every augmentation active in the established pipeline.
+The geometric and noise policies follow the established pipeline. The inherited
+SyntheticMRI intensity clamp is disabled by default to avoid saturating valid
+mean-centered intensities during training only.
 
 ### syntheticMRI training
 
@@ -24,9 +26,17 @@ The policies reproduce every augmentation active in the established pipeline.
 2. Isotropic zoom sampled uniformly from `[0.6, 1.0]`.
 3. Gaussian noise with probability `0.35`.
 4. As in MONAI `RandGaussianNoise`, applied standard deviation is sampled uniformly from `[0, 0.015]`.
-5. Image is clamped to `[-0.5, 0.5]` after the optional noise step. The clamp
-   still runs on samples for which Gaussian noise was not selected, matching
-   the existing transform chain.
+5. No intensity clamp is applied, whether noise is selected or not. Bright
+   centered values above `0.5` and noise-generated values outside the original
+   intensity range are preserved.
+
+`augmentation.synthetic_mri.intensity_clamp: null` is the default. An explicit
+`[-0.5, 0.5]` override remains available solely to reproduce legacy experiments.
+The standalone augmentation policy and direct dataset constructor also default
+to no clipping. This does not change the source-volume MAD clipping used during
+patch generation, mean subtraction, graph-coordinate bounds, or Plants scaling.
+Existing patches need not be regenerated. Record this preprocessing change for
+new runs; do not silently change preprocessing midway through a resumed run.
 
 Image zoom uses trilinear interpolation (`grid_sample` calls this mode `bilinear`). Segmentation zoom always uses nearest-neighbour interpolation.
 

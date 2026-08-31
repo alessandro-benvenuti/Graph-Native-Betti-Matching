@@ -164,7 +164,7 @@ class PolicyCompatibilityTests(unittest.TestCase):
             SYNTHETIC_MRI_TRAIN_POLICY.gaussian_noise_probability, 0.35
         )
         self.assertEqual(SYNTHETIC_MRI_TRAIN_POLICY.gaussian_noise_max_std, 0.015)
-        self.assertEqual(SYNTHETIC_MRI_TRAIN_POLICY.clamp_range, (-0.5, 0.5))
+        self.assertIsNone(SYNTHETIC_MRI_TRAIN_POLICY.clamp_range)
         self.assertTrue(PLANTS_TRAIN_POLICY.rotate_90)
         self.assertEqual(PLANTS_TRAIN_POLICY.flip_probability, (0.5, 0.5, 0.5))
 
@@ -215,7 +215,7 @@ class PolicyCompatibilityTests(unittest.TestCase):
         self.assertLessEqual(float(first.max()), 0.5)
         self.assertGreaterEqual(float(first.min()), -0.5)
 
-    def test_training_clamp_runs_when_noise_is_not_selected(self) -> None:
+    def test_explicit_legacy_clamp_runs_when_noise_is_not_selected(self) -> None:
         image = torch.tensor([[[[-0.75, 0.0, 0.75]]]], dtype=torch.float32)
         segmentation = torch.zeros_like(image)
         nodes = torch.empty((0, 3), dtype=torch.float32)

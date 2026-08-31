@@ -81,6 +81,7 @@ class ConfigurationTests(unittest.TestCase):
         )
         self.assertTrue(config["loss"]["supervise_target_graphs"])
         self.assertNotIn("domain_adaptation", config)
+        self.assertIsNone(config["augmentation"]["synthetic_mri"]["intensity_clamp"])
         self.assertNotIn("domain_lr", config["training"]["optimizer"])
         self.assertEqual(
             config["evaluation"]["protocol"]["iou_thresholds"],
@@ -444,8 +445,9 @@ class CompositionTests(unittest.TestCase):
             ), patch(
                 "data.loaders.synthetic_mri._build_training_intensity_transform",
                 return_value=lambda x: x,
-            ):
+            ) as intensity_builder:
                 train, validation, sampler = build_datasets(config)
+            intensity_builder.assert_called_once_with(0.35, 0.015, None)
             self.assertEqual((len(train), len(validation), sampler.num_samples), (7, 4, 8))
             self.assertTrue(train.datasets[0].datasets[0].augment)
             self.assertTrue(train.datasets[1].datasets[0].augment)
