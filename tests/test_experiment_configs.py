@@ -261,7 +261,9 @@ class ExperimentConfigTests(unittest.TestCase):
             finetune["data"]["datasets"]["synthetic_mri"]["validation_samples"]
         )
         self.assertEqual(pretrain["training"]["epochs"], 50)
-        self.assertEqual(finetune["training"]["epochs"], 100)
+        self.assertEqual(finetune["training"]["epochs"], 250)
+        self.assertEqual(finetune["training"]["early_stopping"]["min_epochs"], 0)
+        self.assertEqual(finetune["training"]["early_stopping"]["patience_epochs"], 50)
         for config in (pretrain, finetune):
             self.assertEqual(config["loss"]["node"]["classification"]["name"], "focal")
             self.assertEqual(config["loss"]["edge"]["classification"]["name"], "cross_entropy")
@@ -323,7 +325,9 @@ class ExperimentConfigTests(unittest.TestCase):
                 ]
             )
             self.assertEqual(pretrain["training"]["epochs"], 50)
-            self.assertEqual(finetune["training"]["epochs"], 100)
+            self.assertEqual(finetune["training"]["epochs"], 250)
+            self.assertEqual(finetune["training"]["early_stopping"]["min_epochs"], 0)
+            self.assertEqual(finetune["training"]["early_stopping"]["patience_epochs"], 50)
             for config in (pretrain, finetune):
                 self.assertEqual(
                     config["loss"]["node"]["classification"]["name"], node_name

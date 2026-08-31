@@ -15,7 +15,14 @@ data:
       validation_samples: null
 
 training:
-  epochs: 100
+  epochs: 250
+  early_stopping:
+    enabled: true
+    monitor: edge_mAP
+    mode: max
+    patience_epochs: 50
+    min_epochs: 0
+    min_delta: 0.0
   checkpoint:
     policy: best_only
     interval_epochs: 100
@@ -25,6 +32,7 @@ evaluation:
   interval_epochs: 5
   training_metrics:
     enabled: true
+    save_f1_checkpoints: true
     dataset: synthetic_mri
     max_samples: null
     selection_metric: edge_mAP

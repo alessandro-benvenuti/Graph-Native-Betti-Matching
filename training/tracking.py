@@ -19,6 +19,8 @@ class WandbTracker:
         self.run.define_metric("validation/*", step_metric="validation/epoch")
         self.run.define_metric("metrics/epoch")
         self.run.define_metric("metrics/*", step_metric="metrics/epoch")
+        self.run.define_metric("stopping/epoch")
+        self.run.define_metric("stopping/*", step_metric="stopping/epoch")
         self.run.define_metric(
             "validation/total",
             step_metric="validation/epoch",
@@ -30,6 +32,12 @@ class WandbTracker:
             ("node_mAR", "max"),
             ("edge_mAP", "max"),
             ("edge_mAR", "max"),
+            ("node_precision", "max"),
+            ("node_recall", "max"),
+            ("node_f1", "max"),
+            ("edge_precision", "max"),
+            ("edge_recall", "max"),
+            ("edge_f1", "max"),
             ("beta0_absolute_error", "min"),
             ("beta1_absolute_error", "min"),
             ("smd", "min"),
@@ -73,6 +81,23 @@ class WandbTracker:
             }
         )
         self.run.log(payload)
+
+    def log_selection(self, record):
+        self.run.summary["checkpoints/" + record["metric"]] = {
+            key: record[key]
+            for key in ("epoch", "iteration", "metric", "mode", "value", "checkpoint")
+        }
+
+    def log_stopping(self, state):
+        self.run.log({
+            "stopping/epoch": state["last_epoch"],
+            "stopping/best": state["best"],
+            "stopping/best_epoch": state["best_epoch"],
+            "stopping/stale_epochs": state["last_epoch"] - state["best_epoch"],
+            "stopping/patience_epochs": state["config"]["patience_epochs"],
+            "stopping/min_epochs": state["config"].get("min_epochs", 0),
+            "stopping/stop": int(state["stopped"]),
+        })
 
     def finish(self, exit_code: int = 0):
         self.run.finish(exit_code=int(exit_code))

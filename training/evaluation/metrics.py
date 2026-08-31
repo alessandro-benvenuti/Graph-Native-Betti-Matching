@@ -406,6 +406,19 @@ def evaluate_graph(
     metrics["edge_count_absolute_error"] = abs(
         metrics["predicted_edges"] - metrics["target_edges"]
     )
+    # Fixed-operating-point F1 uses ALL retained detections, not the AP cap.
+    # Keep the historical AP/AR matching states and aggregation unchanged.
+    f1_protocol = dict(protocol)
+    f1_protocol["iou_thresholds"] = [protocol.get("f1_iou_threshold", 0.5)]
+    f1_protocol["max_detections"] = max(len(predicted_nodes), len(predicted_edges), 1)
+    f1_states = graph_detection_states(
+        prediction, target_nodes, target_edges, protocol=f1_protocol
+    )
+    for prefix, state in zip(("node", "edge"), f1_states):
+        tp = int(state["matches"][0].sum())
+        metrics[prefix + "_tp"] = tp
+        metrics[prefix + "_fp"] = len(state["scores"]) - tp
+        metrics[prefix + "_fn"] = state["target_count"] - tp
     if return_detection_states:
         return metrics, node_state, edge_state
     return metrics
@@ -474,6 +487,18 @@ def summarize_metrics(
         summary[name + "_std"] = (
             float(np.std(fold_means, ddof=1)) if len(fold_means) > 1 else 0.0
         )
+    for prefix in ("node", "edge"):
+        count_names = [prefix + "_" + kind for kind in ("tp", "fp", "fn")]
+        if not all(name in names for name in count_names):
+            continue  # Backwards-compatible summaries of old metric rows.
+        tp, fp, fn = [sum(int(row[name]) for row in rows) for name in count_names]
+        for name, count in zip(count_names, (tp, fp, fn)):
+            summary[name + "_total"] = count
+        # Micro aggregation over the complete split; zero-division yields 0.
+        summary[prefix + "_precision"] = tp / (tp + fp) if tp + fp else 0.0
+        summary[prefix + "_recall"] = tp / (tp + fn) if tp + fn else 0.0
+        denominator = 2 * tp + fp + fn
+        summary[prefix + "_f1"] = 2 * tp / denominator if denominator else 0.0
     detection_groups = (
         ("node", node_detection_states),
         ("edge", edge_detection_states),

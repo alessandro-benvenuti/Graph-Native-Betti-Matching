@@ -18,6 +18,16 @@ from .checkpoint import (
     save_training_checkpoint,
 )
 from .evaluation import evaluate_model
+from .early_stopping import EarlyStopping
+
+
+def _write_json(path, payload):
+    """Replace small provenance records only after checkpoint writes succeed."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    temporary.replace(path)
 
 
 def _move_graph_batch(batch, device, input_name, supervise_target_graphs):
@@ -235,16 +245,30 @@ class Trainer:
         selection_mode = str(metric_config["selection_mode"])
         save_metric_checkpoint = bool(metric_config["save_best_checkpoint"])
         trainer_state = dict(trainer_state or {})
+        for key, current in (("selection_metric", selection_metric), ("selection_mode", selection_mode)):
+            if key in trainer_state and trainer_state[key] != current:
+                raise ValueError("Checkpoint selection configuration changed during resume: " + key)
+        stopping = EarlyStopping(
+            self.config["training"].get("early_stopping"),
+            trainer_state.get("early_stopping"),
+        )
+        if stopping.stopped:
+            if self.is_primary:
+                print("Early stopping was already reached in the resumed checkpoint; no training performed.")
+            return
+        save_f1 = bool(metric_config.get("save_f1_checkpoints", False))
+        best_f1 = dict(trainer_state.get("best_f1", {}))
         best_metric = trainer_state.get(
             "best_metric",
             -float("inf") if selection_mode == "max" else float("inf"),
         )
         metric_record_path = output.parent / "best-metric.json"
-        if metric_record_path.is_file():
+        if "best_metric" not in trainer_state and metric_record_path.is_file():
             record = json.loads(metric_record_path.read_text(encoding="utf-8"))
             if (
                 record.get("metric") == selection_metric
                 and record.get("mode") == selection_mode
+                and record.get("epoch", 0) <= start_epoch
             ):
                 best_metric = float(record["value"])
         best_validation = float(trainer_state.get("best_validation", float("inf")))
@@ -299,6 +323,11 @@ class Trainer:
 
             save_best_validation = False
             save_best_metric = False
+            save_node_f1 = False
+            save_edge_f1 = False
+            stop_training = False
+            pending_records = []
+            monitored_metrics = {}
             if epoch % validation_interval == 0 or epoch == epochs:
                 if self._distributed():
                     dist.barrier()
@@ -322,6 +351,7 @@ class Trainer:
                             epoch=epoch,
                         )
                     validation_total = validation.get("total")
+                    monitored_metrics["validation_total"] = validation_total
                     if (
                         policy in {"best_only", "interval_and_best"}
                         and validation_total is not None
@@ -341,15 +371,19 @@ class Trainer:
                         export_predictions=False,
                     )
                     selected_value = task_metrics.get(selection_metric)
+                    monitored_metrics.update(task_metrics)
                     print(
                         "metrics epoch={} node_mAP={:.6f} edge_mAP={:.6f} "
-                        "beta0_abs={:.6f} beta1_abs={:.6f} smd={:.6f}".format(
+                        "beta0_abs={:.6f} beta1_abs={:.6f} smd={:.6f} "
+                        "node_F1={:.6f} edge_F1={:.6f}".format(
                             epoch,
                             task_metrics.get("node_mAP", float("nan")),
                             task_metrics.get("edge_mAP", float("nan")),
                             task_metrics.get("beta0_absolute_error", float("nan")),
                             task_metrics.get("beta1_absolute_error", float("nan")),
                             task_metrics.get("smd", float("nan")),
+                            task_metrics.get("node_f1", float("nan")),
+                            task_metrics.get("edge_f1", float("nan")),
                         )
                     )
                     if self.tracker is not None:
@@ -393,31 +427,61 @@ class Trainer:
                             best_metric = selected_value
                             if save_metric_checkpoint:
                                 save_best_metric = True
-                                metric_record_path.write_text(
-                                    json.dumps(
-                                        {
+                                pending_records.append((
+                                    metric_record_path, {
                                             "checkpoint": "models/best_metric_checkpoint.pt",
                                             "epoch": int(epoch),
                                             "iteration": int(global_iteration),
                                             "metric": selection_metric,
                                             "mode": selection_mode,
                                             "value": selected_value,
-                                        },
-                                        indent=2,
-                                        sort_keys=True,
-                                    )
-                                    + "\n",
-                                    encoding="utf-8",
-                                )
+                                        }
+                                ))
+
+                    if save_f1:
+                        for name in ("node_f1", "edge_f1"):
+                            value = task_metrics.get(name)
+                            if value is None or not math.isfinite(float(value)):
+                                raise FloatingPointError("Missing/non-finite checkpoint metric: " + name)
+                            if name in best_f1 and value <= best_f1[name]["value"]:
+                                continue
+                            record = {
+                                "checkpoint": "models/best_{}_checkpoint.pt".format(name),
+                                "epoch": epoch, "iteration": global_iteration,
+                                "metric": name, "mode": "max", "value": float(value),
+                                "node_threshold": self.config["evaluation"]["node_threshold"],
+                                "edge_threshold": self.config["evaluation"]["edge_threshold"],
+                                "protocol": dict(self.config["evaluation"]["protocol"]),
+                                "f1_iou_threshold": self.config["evaluation"]["protocol"].get("f1_iou_threshold", 0.5),
+                                "f1_aggregation": "micro_all_retained_detections",
+                                "metrics": history_metrics,
+                            }
+                            best_f1[name] = record
+                            pending_records.append((
+                                output.parent / ("best-" + name.replace("_", "-") + ".json"), record
+                            ))
+                            if name == "node_f1":
+                                save_node_f1 = True
+                            else:
+                                save_edge_f1 = True
+
+                if self.is_primary:
+                    stop_training = stopping.update(epoch, monitored_metrics)
+                    if stopping.config["enabled"]:
+                        print("patience epoch={} monitor={} best={:.6f} best_epoch={} stale_epochs={}/{} stop={}".format(
+                            epoch, stopping.config["monitor"], stopping.best,
+                            stopping.best_epoch, epoch - stopping.best_epoch,
+                            stopping.config["patience_epochs"], stop_training,
+                        ))
 
                 if self._distributed():
                     flags = torch.tensor(
-                        [save_best_validation, save_best_metric],
+                        [save_best_validation, save_best_metric, save_node_f1, save_edge_f1, stop_training],
                         dtype=torch.uint8,
                         device=self.device,
                     )
                     dist.broadcast(flags, src=0)
-                    save_best_validation, save_best_metric = (
+                    save_best_validation, save_best_metric, save_node_f1, save_edge_f1, stop_training = (
                         bool(value) for value in flags.tolist()
                     )
 
@@ -426,12 +490,16 @@ class Trainer:
                 paths.append(output / "best_checkpoint.pt")
             if save_best_metric:
                 paths.append(output / "best_metric_checkpoint.pt")
+            if save_node_f1:
+                paths.append(output / "best_node_f1_checkpoint.pt")
+            if save_edge_f1:
+                paths.append(output / "best_edge_f1_checkpoint.pt")
             if policy in {"interval", "interval_and_best"} and (
                 epoch % interval == 0 or epoch == epochs
             ):
                 paths.append(output / "checkpoint_epoch={}.pt".format(epoch))
             if policy != "none" and (
-                epoch % latest_interval == 0 or epoch == epochs
+                epoch % latest_interval == 0 or epoch == epochs or stop_training
             ):
                 paths.append(output / "latest_checkpoint.pt")
             self._save_checkpoints(
@@ -443,9 +511,28 @@ class Trainer:
                     "best_metric": best_metric,
                     "selection_metric": selection_metric,
                     "selection_mode": selection_mode,
+                    "best_f1": best_f1,
+                    "early_stopping": stopping.state_dict(),
                     "world_size": self.world_size,
                 },
             )
+            if self.is_primary:
+                for path, record in pending_records:
+                    _write_json(path, record)
+                    if hasattr(self.tracker, "log_selection"):
+                        self.tracker.log_selection(record)
+                if stopping.config["enabled"]:
+                    _write_json(output.parent / "early-stopping.json", stopping.state_dict())
+                    if stopping.last_epoch == epoch and hasattr(self.tracker, "log_stopping"):
+                        self.tracker.log_stopping(stopping.state_dict())
+                if stop_training or epoch == epochs:
+                    _write_json(output.parent / "training-status.json", {
+                        "reason": "early_stopping" if stop_training else "max_epochs",
+                        "epoch": epoch, "iteration": global_iteration,
+                        "max_epochs": epochs,
+                    })
             if self._distributed():
                 dist.barrier()
+            if stop_training:
+                break
 __all__ = ["Trainer", "evaluate_loss", "train_step"]

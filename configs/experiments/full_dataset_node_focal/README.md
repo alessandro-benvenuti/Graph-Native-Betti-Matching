@@ -2,8 +2,8 @@
 
 This experiment trains from scratch on the original limited-target mixed regime
 for 50 epochs: 25,900 Plants and 4,000 synthetic-MRI training samples with
-balanced source/target sampling. It then initializes a 100-epoch MRI-only
-specialization on the complete new MRI split from the pretraining checkpoint
+balanced source/target sampling. It then initializes MRI-only specialization
+for up to 250 epochs (50-epoch patience, no minimum) on the complete new MRI split from the pretraining checkpoint
 selected by validation edge mAP.
 
 Both stages use unweighted node focal loss from epoch zero and the baseline

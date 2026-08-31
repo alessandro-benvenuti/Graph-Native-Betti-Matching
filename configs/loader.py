@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import os
 from pathlib import Path
 import re
@@ -547,6 +548,41 @@ def validate_config(config: Mapping[str, Any]) -> None:
     protocol = evaluation.get("protocol")
     if not isinstance(protocol, Mapping):
         raise ConfigError("evaluation.protocol must be a mapping")
+    f1_iou = protocol.get("f1_iou_threshold", 0.5)
+    if isinstance(f1_iou, bool) or not isinstance(f1_iou, (int, float)) or not 0 < f1_iou <= 1:
+        raise ConfigError("evaluation.protocol.f1_iou_threshold must lie in (0,1]")
+    save_f1 = training_metrics.get("save_f1_checkpoints", False)
+    if not isinstance(save_f1, bool):
+        raise ConfigError("evaluation.training_metrics.save_f1_checkpoints must be boolean")
+    if save_f1 and (not training_metrics["enabled"] or checkpoint["policy"] == "none"):
+        raise ConfigError("F1 checkpoints require training metrics and a checkpoint policy")
+    stopping = training.get("early_stopping", {})
+    if not isinstance(stopping, Mapping):
+        raise ConfigError("training.early_stopping must be a mapping")
+    if not isinstance(stopping.get("enabled", False), bool):
+        raise ConfigError("training.early_stopping.enabled must be boolean")
+    _positive_int(stopping.get("patience_epochs", 50), "training.early_stopping.patience_epochs")
+    minimum_epochs = _non_negative_int(
+        stopping.get("min_epochs", 0), "training.early_stopping.min_epochs"
+    )
+    if stopping.get("enabled", False) and minimum_epochs > training["epochs"]:
+        raise ConfigError("training.early_stopping.min_epochs cannot exceed training.epochs")
+    delta = stopping.get("min_delta", 0.0)
+    if isinstance(delta, bool) or not isinstance(delta, (int, float)) or not math.isfinite(delta) or delta < 0:
+        raise ConfigError("training.early_stopping.min_delta must be finite and non-negative")
+    monitor_modes = {
+        "edge_mAP": "max", "node_mAP": "max", "edge_f1": "max", "node_f1": "max",
+        "validation_total": "min", "beta0_absolute_error": "min",
+        "beta1_absolute_error": "min", "smd": "min",
+    }
+    monitor = stopping.get("monitor", "edge_mAP")
+    if monitor not in monitor_modes or stopping.get("mode", "max") != monitor_modes[monitor]:
+        raise ConfigError("Unsupported early-stopping monitor or incorrect min/max mode")
+    if stopping.get("enabled", False):
+        if checkpoint["policy"] == "none":
+            raise ConfigError("Early stopping requires checkpoints for the final resume state")
+        if monitor != "validation_total" and not training_metrics["enabled"]:
+            raise ConfigError("Metric-based early stopping requires training metrics")
     thresholds = protocol.get("iou_thresholds")
     if (
         not isinstance(thresholds, list)

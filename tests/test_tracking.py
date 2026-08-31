@@ -21,6 +21,7 @@ class _FakeRun:
         self.defined_metrics = []
         self.logged = []
         self.exit_codes = []
+        self.summary = {}
 
     def define_metric(self, *args, **kwargs):
         self.defined_metrics.append((args, kwargs))
@@ -58,6 +59,21 @@ def _config():
 
 
 class WandbTrackingTests(unittest.TestCase):
+    def test_selection_epochs_and_patience_are_logged(self):
+        from training.tracking import WandbTracker
+        run = _FakeRun()
+        tracker = WandbTracker(run)
+        record = dict(epoch=20, iteration=100, metric="node_f1", mode="max",
+                      value=0.8, checkpoint="models/best_node_f1_checkpoint.pt")
+        tracker.log_selection(record)
+        self.assertEqual(run.summary["checkpoints/node_f1"], record)
+        tracker.log_stopping(dict(last_epoch=70, best_epoch=20, best=0.8,
+                                  stopped=True, config={"patience_epochs": 50}))
+        self.assertEqual(run.logged[-1]["stopping/stale_epochs"], 50)
+        defined = [args[0] for args, kwargs in run.defined_metrics]
+        self.assertIn("metrics/node_f1", defined)
+        self.assertIn("metrics/edge_f1", defined)
+
     def test_initializes_logs_complete_records_and_finishes(self):
         fake_run = _FakeRun()
         fake_wandb = _FakeWandb(fake_run)

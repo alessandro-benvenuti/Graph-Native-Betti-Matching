@@ -8,7 +8,8 @@ These recipes add two controlled comparisons to the full-data node-focal run:
 
 Every recipe uses the original limited-target mixed pretraining regime (25,900
 Plants and 4,000 MRI training samples with balanced domain sampling) for 50
-epochs, followed by 100 epochs on the complete new MRI split. The default
+epochs, followed by up to 250 epochs on the complete new MRI split (50-epoch
+patience, no minimum). The default
 launcher uses one H100 for pretraining and four H100s for specialization while
 preserving a global batch of 32. The MRI stage starts from the pretraining
 checkpoint selected by validation edge mAP.

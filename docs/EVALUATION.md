@@ -41,6 +41,8 @@ implementation.
 The evaluator reports:
 
 - node and edge mAP/mAR over IoU 0.50:0.05:0.95 with at most 40 detections;
+- node and edge micro precision/recall/F1 at fixed confidence thresholds and
+  `protocol.f1_iou_threshold` (default IoU 0.5), without a detection-count cap;
 - Street Mover Distance (SMD);
 - absolute beta-0 and beta-1 errors;
 - target and predicted beta-0/beta-1 values;
@@ -56,6 +58,15 @@ edges, or SMD when either graph has no non-zero-length edge).
 The fixed target node size (`0.2`), edge half-width (`0.1`), IoU thresholds,
 SMD settings, fold count, and detection cap are explicit under
 `evaluation.protocol` in `configs/base.yaml`.
+
+F1 uses summed TP/FP/FN over all patches, rather than averaging per-patch F1 or
+combining AP with AR. Greedy score-ordered one-to-one box matching counts
+duplicates as false positives, including on patches with no GT. Zero
+denominators return zero. Edge F1 measures spatial edge-box agreement, not
+endpoint-correct graph adjacency. Precision/recall use all predictions retained
+by inference; node and edge confidence cuts are saved in the resolved config.
+See [training selection](TRAINING.md#epoch-patience-and-independent-f1-checkpoints)
+for checkpoint selection and patience behavior.
 
 The implementation intentionally fixes four logic errors in the old report
 script:
