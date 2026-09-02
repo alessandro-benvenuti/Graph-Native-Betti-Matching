@@ -96,6 +96,25 @@ python evaluate.py \
   --visualizations 4
 ```
 
+To export predictions only for explicitly selected source patches, either
+repeat `--sample-id` or provide a text manifest with one `source_sample_id` per
+line:
+
+```bash
+python evaluate.py \
+  --config configs/experiments/full_dataset_comparison/finetune_baseline.yaml \
+  --checkpoint "$GNBM_MRI_CHECKPOINT" \
+  --output-dir "$GNBM_OUTPUT_DIR/evaluation_selected" \
+  --dataset synthetic_mri \
+  --split test \
+  --sample-list /path/to/source_sample_ids.txt
+```
+
+`--sample-id`, `--sample-list`, and `--max-samples` are mutually exclusive.
+Explicit selection preserves manifest order and fails if any ID is absent from
+the requested split. This permits several models to be evaluated on exactly
+the same patches without exporting predictions for the rest of the split.
+
 The dataset root must contain the requested `val/` or `test/` split. Evaluation
 never enables random data augmentation. It sorts discovered source sample IDs
 before applying `--max-samples`, so a smoke-test subset is filesystem-independent.
@@ -108,6 +127,10 @@ Outputs are:
 - `predictions.json`: graph predictions, source IDs, and per-sample metrics;
 - `per-patch-metrics.csv`: one readable metrics row per source patch;
 - `plots/sample_*.png`: optional segmentation/target/prediction comparisons.
+
+For portable interactive inspection of these exports, including patch
+provenance and confidence/error overlays, see
+[Interactive SyntheticMRI graph visualization](GRAPH_PREDICTION_3D.md).
 
 Use `--no-export-predictions` when only aggregate metrics are needed.
 

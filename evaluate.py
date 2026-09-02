@@ -27,7 +27,19 @@ def _parser():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--dataset")
     parser.add_argument("--split", choices=("val", "test"), default="val")
-    parser.add_argument("--max-samples", type=int)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--max-samples", type=int)
+    selection.add_argument(
+        "--sample-id",
+        action="append",
+        dest="sample_ids",
+        help="Source dataset sample ID; repeat to evaluate multiple patches",
+    )
+    selection.add_argument(
+        "--sample-list",
+        type=Path,
+        help="Text file containing one source dataset sample ID per line",
+    )
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--workers", type=int)
     parser.add_argument("--device")
@@ -37,6 +49,24 @@ def _parser():
     parser.add_argument("--visualizations", type=int, default=0)
     parser.add_argument("--no-export-predictions", action="store_true")
     return parser
+
+
+def _selected_sample_ids(args):
+    if args.sample_ids is not None:
+        return args.sample_ids
+    if args.sample_list is None:
+        return None
+    if not args.sample_list.is_file():
+        raise FileNotFoundError(f"Sample list does not exist: {args.sample_list}")
+    with args.sample_list.open(encoding="utf-8") as handle:
+        sample_ids = [
+            line.strip()
+            for line in handle
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+    if not sample_ids:
+        raise ValueError(f"Sample list is empty: {args.sample_list}")
+    return sample_ids
 
 
 def _dataset_name(config, requested):
@@ -54,11 +84,13 @@ def _dataset_name(config, requested):
 
 def main():
     args = _parser().parse_args()
+    selected_sample_ids = _selected_sample_ids(args)
     config = copy.deepcopy(load_config(args.config))
     if args.device:
         config["runtime"]["device"] = args.device
     if args.batch_size is not None:
         config["data"]["batch_size"] = args.batch_size
+        config["data"]["validation_batch_size"] = args.batch_size
     if args.workers is not None:
         config["runtime"]["workers"] = args.workers
     if args.node_threshold is not None:
@@ -84,6 +116,7 @@ def main():
         dataset_name=dataset_name,
         split=args.split,
         max_samples=args.max_samples,
+        sample_ids=selected_sample_ids,
     )
     model = build_model(config).to(device)
     checkpoint_report = load_legacy_model_checkpoint(
@@ -130,6 +163,7 @@ def main():
         "dataset": dataset_name,
         "split": args.split,
         "requested_max_samples": args.max_samples,
+        "requested_sample_ids": selected_sample_ids,
         "evaluated_samples": summary["samples"],
         "bn_calibration_batches": calibration_batches,
     }

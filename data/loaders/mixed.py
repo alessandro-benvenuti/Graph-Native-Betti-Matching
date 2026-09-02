@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
-from typing import Mapping, Optional, Tuple
+from typing import Mapping, Optional, Sequence, Tuple
 
 import torch
 from torch.utils.data import (
@@ -301,6 +301,7 @@ def build_evaluation_loader(
     dataset_name: str,
     split: str = "val",
     max_samples: Optional[int] = None,
+    sample_ids: Optional[Sequence[str]] = None,
 ):
     """Build an unshuffled, augmentation-free loader for one configured dataset."""
 
@@ -322,7 +323,27 @@ def build_evaluation_loader(
     dataset = _dataset_for_split(dataset_name, settings, config, split)
     if hasattr(dataset, "records"):
         dataset.records.sort(key=lambda record: record.sample_id)
-    if max_samples is not None:
+    if max_samples is not None and sample_ids is not None:
+        raise ValueError("max_samples and sample_ids are mutually exclusive")
+    if sample_ids is not None:
+        requested = [str(sample_id).strip() for sample_id in sample_ids]
+        if not requested or any(not sample_id for sample_id in requested):
+            raise ValueError("sample_ids must contain at least one non-empty ID")
+        if len(set(requested)) != len(requested):
+            raise ValueError("sample_ids must not contain duplicates")
+        records_by_id = {record.sample_id: record for record in dataset.records}
+        missing = [sample_id for sample_id in requested if sample_id not in records_by_id]
+        if missing:
+            preview = ", ".join(repr(sample_id) for sample_id in missing[:5])
+            suffix = " ..." if len(missing) > 5 else ""
+            raise ValueError(
+                f"Requested sample IDs are absent from the {split} split: "
+                f"{preview}{suffix}"
+            )
+        # Preserve the caller's order so every model export follows the same
+        # explicitly recorded patch manifest.
+        dataset.records = [records_by_id[sample_id] for sample_id in requested]
+    elif max_samples is not None:
         if int(max_samples) <= 0:
             raise ValueError("max_samples must be positive or None")
         dataset.records = select_capped_records(

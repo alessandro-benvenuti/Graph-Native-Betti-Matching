@@ -531,6 +531,33 @@ class CompositionTests(unittest.TestCase):
                 ["sample_000000", "sample_000001"],
             )
 
+            selected = build_evaluation_loader(
+                config,
+                dataset_name="synthetic_mri",
+                split="test",
+                sample_ids=["sample_000002", "sample_000000"],
+            )
+            self.assertEqual(
+                [record.sample_id for record in selected.dataset.records],
+                ["sample_000002", "sample_000000"],
+            )
+
+            with self.assertRaisesRegex(ValueError, "absent from the test split"):
+                build_evaluation_loader(
+                    config,
+                    dataset_name="synthetic_mri",
+                    split="test",
+                    sample_ids=["sample_missing"],
+                )
+            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+                build_evaluation_loader(
+                    config,
+                    dataset_name="synthetic_mri",
+                    split="test",
+                    max_samples=1,
+                    sample_ids=["sample_000000"],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
