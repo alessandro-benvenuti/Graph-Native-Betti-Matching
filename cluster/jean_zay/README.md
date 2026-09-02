@@ -1,5 +1,8 @@
 # Jean Zay setup and execution
 
+For the complete training, evaluation, environment-variable, CLI, YAML, and
+checkpoint reference, see [`../../docs/RUNNING_THE_MODEL.md`](../../docs/RUNNING_THE_MODEL.md).
+
 This directory targets Jean Zay's dedicated H100 partition:
 
 - `arch/h100` architecture modules;

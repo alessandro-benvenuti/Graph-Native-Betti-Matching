@@ -113,15 +113,19 @@ done
 For a storage-bounded comparison that first chooses ten reproducible random
 test patches, runs inference for only those patches through the baseline,
 node-focal, and node+matched-edge-focal full-data checkpoints, and then renders
-all 30 HTML reports, use:
+all 30 HTML reports, submit a one-GPU job from a Jean-Zay login node:
 
 ```bash
-bash scripts/evaluate_random_patches_3d.sh \
+bash cluster/jean_zay/submit_evaluate_random_patches_3d.sh \
   /path/to/baseline/best_metric_checkpoint.pt \
   /path/to/node_focal/best_metric_checkpoint.pt \
   /path/to/node_edge_focal/best_metric_checkpoint.pt \
   "$SCRATCH/experiments/gnbm/random10_three_models"
 ```
+
+The lower-level `scripts/evaluate_random_patches_3d.sh` must run inside a GPU
+allocation; launching it directly on `jean-zay3` fails because login nodes do
+not expose CUDA. Other running Slurm jobs do not lend their GPUs to that shell.
 
 The script records the shared IDs in `source_sample_ids.txt` and refuses to
 overwrite an existing output directory. Override its defaults with
