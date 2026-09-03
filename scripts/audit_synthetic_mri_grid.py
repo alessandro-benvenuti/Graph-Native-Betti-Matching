@@ -135,6 +135,7 @@ class CenterlineEdge:
 class CroppedGraph:
     positions: np.ndarray
     edges: np.ndarray
+    tangent_contact_count: int = 0
 
     @property
     def edge_count(self) -> int:
@@ -364,10 +365,11 @@ class SourceGraph:
     def _clip_polyline(
         cls, points: np.ndarray, bounds: np.ndarray, tolerance: float = 1e-8
     ) -> list[np.ndarray]:
-        """Return connected, positive-length portions of a polyline in a box."""
+        """Return connected portions and isolated contacts with a closed box."""
 
         components: list[list[np.ndarray]] = []
         active: list[np.ndarray] = []
+        point_contacts: list[np.ndarray] = []
         for start, end in zip(points[:-1], points[1:]):
             clipped = cls._clip_segment(start, end, bounds)
             if clipped is None:
@@ -377,6 +379,11 @@ class SourceGraph:
                 continue
             clipped_start, clipped_end = clipped
             if np.linalg.norm(clipped_end - clipped_start) <= tolerance:
+                if not any(
+                    np.allclose(clipped_start, present, atol=tolerance, rtol=0.0)
+                    for present in point_contacts
+                ):
+                    point_contacts.append(clipped_start)
                 continue
             if not active:
                 active = [clipped_start, clipped_end]
@@ -388,7 +395,17 @@ class SourceGraph:
                 active = [clipped_start, clipped_end]
         if active:
             components.append(active)
-        return [np.asarray(component) for component in components]
+        arrays = [np.asarray(component) for component in components]
+        for contact in point_contacts:
+            if not any(
+                any(
+                    np.allclose(contact, point, atol=tolerance, rtol=0.0)
+                    for point in component
+                )
+                for component in arrays
+            ):
+                arrays.append(np.asarray([contact]))
+        return arrays
 
     def _edge_geometries(self) -> list[CenterlineEdge]:
         """Require a one-to-one correspondence between VVG and CSV edges."""
@@ -455,10 +472,15 @@ class SourceGraph:
             return index
 
         edges = []
+        tangent_contact_count = 0
         for edge_index in self._candidate_edge_indices(bounds):
             source_edge = self.edge_geometries[int(edge_index)]
             polyline = self.edge_polylines[int(edge_index)]
             for component in self._clip_polyline(polyline, bounds):
+                if len(component) == 1:
+                    component_endpoint_index(component[0], source_edge)
+                    tangent_contact_count += 1
+                    continue
                 left = component_endpoint_index(component[0], source_edge)
                 right = component_endpoint_index(component[-1], source_edge)
                 if left != right:
@@ -466,7 +488,11 @@ class SourceGraph:
 
         array = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
         edge_array = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
-        return CroppedGraph(positions=array, edges=edge_array)
+        return CroppedGraph(
+            positions=array,
+            edges=edge_array,
+            tangent_contact_count=tangent_contact_count,
+        )
 
 
 def _stem_id(path: Path) -> str:

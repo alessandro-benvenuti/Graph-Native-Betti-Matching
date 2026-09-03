@@ -150,6 +150,37 @@ class GridAuditTests(unittest.TestCase):
         np.testing.assert_array_equal(cropped.positions[1], np.asarray((10.0, 2.0, 2.0)))
         np.testing.assert_array_equal(cropped.edges, np.asarray(((0, 1),)))
 
+    def test_graph_crop_keeps_one_node_for_tangent_contact(self):
+        graph = SourceGraph(
+            nodes={
+                1: np.asarray((-2.0, -2.0, 5.0)),
+                2: np.asarray((2.0, -2.0, 5.0)),
+            },
+            edges=[(1, 2)],
+            centerlines=[
+                CenterlineEdge(
+                    1,
+                    2,
+                    tuple(
+                        np.asarray(item, dtype=float)
+                        for item in ((-1, -1, 5), (0, 0, 5), (1, -1, 5))
+                    ),
+                )
+            ],
+        )
+        bounds = np.asarray(((0.0, 10.0),) * 3)
+
+        inherited = graph.crop_inherited(bounds)
+        cropped = graph.crop(bounds)
+
+        self.assertEqual(len(inherited.positions), 2)
+        np.testing.assert_array_equal(inherited.positions[0], inherited.positions[1])
+        self.assertEqual(inherited.edge_count, 1)
+        self.assertEqual(len(cropped.positions), 1)
+        np.testing.assert_array_equal(cropped.positions[0], np.asarray((0.0, 0.0, 5.0)))
+        self.assertEqual(cropped.edge_count, 0)
+        self.assertEqual(cropped.tangent_contact_count, 1)
+
     def test_graph_crop_splits_edge_that_leaves_and_reenters(self):
         graph = SourceGraph(
             nodes={

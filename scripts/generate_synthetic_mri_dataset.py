@@ -53,6 +53,7 @@ PATCH_INDEX_FIELDS = (
     "legacy_node_count",
     "legacy_edge_count",
     "graph_crop_changed",
+    "tangent_contact_count",
     "image_mean",
     "image_std",
     "foreground_voxels",
@@ -561,6 +562,7 @@ def _generate_patient(task: Mapping[str, object]) -> dict[str, object]:
                     graph_geometry_signature(cropped)
                     != graph_geometry_signature(inherited_crop)
                 ),
+                "tangent_contact_count": cropped.tangent_contact_count,
                 "image_mean": image_mean,
                 "image_std": image_std,
                 "foreground_voxels": foreground_voxels,
@@ -619,6 +621,9 @@ def combine_patient_manifests(output: Path) -> tuple[int, int, dict[str, dict[st
                 "edge_count_delta": sum(
                     int(row["edge_count"]) - int(row["legacy_edge_count"])
                     for row in selected
+                ),
+                "tangent_contact_count": sum(
+                    int(row["tangent_contact_count"]) for row in selected
                 ),
             }
     return len(manifests), len(rows), statistics
@@ -748,7 +753,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     split_bytes = split_output.read_bytes()
     configuration = {
-        "format_version": 2,
+        "format_version": 3,
         "source_root": str(root),
         "split_sha256": hashlib.sha256(split_bytes).hexdigest(),
         "patch_size": list(patch_size),
@@ -757,7 +762,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "maximum_stride": list(args.maximum_stride),
         "grid": "endpoint_distributed_v1",
         "normalization": "legacy_mad_clip_v1",
-        "graph_crop": "endpoint_aware_exact_polyline_box_v2",
+        "graph_crop": "endpoint_aware_closed_box_with_tangent_contacts_v3",
         "selection_filter": None,
         "raw_seg_materialization": (
             "hardlink_from_existing" if reuse_patch_root is not None else "generated"

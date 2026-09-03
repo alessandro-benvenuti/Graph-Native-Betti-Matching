@@ -55,6 +55,7 @@ SUMMARY_FIELDS = (
     "saved_edges",
     "source_edges_intersecting",
     "exact_clipped_components",
+    "tangent_contacts",
     "current_clipped_components",
     "missing_components",
     "extra_components",
@@ -84,6 +85,7 @@ EDGE_FIELDS = (
     "reverse_endpoint_cost",
     "max_polyline_step_voxels",
     "exact_components",
+    "tangent_contacts",
     "current_components",
     "missing_components",
     "extra_components",
@@ -164,29 +166,9 @@ def orient_edge_polyline(
 def clip_polyline_to_box(
     points: np.ndarray, bounds: np.ndarray, tolerance: float = 1e-8
 ) -> list[np.ndarray]:
-    """Clip a polyline and return its connected in-box components."""
+    """Use the production cropper's closed-box component definition."""
 
-    components: list[list[np.ndarray]] = []
-    active: list[np.ndarray] = []
-    for start, end in zip(points[:-1], points[1:]):
-        clipped = clip_segment_to_box(start, end, bounds)
-        if clipped is None:
-            if active:
-                components.append(active)
-                active = []
-            continue
-        clipped_start, clipped_end = clipped
-        if not active:
-            active = [clipped_start, clipped_end]
-        elif np.allclose(active[-1], clipped_start, atol=tolerance, rtol=0.0):
-            if not np.allclose(active[-1], clipped_end, atol=tolerance, rtol=0.0):
-                active.append(clipped_end)
-        else:
-            components.append(active)
-            active = [clipped_start, clipped_end]
-    if active:
-        components.append(active)
-    return [np.asarray(component) for component in components]
+    return SourceGraph._clip_polyline(points, bounds, tolerance=tolerance)
 
 
 def _on_boundary(point: np.ndarray, bounds: np.ndarray, tolerance: float = 1e-7) -> bool:
@@ -286,7 +268,7 @@ def diagnose_sample(
 
     edge_rows = []
     intersecting = exact_total = current_total = 0
-    reversed_count = empty_count = compared = displaced = 0
+    reversed_count = empty_count = compared = displaced = tangent_total = 0
     missing_total = extra_total = 0
     maximum_displacement = 0.0
 
@@ -299,6 +281,7 @@ def diagnose_sample(
             continue
         intersecting += 1
         exact_count = len(exact_components)
+        tangent_contacts = sum(len(component) == 1 for component in exact_components)
         current_count, current_boundary = inherited_edge_crop(graph, edge, bounds)
         exact_boundary = exact_boundary_nodes(exact_components, bounds)
         displacements = _boundary_displacements(current_boundary, exact_boundary, raw_image.affine)
@@ -310,6 +293,7 @@ def diagnose_sample(
         node2_inside = _inside(graph.nodes[edge.node2], bounds)
 
         exact_total += exact_count
+        tangent_total += tangent_contacts
         current_total += current_count
         missing_total += missing
         extra_total += extra
@@ -326,6 +310,8 @@ def diagnose_sample(
             statuses.append("extra_component")
         if edge_displaced:
             statuses.append("displaced_boundary")
+        if tangent_contacts:
+            statuses.append("tangent_contact")
         if orientation == "reversed":
             statuses.append("reversed_samples")
         if orientation == "empty":
@@ -351,6 +337,7 @@ def diagnose_sample(
                 "reverse_endpoint_cost": reverse_cost,
                 "max_polyline_step_voxels": maximum_step,
                 "exact_components": exact_count,
+                "tangent_contacts": tangent_contacts,
                 "current_components": current_count,
                 "missing_components": missing,
                 "extra_components": extra,
@@ -374,6 +361,7 @@ def diagnose_sample(
         "saved_edges": int(row["edge_count"]),
         "source_edges_intersecting": intersecting,
         "exact_clipped_components": exact_total,
+        "tangent_contacts": tangent_total,
         "current_clipped_components": current_total,
         "missing_components": missing_total,
         "extra_components": extra_total,

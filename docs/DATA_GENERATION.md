@@ -36,6 +36,8 @@ syntheticMRI/
 - Graph edges are treated as endpoint-aware polylines and clipped exactly to
   the effective crop. True endpoints are always included, VVG sample order is
   normalized, and every boundary crossing receives an interpolated endpoint.
+  A centerline that only touches the closed crop box contributes one isolated
+  tangent-contact node and no zero-length edge.
 - MRI normalization reproduces the inherited MAD clipping and scaling.
 - VTP graph coordinates are stored in normalized patch coordinates, matching
   the current SyntheticMRI loader.
@@ -152,7 +154,7 @@ data_root=/lustre/fsn1/projects/rech/vnc/upz73jr/datasets/syntheticMRI
 
 python -u scripts/generate_synthetic_mri_dataset.py \
   --root "$data_root" \
-  --output-dir "$data_root/new_patches_boundary_v2" \
+  --output-dir "$data_root/new_patches_boundary_v3" \
   --split-output "$data_root/new_split.csv" \
   --reuse-patches-from "$data_root/new_patches" \
   --resume \
@@ -165,7 +167,8 @@ unchanged file payload but remain valid if the old directory entry is later
 renamed or removed. Source files are never edited. Corrected VTP files and all
 metadata are newly written.
 
-`patch_index.csv` records the old and corrected node/edge counts and a
-`graph_crop_changed` flag for every patch. `generation_summary.json` aggregates
-the changed-patch fraction and total node/edge deltas for the complete dataset
-and by split, providing the dataset-wide control during regeneration.
+`patch_index.csv` records the old and corrected node/edge counts, a
+`graph_crop_changed` flag, and the number of tangent-contact nodes for every
+patch. `generation_summary.json` aggregates the tangent contacts,
+changed-patch fraction, and total node/edge deltas for the complete dataset and
+by split, providing the dataset-wide control during regeneration.

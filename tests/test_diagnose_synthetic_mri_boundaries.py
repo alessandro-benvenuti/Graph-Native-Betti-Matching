@@ -74,6 +74,16 @@ class BoundaryDiagnosticTests(unittest.TestCase):
         np.testing.assert_allclose(components[0][0], (0.0, 2.0, 2.0))
         np.testing.assert_allclose(components[0][-1], (10.0, 2.0, 2.0))
 
+    def test_tangent_contact_is_one_zero_dimensional_component(self):
+        points = np.asarray(
+            ((-1.0, -1.0, 5.0), (0.0, 0.0, 5.0), (1.0, -1.0, 5.0))
+        )
+        components = clip_polyline_to_box(points, self.bounds)
+
+        self.assertEqual(len(components), 1)
+        self.assertEqual(components[0].shape, (1, 3))
+        np.testing.assert_array_equal(components[0][0], (0.0, 0.0, 5.0))
+
 
 if __name__ == "__main__":
     unittest.main()
