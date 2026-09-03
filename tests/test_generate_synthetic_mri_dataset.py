@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -80,7 +81,7 @@ class GeneratorIntegrationTests(unittest.TestCase):
         (graph / "nodes.csv").write_text(
             "id;pos_x;pos_y;pos_z\n"
             "1;1;1;1\n"
-            "2;2;2;2\n"
+            "2;5;1;1\n"
         )
         (graph / "edges.csv").write_text("id;node1id;node2id\n1;1;2\n")
         (graph / "graph.vvg").write_text(
@@ -93,8 +94,7 @@ class GeneratorIntegrationTests(unittest.TestCase):
                                 "node1": 1,
                                 "node2": 2,
                                 "skeletonVoxels": [
-                                    {"pos": [1, 1, 1]},
-                                    {"pos": [2, 2, 2]},
+                                    {"pos": [2, 1, 1]},
                                 ],
                             }
                         ]
@@ -161,9 +161,41 @@ class GeneratorIntegrationTests(unittest.TestCase):
             summary = json.loads((output / "generation_summary.json").read_text())
             self.assertTrue(summary["complete"])
             self.assertEqual(summary["patches_indexed"], 7)
+            self.assertEqual(
+                summary["dataset_statistics"]["all"]["graph_crop_changed_patches"],
+                7,
+            )
+            self.assertEqual(summary["dataset_statistics"]["all"]["node_count_delta"], 7)
+            self.assertEqual(summary["dataset_statistics"]["all"]["edge_count_delta"], 7)
 
             self.assertEqual(main([*common, "--resume"]), 0)
             self.assertEqual(len(list(output.glob("*/raw/*_data.nii.gz"))), 7)
+
+            corrected = root / "new_patches_boundary_v2"
+            self.assertEqual(
+                main(
+                    [
+                        *common,
+                        "--output-dir",
+                        str(corrected),
+                        "--split-output",
+                        str(split_path),
+                        "--reuse-patches-from",
+                        str(output),
+                        "--resume",
+                    ]
+                ),
+                0,
+            )
+            original_raw = sorted(output.glob("*/raw/*_data.nii.gz"))[0]
+            reused_raw = corrected / original_raw.relative_to(output)
+            self.assertEqual(os.stat(original_raw).st_ino, os.stat(reused_raw).st_ino)
+            corrected_config = json.loads(
+                (corrected / "generation_config.json").read_text()
+            )
+            self.assertEqual(
+                corrected_config["raw_seg_materialization"], "hardlink_from_existing"
+            )
 
 
 if __name__ == "__main__":

@@ -157,6 +157,18 @@ class SourceGraph:
         self.node_positions = np.asarray(
             [self.nodes[node] for node in self.node_ids], dtype=np.float64
         ).reshape(-1, 3)
+        self.edge_geometries = tuple(self._edge_geometries())
+        self.edge_polylines = tuple(
+            self._oriented_polyline(edge) for edge in self.edge_geometries
+        )
+        self.edge_minima = np.asarray(
+            [polyline.min(axis=0) for polyline in self.edge_polylines],
+            dtype=np.float64,
+        ).reshape(-1, 3)
+        self.edge_maxima = np.asarray(
+            [polyline.max(axis=0) for polyline in self.edge_polylines],
+            dtype=np.float64,
+        ).reshape(-1, 3)
 
     @classmethod
     def from_directory(cls, directory: Path) -> "SourceGraph":
@@ -244,7 +256,9 @@ class SourceGraph:
             segments.append((start, previous))
         return segments
 
-    def crop(self, bounds: np.ndarray) -> CroppedGraph:
+    def crop_inherited(self, bounds: np.ndarray) -> CroppedGraph:
+        """Reproduce the historical sample-based crop policy for auditing."""
+
         if bounds.shape != (3, 2):
             raise ValueError(f"Expected bounds [3,2], received {bounds.shape}")
         if len(self.node_ids):
@@ -269,7 +283,10 @@ class SourceGraph:
             if left in kept_ids and right in kept_ids
         ]
 
-        for edge in self.centerlines:
+        candidate_indices = set(self._candidate_edge_indices(bounds).tolist())
+        for edge_index, edge in enumerate(self.centerlines):
+            if edge_index not in candidate_indices:
+                continue
             node1_inside = edge.node1 in kept_ids
             node2_inside = edge.node2 in kept_ids
             if node1_inside and not node2_inside:
@@ -289,6 +306,163 @@ class SourceGraph:
                     start_index = len(positions)
                     positions.extend((start.copy(), end.copy()))
                     edges.append((start_index, start_index + 1))
+
+        array = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
+        edge_array = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
+        return CroppedGraph(positions=array, edges=edge_array)
+
+    @staticmethod
+    def _clip_segment(
+        start: np.ndarray,
+        end: np.ndarray,
+        bounds: np.ndarray,
+        tolerance: float = 1e-12,
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """Return the exact portion of a segment inside an axis-aligned box."""
+
+        start = np.asarray(start, dtype=np.float64)
+        end = np.asarray(end, dtype=np.float64)
+        direction = end - start
+        lower_t, upper_t = 0.0, 1.0
+        for axis in range(3):
+            if abs(float(direction[axis])) <= tolerance:
+                if start[axis] < bounds[axis, 0] or start[axis] > bounds[axis, 1]:
+                    return None
+                continue
+            first = (bounds[axis, 0] - start[axis]) / direction[axis]
+            second = (bounds[axis, 1] - start[axis]) / direction[axis]
+            entering, leaving = sorted((float(first), float(second)))
+            lower_t = max(lower_t, entering)
+            upper_t = min(upper_t, leaving)
+            if lower_t > upper_t + tolerance:
+                return None
+        return start + lower_t * direction, start + upper_t * direction
+
+    def _oriented_polyline(self, edge: CenterlineEdge) -> np.ndarray:
+        """Return node1 -> centerline samples -> node2, correcting sample order."""
+
+        node1 = np.asarray(self.nodes[edge.node1], dtype=np.float64)
+        node2 = np.asarray(self.nodes[edge.node2], dtype=np.float64)
+        samples = np.asarray(edge.positions, dtype=np.float64).reshape(-1, 3)
+        if len(samples):
+            forward_cost = np.linalg.norm(samples[0] - node1) + np.linalg.norm(
+                samples[-1] - node2
+            )
+            reverse_cost = np.linalg.norm(samples[0] - node2) + np.linalg.norm(
+                samples[-1] - node1
+            )
+            if reverse_cost < forward_cost:
+                samples = samples[::-1]
+        points = [node1, *samples, node2]
+        deduplicated = [points[0]]
+        for point in points[1:]:
+            if not np.allclose(point, deduplicated[-1], atol=1e-9, rtol=0.0):
+                deduplicated.append(point)
+        return np.asarray(deduplicated, dtype=np.float64)
+
+    @classmethod
+    def _clip_polyline(
+        cls, points: np.ndarray, bounds: np.ndarray, tolerance: float = 1e-8
+    ) -> list[np.ndarray]:
+        """Return connected, positive-length portions of a polyline in a box."""
+
+        components: list[list[np.ndarray]] = []
+        active: list[np.ndarray] = []
+        for start, end in zip(points[:-1], points[1:]):
+            clipped = cls._clip_segment(start, end, bounds)
+            if clipped is None:
+                if active:
+                    components.append(active)
+                    active = []
+                continue
+            clipped_start, clipped_end = clipped
+            if np.linalg.norm(clipped_end - clipped_start) <= tolerance:
+                continue
+            if not active:
+                active = [clipped_start, clipped_end]
+            elif np.allclose(active[-1], clipped_start, atol=tolerance, rtol=0.0):
+                if not np.allclose(active[-1], clipped_end, atol=tolerance, rtol=0.0):
+                    active.append(clipped_end)
+            else:
+                components.append(active)
+                active = [clipped_start, clipped_end]
+        if active:
+            components.append(active)
+        return [np.asarray(component) for component in components]
+
+    def _edge_geometries(self) -> list[CenterlineEdge]:
+        """Require a one-to-one correspondence between VVG and CSV edges."""
+
+        remaining: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        for left, right in self.edges:
+            remaining.setdefault(tuple(sorted((left, right))), []).append((left, right))
+        result = []
+        for centerline in self.centerlines:
+            key = tuple(sorted((centerline.node1, centerline.node2)))
+            matches = remaining.get(key)
+            if not matches:
+                raise ValueError(
+                    "VVG centerline has no matching CSV edge: "
+                    f"({centerline.node1}, {centerline.node2})"
+                )
+            matches.pop()
+            result.append(centerline)
+        unmatched = [edge for matches in remaining.values() for edge in matches]
+        if unmatched:
+            raise ValueError(
+                f"CSV edges have no matching VVG centerline ({len(unmatched)} total): "
+                f"{unmatched[:5]}"
+            )
+        return result
+
+    def _candidate_edge_indices(self, bounds: np.ndarray) -> np.ndarray:
+        if not len(self.edge_polylines):
+            return np.empty((0,), dtype=np.int64)
+        overlap = np.logical_and(
+            self.edge_maxima >= bounds[:, 0], self.edge_minima <= bounds[:, 1]
+        ).all(axis=1)
+        return np.flatnonzero(overlap)
+
+    def crop(self, bounds: np.ndarray) -> CroppedGraph:
+        """Clip complete endpoint-aware edge polylines exactly to ``bounds``."""
+
+        if bounds.shape != (3, 2):
+            raise ValueError(f"Expected bounds [3,2], received {bounds.shape}")
+        if len(self.node_ids):
+            inside_mask = np.logical_and(
+                self.node_positions >= bounds[:, 0],
+                self.node_positions <= bounds[:, 1],
+            ).all(axis=1)
+            inside_ids = self.node_ids[inside_mask].tolist()
+            positions = [position.copy() for position in self.node_positions[inside_mask]]
+            kept_indices = {
+                int(node_id): index for index, node_id in enumerate(inside_ids)
+            }
+        else:
+            positions = []
+            kept_indices = {}
+
+        def component_endpoint_index(
+            point: np.ndarray, source_edge: CenterlineEdge
+        ) -> int:
+            for node_id in (source_edge.node1, source_edge.node2):
+                if node_id in kept_indices and np.allclose(
+                    point, self.nodes[node_id], atol=1e-7, rtol=0.0
+                ):
+                    return kept_indices[node_id]
+            index = len(positions)
+            positions.append(point.copy())
+            return index
+
+        edges = []
+        for edge_index in self._candidate_edge_indices(bounds):
+            source_edge = self.edge_geometries[int(edge_index)]
+            polyline = self.edge_polylines[int(edge_index)]
+            for component in self._clip_polyline(polyline, bounds):
+                left = component_endpoint_index(component[0], source_edge)
+                right = component_endpoint_index(component[-1], source_edge)
+                if left != right:
+                    edges.append((left, right))
 
         array = np.asarray(positions, dtype=np.float64).reshape(-1, 3)
         edge_array = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
@@ -546,7 +720,8 @@ def _candidate_row(
         snr = None
 
     bounds = patch_world_bounds(start, crop_size, affine)
-    cropped = graph.crop(bounds)
+    # This report intentionally reproduces the historical selection policy.
+    cropped = graph.crop_inherited(bounds)
     coordinate_min, coordinate_max, coordinate_valid = coordinate_range(
         cropped.positions, affine, start, pad, patch_size
     )

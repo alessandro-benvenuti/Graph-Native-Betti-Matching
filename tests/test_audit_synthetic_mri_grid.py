@@ -36,14 +36,25 @@ class GridAuditTests(unittest.TestCase):
                 2: np.asarray((8.0, 8.0, 8.0)),
             },
             edges=[(1, 2)],
-            centerlines=[],
+            centerlines=[CenterlineEdge(1, 2, ())],
         )
         cropped = graph.crop(np.asarray(((0.0, 10.0),) * 3))
         self.assertEqual(len(cropped.positions), 2)
         self.assertEqual(cropped.edge_count, 1)
         np.testing.assert_array_equal(cropped.edges, np.asarray(((0, 1),)))
 
-    def test_graph_crop_adds_boundary_node_for_truncated_edge(self):
+    def test_source_graph_rejects_csv_vvg_edge_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "no matching VVG centerline"):
+            SourceGraph(
+                nodes={
+                    1: np.asarray((2.0, 2.0, 2.0)),
+                    2: np.asarray((8.0, 8.0, 8.0)),
+                },
+                edges=[(1, 2)],
+                centerlines=[],
+            )
+
+    def test_graph_crop_adds_exact_boundary_node_for_truncated_edge(self):
         graph = SourceGraph(
             nodes={
                 1: np.asarray((2.0, 2.0, 2.0)),
@@ -61,8 +72,58 @@ class GridAuditTests(unittest.TestCase):
         cropped = graph.crop(np.asarray(((0.0, 10.0),) * 3))
         self.assertEqual(len(cropped.positions), 2)
         self.assertEqual(cropped.edge_count, 1)
+        np.testing.assert_array_equal(cropped.positions[-1], np.asarray((10.0, 2.0, 2.0)))
+        np.testing.assert_array_equal(cropped.edges, np.asarray(((0, 1),)))
+
+    def test_inherited_crop_uses_last_inside_sample(self):
+        graph = SourceGraph(
+            nodes={
+                1: np.asarray((2.0, 2.0, 2.0)),
+                2: np.asarray((20.0, 2.0, 2.0)),
+            },
+            edges=[(1, 2)],
+            centerlines=[
+                CenterlineEdge(
+                    1,
+                    2,
+                    tuple(np.asarray(item, dtype=float) for item in ((2, 2, 2), (8, 2, 2), (12, 2, 2))),
+                )
+            ],
+        )
+        cropped = graph.crop_inherited(np.asarray(((0.0, 10.0),) * 3))
         np.testing.assert_array_equal(cropped.positions[-1], np.asarray((8.0, 2.0, 2.0)))
-        np.testing.assert_array_equal(cropped.edges, np.asarray(((1, 0),)))
+
+    def test_graph_crop_includes_true_endpoints_when_samples_do_not(self):
+        graph = SourceGraph(
+            nodes={
+                1: np.asarray((8.0, 2.0, 2.0)),
+                2: np.asarray((12.0, 2.0, 2.0)),
+            },
+            edges=[(1, 2)],
+            centerlines=[
+                CenterlineEdge(1, 2, (np.asarray((9.0, 2.0, 2.0)),))
+            ],
+        )
+        bounds = np.asarray(((0.0, 10.0),) * 3)
+        self.assertEqual(graph.crop_inherited(bounds).edge_count, 0)
+        cropped = graph.crop(bounds)
+        self.assertEqual(cropped.edge_count, 1)
+        np.testing.assert_array_equal(cropped.positions[-1], np.asarray((10.0, 2.0, 2.0)))
+
+    def test_graph_crop_is_independent_of_centerline_order(self):
+        nodes = {
+            1: np.asarray((2.0, 2.0, 2.0)),
+            2: np.asarray((20.0, 2.0, 2.0)),
+        }
+        points = tuple(
+            np.asarray(item, dtype=float)
+            for item in ((3, 2, 2), (8, 2, 2), (12, 2, 2), (19, 2, 2))
+        )
+        forward = SourceGraph(nodes, [(1, 2)], [CenterlineEdge(1, 2, points)])
+        reverse = SourceGraph(nodes, [(1, 2)], [CenterlineEdge(1, 2, points[::-1])])
+        bounds = np.asarray(((0.0, 10.0),) * 3)
+        np.testing.assert_allclose(forward.crop(bounds).positions, reverse.crop(bounds).positions)
+        np.testing.assert_array_equal(forward.crop(bounds).edges, reverse.crop(bounds).edges)
 
     def test_graph_crop_adds_segment_when_both_endpoints_are_outside(self):
         graph = SourceGraph(
@@ -85,9 +146,32 @@ class GridAuditTests(unittest.TestCase):
         cropped = graph.crop(np.asarray(((0.0, 10.0),) * 3))
         self.assertEqual(len(cropped.positions), 2)
         self.assertEqual(cropped.edge_count, 1)
-        np.testing.assert_array_equal(cropped.positions[0], np.asarray((1.0, 2.0, 2.0)))
-        np.testing.assert_array_equal(cropped.positions[1], np.asarray((8.0, 2.0, 2.0)))
+        np.testing.assert_array_equal(cropped.positions[0], np.asarray((0.0, 2.0, 2.0)))
+        np.testing.assert_array_equal(cropped.positions[1], np.asarray((10.0, 2.0, 2.0)))
         np.testing.assert_array_equal(cropped.edges, np.asarray(((0, 1),)))
+
+    def test_graph_crop_splits_edge_that_leaves_and_reenters(self):
+        graph = SourceGraph(
+            nodes={
+                1: np.asarray((1.0, 1.0, 1.0)),
+                2: np.asarray((1.0, 9.0, 1.0)),
+            },
+            edges=[(1, 2)],
+            centerlines=[
+                CenterlineEdge(
+                    1,
+                    2,
+                    tuple(
+                        np.asarray(item, dtype=float)
+                        for item in ((-2, 1, 1), (-2, 12, 1))
+                    ),
+                )
+            ],
+        )
+        cropped = graph.crop(np.asarray(((0.0, 10.0),) * 3))
+        self.assertEqual(cropped.edge_count, 2)
+        self.assertEqual(len(cropped.positions), 4)
+        np.testing.assert_array_equal(cropped.edges, np.asarray(((0, 2), (3, 1))))
 
     def test_inherited_rejection_priority(self):
         common = dict(

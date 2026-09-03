@@ -50,6 +50,9 @@ PATCH_INDEX_FIELDS = (
     "start_w",
     "node_count",
     "edge_count",
+    "legacy_node_count",
+    "legacy_edge_count",
+    "graph_crop_changed",
     "image_mean",
     "image_std",
     "foreground_voxels",
@@ -333,6 +336,20 @@ def write_nifti(path: Path, array: np.ndarray) -> None:
     os.replace(temporary, path)
 
 
+def hardlink_patch(source: Path, destination: Path) -> None:
+    """Materialize an unchanged patch without duplicating its file payload."""
+
+    if not source.is_file():
+        raise FileNotFoundError(f"Reusable patch is missing: {source}")
+    try:
+        os.link(source, destination)
+    except OSError as error:
+        raise OSError(
+            f"Could not hard-link {source} to {destination}. Both datasets must be "
+            "on the same filesystem; no implicit full-data copy was attempted."
+        ) from error
+
+
 def write_vtp_graph(path: Path, positions: np.ndarray, edges: np.ndarray) -> None:
     """Write a minimal ASCII VTK PolyData graph readable by PyVista/VTK."""
 
@@ -359,6 +376,18 @@ def write_vtp_graph(path: Path, positions: np.ndarray, edges: np.ndarray) -> Non
 </VTKFile>
 """
     atomic_write_text(path, payload)
+
+
+def graph_geometry_signature(graph) -> tuple[tuple, tuple]:
+    """Return an index-independent, tolerance-stable geometric graph signature."""
+
+    points = [tuple(np.round(position, decimals=6)) for position in graph.positions]
+    nodes = tuple(sorted(points))
+    edges = []
+    for left, right in graph.edges:
+        endpoints = sorted((points[int(left)], points[int(right)]))
+        edges.append(tuple(endpoints))
+    return nodes, tuple(sorted(edges))
 
 
 def patient_token(patient_id: str) -> str:
@@ -395,6 +424,9 @@ def _generate_patient(task: Mapping[str, object]) -> dict[str, object]:
     crop_size = tuple(size - 2 * border for size, border in zip(patch_size, pad))
     maximum_stride = tuple(int(value) for value in task["maximum_stride"])
     fingerprint = str(task["fingerprint"])
+    reuse_patch_root = (
+        Path(str(task["reuse_patch_root"])) if task.get("reuse_patch_root") else None
+    )
 
     marker = output / ".complete" / f"{patient_token(patient_id)}.json"
     if marker.exists():
@@ -419,11 +451,22 @@ def _generate_patient(task: Mapping[str, object]) -> dict[str, object]:
     if not np.allclose(raw_image.affine, segmentation_image.affine):
         raise ValueError(f"Raw/segmentation affine mismatch for {patient_id}")
 
-    raw = np.asanyarray(raw_image.dataobj)
-    segmentation = np.asarray(segmentation_image.dataobj)
-    normalized, threshold = normalize_like_legacy(raw)
+    reuse_rows = task.get("reuse_rows")
+    if reuse_rows is None:
+        raw = np.asanyarray(raw_image.dataobj)
+        segmentation = np.asarray(segmentation_image.dataobj)
+        normalized, threshold = normalize_like_legacy(raw)
+    else:
+        segmentation = None
+        normalized = None
+        threshold = float(task["normalization_threshold"])
     graph = SourceGraph.from_directory(graph_directory)
     positions = endpoint_grid_positions(raw_image.shape, crop_size, maximum_stride)
+    if reuse_rows is not None and len(reuse_rows) != len(positions):
+        raise ValueError(
+            f"Reusable patch count mismatch for {patient_id}: "
+            f"received={len(reuse_rows)}, expected={len(positions)}"
+        )
     rows = []
     token = patient_token(patient_id)
 
@@ -431,13 +474,39 @@ def _generate_patient(task: Mapping[str, object]) -> dict[str, object]:
         slices = tuple(
             slice(origin, origin + size) for origin, size in zip(start, crop_size)
         )
-        image_patch = np.pad(
-            normalized[slices], tuple((border, border) for border in pad)
-        ).astype(np.float32, copy=False)
-        segmentation_patch = np.pad(
-            segmentation[slices], tuple((border, border) for border in pad)
-        )
+        if reuse_rows is None:
+            image_patch = np.pad(
+                normalized[slices], tuple((border, border) for border in pad)
+            ).astype(np.float32, copy=False)
+            segmentation_patch = np.pad(
+                segmentation[slices], tuple((border, border) for border in pad)
+            )
+            image_mean = float(image_patch.mean())
+            image_std = float(image_patch.std())
+            foreground_voxels = int(np.count_nonzero(segmentation_patch > 0))
+            foreground_fraction = float(foreground_voxels / segmentation_patch.size)
+        else:
+            reused = reuse_rows[patch_index]
+            expected_sample_id = f"sample_{token}_{patch_index:04d}"
+            if reused["sample_id"] != expected_sample_id:
+                raise ValueError(
+                    f"Reusable sample ID mismatch: received={reused['sample_id']}, "
+                    f"expected={expected_sample_id}"
+                )
+            expected_start = tuple(
+                int(reused[field]) for field in ("start_d", "start_h", "start_w")
+            )
+            if expected_start != tuple(start):
+                raise ValueError(
+                    f"Reusable grid mismatch for {patient_id} patch {patch_index}: "
+                    f"received={expected_start}, expected={start}"
+                )
+            image_mean = float(reused["image_mean"])
+            image_std = float(reused["image_std"])
+            foreground_voxels = int(reused["foreground_voxels"])
+            foreground_fraction = float(reused["foreground_fraction"])
         bounds = patch_world_bounds(start, crop_size, raw_image.affine)
+        inherited_crop = graph.crop_inherited(bounds)
         cropped = graph.crop(bounds)
         if len(cropped.positions):
             voxel_positions = world_to_voxel(cropped.positions, raw_image.affine)
@@ -456,11 +525,20 @@ def _generate_patient(task: Mapping[str, object]) -> dict[str, object]:
             normalized_positions = np.empty((0, 3), dtype=np.float32)
 
         sample_id = f"sample_{token}_{patch_index:04d}"
-        write_nifti(output / split / "raw" / f"{sample_id}_data.nii.gz", image_patch)
-        write_nifti(
-            output / split / "seg" / f"{sample_id}_seg.nii.gz",
-            segmentation_patch,
-        )
+        raw_destination = output / split / "raw" / f"{sample_id}_data.nii.gz"
+        segmentation_destination = output / split / "seg" / f"{sample_id}_seg.nii.gz"
+        if reuse_patch_root is None:
+            write_nifti(raw_destination, image_patch)
+            write_nifti(segmentation_destination, segmentation_patch)
+        else:
+            hardlink_patch(
+                reuse_patch_root / split / "raw" / raw_destination.name,
+                raw_destination,
+            )
+            hardlink_patch(
+                reuse_patch_root / split / "seg" / segmentation_destination.name,
+                segmentation_destination,
+            )
         write_vtp_graph(
             output / split / "vtp" / f"{sample_id}_graph.vtp",
             normalized_positions,
@@ -477,12 +555,16 @@ def _generate_patient(task: Mapping[str, object]) -> dict[str, object]:
                 "start_w": start[2],
                 "node_count": len(cropped.positions),
                 "edge_count": cropped.edge_count,
-                "image_mean": float(image_patch.mean()),
-                "image_std": float(image_patch.std()),
-                "foreground_voxels": int(np.count_nonzero(segmentation_patch > 0)),
-                "foreground_fraction": float(
-                    np.count_nonzero(segmentation_patch > 0) / segmentation_patch.size
+                "legacy_node_count": len(inherited_crop.positions),
+                "legacy_edge_count": inherited_crop.edge_count,
+                "graph_crop_changed": (
+                    graph_geometry_signature(cropped)
+                    != graph_geometry_signature(inherited_crop)
                 ),
+                "image_mean": image_mean,
+                "image_std": image_std,
+                "foreground_voxels": foreground_voxels,
+                "foreground_fraction": foreground_fraction,
             }
         )
 
@@ -524,6 +606,20 @@ def combine_patient_manifests(output: Path) -> tuple[int, int, dict[str, dict[st
                 "foreground_fraction": float(
                     np.mean([float(row["foreground_fraction"]) for row in selected])
                 ),
+                "graph_crop_changed_patches": sum(
+                    row["graph_crop_changed"] == "True" for row in selected
+                ),
+                "graph_crop_changed_fraction": float(
+                    np.mean([row["graph_crop_changed"] == "True" for row in selected])
+                ),
+                "node_count_delta": sum(
+                    int(row["node_count"]) - int(row["legacy_node_count"])
+                    for row in selected
+                ),
+                "edge_count_delta": sum(
+                    int(row["edge_count"]) - int(row["legacy_edge_count"])
+                    for row in selected
+                ),
             }
     return len(manifests), len(rows), statistics
 
@@ -550,6 +646,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--split-output", type=Path)
+    parser.add_argument(
+        "--reuse-patches-from",
+        type=Path,
+        help="Hard-link unchanged raw/seg patches from a compatible generated dataset",
+    )
     parser.add_argument("--patch-size", type=int, nargs=3, default=(64, 64, 64))
     parser.add_argument("--pad", type=int, nargs=3, default=(5, 5, 5))
     parser.add_argument("--maximum-stride", type=int, nargs=3, default=(40, 40, 40))
@@ -568,6 +669,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = args.root.resolve()
     output = (args.output_dir or (root / "new_patches")).resolve()
     split_output = (args.split_output or (root / "new_split.csv")).resolve()
+    reuse_patch_root = (
+        args.reuse_patches_from.resolve() if args.reuse_patches_from else None
+    )
+    if reuse_patch_root == output:
+        raise ValueError("--reuse-patches-from must differ from --output-dir")
     if args.workers <= 0:
         raise ValueError("--workers must be positive")
     if args.split_trials <= 0:
@@ -615,6 +721,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         features = read_patient_features(feature_path)
         if {item.patient_id for item in features} != set(sources):
             raise ValueError(f"Patient feature/source mismatch: {feature_path}")
+    if features is None and reuse_patch_root is not None:
+        reusable_features = reuse_patch_root / "patient_features.csv"
+        if not reusable_features.is_file():
+            raise FileNotFoundError(
+                f"Reusable patient features are missing: {reusable_features}"
+            )
+        features = read_patient_features(reusable_features)
+        if {item.patient_id for item in features} != set(sources):
+            raise ValueError(
+                f"Reusable patient feature/source mismatch: {reusable_features}"
+            )
     if features is None:
         features = collect_patient_features(sources)
     write_csv_rows(
@@ -631,7 +748,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     split_bytes = split_output.read_bytes()
     configuration = {
-        "format_version": 1,
+        "format_version": 2,
         "source_root": str(root),
         "split_sha256": hashlib.sha256(split_bytes).hexdigest(),
         "patch_size": list(patch_size),
@@ -640,8 +757,65 @@ def main(argv: Sequence[str] | None = None) -> int:
         "maximum_stride": list(args.maximum_stride),
         "grid": "endpoint_distributed_v1",
         "normalization": "legacy_mad_clip_v1",
+        "graph_crop": "endpoint_aware_exact_polyline_box_v2",
         "selection_filter": None,
+        "raw_seg_materialization": (
+            "hardlink_from_existing" if reuse_patch_root is not None else "generated"
+        ),
     }
+    reuse_rows_by_patient = None
+    reuse_thresholds = None
+    if reuse_patch_root is not None:
+        reuse_configuration_path = reuse_patch_root / "generation_config.json"
+        if not reuse_configuration_path.is_file():
+            raise FileNotFoundError(
+                f"Reusable dataset has no generation configuration: {reuse_configuration_path}"
+            )
+        reuse_configuration = json.loads(reuse_configuration_path.read_text())
+        compatible_fields = (
+            "split_sha256",
+            "patch_size",
+            "pad",
+            "crop_size",
+            "maximum_stride",
+            "grid",
+            "normalization",
+        )
+        mismatches = [
+            field
+            for field in compatible_fields
+            if reuse_configuration.get(field) != configuration.get(field)
+        ]
+        if mismatches:
+            raise ValueError(
+                "Reusable dataset is incompatible for hard-linking raw/seg patches; "
+                f"different fields: {mismatches}"
+            )
+        reuse_rows_by_patient = {patient_id: [] for patient_id in sources}
+        with (reuse_patch_root / "patch_index.csv").open(newline="") as handle:
+            for row in csv.DictReader(handle):
+                patient_id = row["patient_id"]
+                if patient_id not in reuse_rows_by_patient:
+                    raise ValueError(
+                        f"Reusable patch index contains unknown patient: {patient_id}"
+                    )
+                if row["split"] != split_map[patient_id]:
+                    raise ValueError(
+                        f"Reusable split mismatch for patient {patient_id}: {row['split']}"
+                    )
+                reuse_rows_by_patient[patient_id].append(row)
+        for rows in reuse_rows_by_patient.values():
+            rows.sort(key=lambda row: int(row["patch_index"]))
+            if [int(row["patch_index"]) for row in rows] != list(range(len(rows))):
+                raise ValueError("Reusable patch indices must be contiguous from zero")
+        reuse_thresholds = {}
+        for patient_id in sources:
+            marker = reuse_patch_root / ".complete" / f"{patient_token(patient_id)}.json"
+            if not marker.is_file():
+                raise FileNotFoundError(f"Reusable patient marker is missing: {marker}")
+            reuse_thresholds[patient_id] = float(
+                json.loads(marker.read_text())["normalization_threshold"]
+            )
     fingerprint = configuration_fingerprint(configuration)
     manifest_path = output / "generation_config.json"
     if manifest_path.exists():
@@ -736,6 +910,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "pad": pad,
                 "maximum_stride": tuple(args.maximum_stride),
                 "fingerprint": fingerprint,
+                "reuse_patch_root": (
+                    str(reuse_patch_root) if reuse_patch_root is not None else None
+                ),
+                "reuse_rows": (
+                    reuse_rows_by_patient[patient_id]
+                    if reuse_rows_by_patient is not None
+                    else None
+                ),
+                "normalization_threshold": (
+                    reuse_thresholds[patient_id]
+                    if reuse_thresholds is not None
+                    else None
+                ),
             }
         )
 
