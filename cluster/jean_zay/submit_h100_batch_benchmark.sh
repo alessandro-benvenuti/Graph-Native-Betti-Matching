@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit the four-H100 batch-8 versus batch-32 throughput benchmark.
+# Submit the two-H100 development batch-8 versus batch-32 benchmark.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -21,7 +21,7 @@ mkdir -p "$report_dir" "$output_dir"
 
 submission="$(sbatch \
   --chdir="$repo_dir" \
-  --qos=qos_gpu_h100-t3 \
+  --qos=qos_gpu_h100-dev \
   --time="${GNBM_BENCHMARK_WALLTIME:-02:00:00}" \
   --output="$report_dir/slurm-%j.out" \
   --error="$report_dir/slurm-%j.err" \

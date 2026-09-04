@@ -5,8 +5,8 @@
 #SBATCH --constraint=h100
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=40
+#SBATCH --gres=gpu:2
+#SBATCH --cpus-per-task=20
 #SBATCH --hint=nomultithread
 
 set -eo pipefail
@@ -54,8 +54,8 @@ run_case() {
   export GNBM_CONFIG="$config"
   export GNBM_RUN_NAME="h100_${case_name}_job${SLURM_JOB_ID}"
   export GNBM_OUTPUT_DIR="$case_output"
-  export GNBM_GPUS=4
-  export GNBM_GPUS_PER_NODE=4
+  export GNBM_GPUS=2
+  export GNBM_GPUS_PER_NODE=2
   export GNBM_BATCH_SIZE="$batch_size"
   export WANDB_MODE=disabled
   unset GNBM_INITIAL_WEIGHTS GNBM_RESUME_CHECKPOINT GNBM_AUTO_RESUME
@@ -75,9 +75,9 @@ run_case() {
   {
     echo "case=$case_name"
     echo "batch_size_per_gpu=$batch_size"
-    echo "global_batch_size=$((batch_size * 4))"
+    echo "global_batch_size=$((batch_size * 2))"
     echo "wall_seconds=$((end_seconds - start_seconds))"
-    echo "allocated_gpu_hours=$(awk -v seconds="$((end_seconds - start_seconds))" 'BEGIN {printf "%.6f", seconds * 4 / 3600}')"
+    echo "allocated_gpu_hours=$(awk -v seconds="$((end_seconds - start_seconds))" 'BEGIN {printf "%.6f", seconds * 2 / 3600}')"
     echo "exit_code=$exit_code"
   } > "$case_report/summary.txt"
 
