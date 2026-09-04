@@ -1,0 +1,33 @@
+defaults:
+  - finetune_node_edge_focal_g20.yaml
+
+# Full boundary-corrected MRI train/validation sets, used to compare resource
+# layouts that preserve the production global batch of 32.
+experiment:
+  name: boundary_h100_full_dataset_benchmark
+
+data:
+  validation_batch_size: 32
+  datasets:
+    synthetic_mri:
+      train_samples: null
+      validation_samples: null
+
+training:
+  epochs: 2
+  early_stopping:
+    enabled: false
+  checkpoint:
+    policy: none
+    interval_epochs: 2
+    latest_interval_epochs: 2
+
+evaluation:
+  interval_epochs: 2
+  training_metrics:
+    enabled: false
+    save_best_checkpoint: false
+    save_f1_checkpoints: false
+
+tracking:
+  enabled: false
