@@ -21,6 +21,8 @@ class WandbTracker:
         self.run.define_metric("metrics/*", step_metric="metrics/epoch")
         self.run.define_metric("stopping/epoch")
         self.run.define_metric("stopping/*", step_metric="stopping/epoch")
+        self.run.define_metric("performance/epoch")
+        self.run.define_metric("performance/*", step_metric="performance/epoch")
         self.run.define_metric(
             "validation/total",
             step_metric="validation/epoch",
@@ -87,6 +89,13 @@ class WandbTracker:
             key: record[key]
             for key in ("epoch", "iteration", "metric", "mode", "value", "checkpoint")
         }
+
+    def log_performance(self, metrics, *, epoch: int):
+        payload = {"performance/epoch": int(epoch)}
+        payload.update(
+            {"performance/" + name: float(value) for name, value in metrics.items()}
+        )
+        self.run.log(payload)
 
     def log_stopping(self, state):
         self.run.log({

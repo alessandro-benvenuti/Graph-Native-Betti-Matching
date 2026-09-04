@@ -1,0 +1,35 @@
+defaults:
+  - finetune_node_edge_focal_g20.yaml
+
+# Short, representative throughput benchmark. The same deterministic subset and
+# initialization are used for every batch size submitted by the benchmark job.
+experiment:
+  name: boundary_h100_batch_benchmark
+
+data:
+  validation_batch_size: 32
+  datasets:
+    synthetic_mri:
+      train_samples: 4096
+      validation_samples: 64
+      sample_cap_selection: seeded_random
+      sample_cap_seed: 364505
+
+training:
+  epochs: 2
+  early_stopping:
+    enabled: false
+  checkpoint:
+    policy: none
+    interval_epochs: 2
+    latest_interval_epochs: 2
+
+evaluation:
+  interval_epochs: 2
+  training_metrics:
+    enabled: false
+    save_best_checkpoint: false
+    save_f1_checkpoints: false
+
+tracking:
+  enabled: false

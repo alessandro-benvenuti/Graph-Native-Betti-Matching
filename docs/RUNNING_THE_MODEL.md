@@ -204,6 +204,27 @@ The dependent MRI job uses the matching pretraining run's
 `best_metric_checkpoint.pt`, selected by maximum validation edge mAP, as
 initial weights.
 
+### Four-H100 batch-size benchmark
+
+Before committing the full boundary-data sweep to a larger global batch, run
+the controlled batch-8 versus batch-32 benchmark:
+
+```bash
+cd "$WORK/projects/Graph-Native-Betti-Matching"
+source cluster/jean_zay/env.sh
+bash cluster/jean_zay/submit_h100_batch_benchmark.sh
+```
+
+Both cases use four H100s, the same seeded subset of 4,096 MRI training patches,
+64 validation patches, two epochs, and the gamma-2 node+edge-focal recipe. The
+second epoch is the representative warmed-up measurement. The submission
+command prints a report directory below
+`$WORK/logs/graph-native-betti-matching/batch-benchmarks/`. Its
+`comparison.txt` contains throughput and epoch-time speedups; each case also
+preserves `performance.jsonl`, peak allocation, two-second GPU telemetry,
+allocated GPU-hours, resolved configuration, dataset manifest, train log, and
+software/hardware provenance.
+
 ### Historical two-stage pipelines
 
 These launchers submit limited-MRI mixed pretraining and dependent full-MRI

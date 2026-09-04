@@ -8,7 +8,7 @@ import torch
 from torch import nn
 
 from configs import load_config
-from models.matcher import HungarianMatcher
+from models.matcher import FusedGromovWassersteinMatcher, HungarianMatcher
 from training.losses import GraphCriterion
 from training.losses.criterion import _ratio_upsample
 
@@ -139,6 +139,44 @@ class GraphCriterionTests(unittest.TestCase):
         self.assertIsNotNone(predictions["pred_logits"].grad)
         self.assertIsNotNone(predictions["pred_nodes"].grad)
         self.assertIsNotNone(relation.linear.weight.grad)
+
+    def test_fgw_matching_integrates_with_discrete_losses_and_backward(self):
+        config = _config()
+        config["model"]["matcher"] = {
+            "type": "fgw",
+            "class_cost": 2.0,
+            "node_cost": 5.0,
+            "structure_weight": 0.2,
+            "candidate_count": 4,
+            "max_iter": 50,
+            "tolerance": 1e-7,
+            "random_state": 0,
+            "pair_chunk_size": 2,
+        }
+        matcher = FusedGromovWassersteinMatcher(
+            class_cost=2.0,
+            node_cost=5.0,
+            structure_weight=0.2,
+            candidate_count=4,
+        )
+        matcher._solve_transport = lambda *args: torch.eye(3, 4).numpy() / 3.0
+        relation = CountingRelationHead()
+        criterion = GraphCriterion(config, matcher, relation)
+        tokens, predictions, targets = _batch()
+
+        candidates = matcher.matching_candidates(predictions, targets)
+        structures = criterion._matching_structure(tokens, candidates)
+        self.assertEqual(structures[0].shape, (4, 4))
+        self.assertTrue(torch.allclose(structures[0], structures[0].T))
+        self.assertTrue(torch.equal(structures[0].diagonal(), torch.zeros(4)))
+
+        calls_before_losses = relation.calls
+        losses = criterion(tokens, predictions, targets)
+        self.assertTrue(torch.isfinite(losses["total"]))
+        self.assertGreater(relation.calls, calls_before_losses)
+        losses["total"].backward()
+        self.assertTrue(torch.isfinite(tokens.grad).all())
+        self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
 
     def test_betti_terms_reach_relation_head(self):
         config = _config()

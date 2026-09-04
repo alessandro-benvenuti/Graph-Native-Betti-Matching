@@ -379,6 +379,35 @@ class GraphCriterion(nn.Module):
             + self.relation_embed(reverse).softmax(-1)[:, 1]
         )
 
+    @torch.no_grad()
+    def _matching_structure(self, tokens, candidate_indices):
+        """Score all query pairs for a structure-aware matcher without a graph."""
+
+        batch_size = tokens.shape[0]
+        object_tokens = tokens[..., : self.object_queries, :]
+        relation_tokens = tokens[
+            ..., self.object_queries : self.object_queries + self.relation_tokens, :
+        ]
+        chunk_size = int(
+            self.config["model"]["matcher"].get("pair_chunk_size", 1024)
+        )
+        structures = []
+        for batch in range(batch_size):
+            candidates = candidate_indices[batch].to(tokens.device)
+            count = int(candidates.numel())
+            structure = tokens.new_zeros((count, count))
+            pairs = torch.combinations(
+                torch.arange(count, device=tokens.device), r=2
+            )
+            for chunk in pairs.split(chunk_size):
+                probabilities = self._symmetric_edge_probabilities(
+                    object_tokens[batch, candidates], relation_tokens[batch], chunk
+                )
+                structure[chunk[:, 0], chunk[:, 1]] = probabilities
+                structure[chunk[:, 1], chunk[:, 0]] = probabilities
+            structures.append(structure)
+        return structures
+
     def loss_topology(self, tokens, target_edges, assignments):
         zero = tokens.sum() * 0.0
         metrics = {"betti_h0": zero, "betti_h1": zero}
@@ -433,7 +462,19 @@ class GraphCriterion(nn.Module):
         return metrics
 
     def forward(self, tokens, predictions, targets):
-        assignments = self.matcher(predictions, targets)
+        candidate_indices = None
+        predicted_structure = None
+        if self.matcher.requires_structure:
+            candidate_indices = self.matcher.matching_candidates(
+                predictions, targets
+            )
+            predicted_structure = self._matching_structure(tokens, candidate_indices)
+        assignments = self.matcher(
+            predictions,
+            targets,
+            predicted_structure=predicted_structure,
+            candidate_indices=candidate_indices,
+        )
         losses = {
             "class": self.loss_classification(predictions["pred_logits"], assignments),
             "nodes": self.loss_nodes(predictions["pred_nodes"], targets["nodes"], assignments),

@@ -15,12 +15,16 @@ configuration before a dataset is constructed.
 - `finetune_synthetic_mri_focal.yaml`: the focal-edge variant. It differs from
   the finetuning configuration only where the experiment is intentionally
   different.
+- `finetune_synthetic_mri_focal_fgw.yaml`: a ready-to-run focal finetuning
+  configuration using the FGW matcher.
 - `experiments/finetune_mri/`: controlled baseline/focal/Betti/focal+Betti
   finetuning matrix. See `docs/EXPERIMENTS.md` before launching it.
 - `experiments/focal_matrix_600/`: paired mixed-pretraining and 600-epoch MRI
   specialization configurations for the seven unweighted-focal recipes.
 - `losses/`: reusable focal and Betti overlays containing only loss changes;
   they never modify datasets, model architecture, or optimization settings.
+- `matchers/fgw.yaml`: semi-relaxed Fused Gromov-Wasserstein matching followed
+  by a hard one-to-one projection.
 - `smoke_mixed_focal_betti.yaml`: one-epoch, four-sample integration check for
   the complete focal + topology training path.
 - `overfit_synthetic_mri_focal_betti.yaml`: ten-epoch fixed eight-sample MRI
@@ -98,6 +102,29 @@ CLI overrides should be restricted to operational values such as paths, batch
 size, worker count, resume checkpoint, and run name. Scientific settings such as
 the loss type or balancing mode belong in version-controlled YAML files so the
 resolved configuration fully describes an experiment.
+
+## FGW matcher
+
+The FGW overlay replaces only the training-time matcher. Ground-truth nodes are
+the fixed-mass source measure, prediction queries are the relaxed target
+measure, and the returned transport is projected globally to one-to-one hard
+matches before the existing node, edge, and topology losses run.
+
+Scoring the complete graph of 120 queries would require 7,140 undirected query
+pairs, or 14,280 ordered relation evaluations after symmetrization, per sample.
+`candidate_count` bounds this work. The candidate pool always contains every
+coordinate/class Hungarian match and is filled with the highest-confidence
+remaining queries. Set it to 120 for exhaustive diagnostic runs.
+`pair_chunk_size` bounds temporary relation-feature memory and does not change
+the selected candidates or objective.
+
+Use the overlay after a complete training configuration, for example:
+
+```yaml
+defaults:
+  - finetune_synthetic_mri_focal.yaml
+  - matchers/fgw.yaml
+```
 
 ## Model compatibility values
 

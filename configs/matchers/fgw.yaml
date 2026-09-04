@@ -1,0 +1,11 @@
+model:
+  matcher:
+    type: fgw
+    class_cost: 2.0
+    node_cost: 5.0
+    structure_weight: 0.2
+    candidate_count: 32
+    max_iter: 100
+    tolerance: 1.0e-7
+    random_state: 0
+    pair_chunk_size: 1024

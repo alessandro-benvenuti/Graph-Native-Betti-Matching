@@ -232,6 +232,40 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if not isinstance(decoder.get("use_cuda_extension"), bool):
         raise ConfigError("model.decoder.use_cuda_extension must be a boolean")
 
+    matcher = model.get("matcher")
+    if not isinstance(matcher, Mapping):
+        raise ConfigError("model.matcher must be a mapping")
+    if matcher.get("type") not in {"hungarian", "fgw"}:
+        raise ConfigError("model.matcher.type must be hungarian or fgw")
+    try:
+        class_cost = float(matcher.get("class_cost"))
+        node_cost = float(matcher.get("node_cost"))
+    except (TypeError, ValueError) as error:
+        raise ConfigError("model.matcher costs must be numeric") from error
+    if class_cost < 0 or node_cost < 0 or class_cost + node_cost == 0:
+        raise ConfigError(
+            "model.matcher costs must be non-negative and at least one must be positive"
+        )
+    if matcher["type"] == "fgw":
+        try:
+            structure_weight = float(matcher.get("structure_weight"))
+            tolerance = float(matcher.get("tolerance"))
+        except (TypeError, ValueError) as error:
+            raise ConfigError("FGW matcher weights/tolerance must be numeric") from error
+        if not 0 <= structure_weight <= 1:
+            raise ConfigError("model.matcher.structure_weight must lie in [0,1]")
+        if tolerance <= 0:
+            raise ConfigError("model.matcher.tolerance must be positive")
+        _positive_int(matcher.get("max_iter"), "model.matcher.max_iter")
+        _positive_int(
+            matcher.get("candidate_count"), "model.matcher.candidate_count"
+        )
+        _positive_int(
+            matcher.get("pair_chunk_size"), "model.matcher.pair_chunk_size"
+        )
+        if not isinstance(matcher.get("random_state", 0), int):
+            raise ConfigError("model.matcher.random_state must be an integer")
+
     datasets = data.get("datasets")
     if not isinstance(datasets, Mapping) or not datasets:
         raise ConfigError("data.datasets must contain at least one dataset")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+import time
 from typing import Mapping
 
 import torch
@@ -277,6 +278,12 @@ class Trainer:
             sampler = getattr(self.train_loader, "sampler", None)
             if hasattr(sampler, "set_epoch"):
                 sampler.set_epoch(epoch)
+            if self._distributed():
+                dist.barrier()
+            if self.device.type == "cuda":
+                torch.cuda.synchronize(self.device)
+                torch.cuda.reset_peak_memory_stats(self.device)
+            epoch_started = time.perf_counter()
             sums = {}
             batches = 0
             for batch in self.train_loader:
@@ -310,6 +317,33 @@ class Trainer:
                     )
                 batches += 1
             sums, batches = self._reduce_epoch_totals(sums, batches)
+            if self.device.type == "cuda":
+                torch.cuda.synchronize(self.device)
+                peak_allocated_bytes = torch.cuda.max_memory_allocated(self.device)
+            else:
+                peak_allocated_bytes = 0
+            train_seconds = time.perf_counter() - epoch_started
+            if self._distributed():
+                timing = torch.tensor(
+                    [train_seconds, float(peak_allocated_bytes)],
+                    dtype=torch.float64,
+                    device=self.device,
+                )
+                dist.all_reduce(timing, op=dist.ReduceOp.MAX)
+                train_seconds = float(timing[0].item())
+                peak_allocated_bytes = int(timing[1].item())
+            optimizer_steps = float(batches) / max(1, self.world_size)
+            nominal_samples = float(batches) * int(self.config["data"]["batch_size"])
+            performance = {
+                "train_seconds": train_seconds,
+                "nominal_samples": nominal_samples,
+                "samples_per_second": nominal_samples / max(train_seconds, 1e-12),
+                "optimizer_steps_per_second": optimizer_steps / max(train_seconds, 1e-12),
+                "peak_allocated_gib": peak_allocated_bytes / (1024 ** 3),
+                "world_size": self.world_size,
+                "batch_size_per_gpu": int(self.config["data"]["batch_size"]),
+                "global_batch_size": int(self.config["data"]["batch_size"]) * self.world_size,
+            }
             means = {name: value / max(1, batches) for name, value in sums.items()}
             if self.is_primary:
                 print(
@@ -320,6 +354,31 @@ class Trainer:
                         self.optimizer.param_groups[0]["lr"],
                     )
                 )
+                print(
+                    "performance epoch={} train_seconds={:.3f} samples_per_second={:.3f} "
+                    "optimizer_steps_per_second={:.3f} peak_allocated_gib={:.3f} "
+                    "batch_per_gpu={} global_batch={}".format(
+                        epoch,
+                        performance["train_seconds"],
+                        performance["samples_per_second"],
+                        performance["optimizer_steps_per_second"],
+                        performance["peak_allocated_gib"],
+                        performance["batch_size_per_gpu"],
+                        performance["global_batch_size"],
+                    )
+                )
+                performance_path = output.parent / "performance.jsonl"
+                performance_path.parent.mkdir(parents=True, exist_ok=True)
+                with performance_path.open("a", encoding="utf-8") as handle:
+                    handle.write(
+                        json.dumps(
+                            {"epoch": int(epoch), **performance},
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+                if self.tracker is not None and hasattr(self.tracker, "log_performance"):
+                    self.tracker.log_performance(performance, epoch=epoch)
 
             save_best_validation = False
             save_best_metric = False

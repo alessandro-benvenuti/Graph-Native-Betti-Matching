@@ -1,0 +1,6 @@
+defaults:
+  - finetune_synthetic_mri_focal.yaml
+  - matchers/fgw.yaml
+
+experiment:
+  name: finetune_synthetic_mri_focal_fgw
