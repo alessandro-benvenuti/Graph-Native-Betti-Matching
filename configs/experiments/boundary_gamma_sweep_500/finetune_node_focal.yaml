@@ -1,0 +1,10 @@
+defaults:
+  - finetune_common.yaml
+  - ../../losses/node_focal_unweighted_immediate.yaml
+
+experiment:
+  name: finetune_boundary_mri500_node_focal_seed364505
+
+tracking:
+  tags: [gnbm, boundary-data, mri-finetune, node-focal, ddp]
+

@@ -360,6 +360,78 @@ class ExperimentConfigTests(unittest.TestCase):
         self.assertIn("baseline", launcher)
         self.assertIn("nodefocal_edgefocal_mm", launcher)
 
+    def test_boundary_gamma_sweep_contract(self):
+        paths = ROOT / "configs" / "experiments" / "boundary_gamma_sweep_500"
+        expectations = {
+            "baseline": (
+                "weighted_cross_entropy",
+                "cross_entropy",
+                "ratio_upsample",
+                2.0,
+            ),
+            "node_focal": ("focal", "cross_entropy", "ratio_upsample", 2.0),
+            "node_edge_focal_g05": ("focal", "focal", "none", 0.5),
+            "node_edge_focal_g10": ("focal", "focal", "none", 1.0),
+            "node_edge_focal_g20": ("focal", "focal", "none", 2.0),
+        }
+        names = set()
+        for recipe, expected in expectations.items():
+            pretrain = load_config(
+                paths / f"pretrain_{recipe}.yaml", environment=ENVIRONMENT
+            )
+            finetune = load_config(
+                paths / f"finetune_{recipe}.yaml", environment=ENVIRONMENT
+            )
+            node_name, edge_name, balancing, edge_gamma = expected
+            self.assertEqual(pretrain["training"]["epochs"], 100)
+            self.assertEqual(finetune["training"]["epochs"], 500)
+            self.assertEqual(
+                finetune["training"]["early_stopping"]["monitor"], "edge_mAP"
+            )
+            self.assertEqual(
+                finetune["training"]["early_stopping"]["patience_epochs"], 50
+            )
+            self.assertEqual(
+                pretrain["data"]["datasets"]["synthetic_mri"]["train_samples"],
+                4000,
+            )
+            self.assertIsNone(
+                finetune["data"]["datasets"]["synthetic_mri"]["train_samples"]
+            )
+            for config in (pretrain, finetune):
+                self.assertEqual(
+                    config["loss"]["node"]["classification"]["name"], node_name
+                )
+                self.assertEqual(
+                    config["loss"]["edge"]["classification"]["name"], edge_name
+                )
+                self.assertEqual(
+                    config["loss"]["edge"]["balancing"]["mode"], balancing
+                )
+                self.assertEqual(
+                    config["loss"]["edge"]["classification"]["focal_gamma"],
+                    edge_gamma,
+                )
+                metrics = config["evaluation"]["training_metrics"]
+                self.assertEqual(metrics["selection_metric"], "edge_mAP")
+                self.assertTrue(metrics["save_best_checkpoint"])
+                self.assertTrue(metrics["save_f1_checkpoints"])
+                for betti in ("betti_h0", "betti_h1"):
+                    self.assertFalse(config["topology"][betti]["enabled"])
+                    self.assertEqual(config["topology"][betti]["weight"], 0.0)
+            names.update(
+                (pretrain["experiment"]["name"], finetune["experiment"]["name"])
+            )
+        self.assertEqual(len(names), 2 * len(expectations))
+
+        launcher = (
+            ROOT / "cluster" / "jean_zay" / "submit_boundary_gamma_sweep_500.sh"
+        ).read_text(encoding="utf-8")
+        for recipe in expectations:
+            self.assertIn(recipe, launcher)
+        self.assertIn("best_metric_checkpoint.pt", launcher)
+        self.assertIn("GNBM_BOUNDARY_SWEEP_DRY_RUN", launcher)
+
     def test_edge_candidate_ablation_completes_missing_recipe_cells(self):
         paths = ROOT / "configs" / "experiments" / "edge_candidate_ablation_600"
         expectations = {

@@ -1,0 +1,52 @@
+defaults:
+  - ../../finetune_synthetic_mri.yaml
+
+# MRI-only specialization on every materialized training/validation patch.
+experiment:
+  name: boundary_gamma_sweep_finetune_placeholder
+
+data:
+  # Per-GPU batch is overridden by the launcher to preserve global batch 32.
+  batch_size: 32
+  validation_batch_size: 32
+  datasets:
+    synthetic_mri:
+      train_samples: null
+      validation_samples: null
+
+training:
+  epochs: 500
+  early_stopping:
+    enabled: true
+    monitor: edge_mAP
+    mode: max
+    patience_epochs: 50
+    min_epochs: 0
+    min_delta: 0.0
+  checkpoint:
+    policy: best_only
+    interval_epochs: 500
+    latest_interval_epochs: 2
+
+evaluation:
+  interval_epochs: 5
+  training_metrics:
+    enabled: true
+    dataset: synthetic_mri
+    max_samples: null
+    selection_metric: edge_mAP
+    selection_mode: max
+    save_best_checkpoint: true
+    save_f1_checkpoints: true
+
+# Explicitly exclude topological losses from every recipe in this sweep.
+topology:
+  betti_h0:
+    enabled: false
+    log_only: true
+    weight: 0.0
+  betti_h1:
+    enabled: false
+    log_only: true
+    weight: 0.0
+

@@ -1,0 +1,16 @@
+defaults:
+  - pretrain_common.yaml
+  - ../../losses/node_focal_unweighted_immediate.yaml
+  - ../../losses/edge_focal_unweighted_immediate_matched_only.yaml
+
+experiment:
+  name: pretrain_boundary_mixed_node_edge_focal_g20_seed364505
+
+loss:
+  edge:
+    classification:
+      focal_gamma: 2.0
+
+tracking:
+  tags: [gnbm, boundary-data, mixed-pretrain, node-focal, edge-focal-mm, gamma-2.0, ddp]
+

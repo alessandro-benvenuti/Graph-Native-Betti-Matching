@@ -1,0 +1,53 @@
+defaults:
+  - ../../pretrain_mixed.yaml
+
+# Controlled mixed-domain initialization for the boundary-corrected MRI data.
+# Keep the historical capped source/target regime while extending pretraining.
+experiment:
+  name: boundary_gamma_sweep_pretrain_placeholder
+
+data:
+  # Per-GPU batch is overridden by the launcher to preserve global batch 32.
+  batch_size: 32
+  validation_batch_size: 32
+  mixed_sampling:
+    balance_source_target: true
+  datasets:
+    plants:
+      train_samples: 25900
+      validation_samples: 480
+    synthetic_mri:
+      train_samples: 4000
+      validation_samples: 200
+      sample_cap_selection: seeded_random
+      sample_cap_seed: 364505
+
+training:
+  epochs: 100
+  checkpoint:
+    policy: best_only
+    interval_epochs: 100
+    latest_interval_epochs: 2
+
+evaluation:
+  interval_epochs: 5
+  training_metrics:
+    enabled: true
+    dataset: synthetic_mri
+    max_samples: 200
+    selection_metric: edge_mAP
+    selection_mode: max
+    save_best_checkpoint: true
+    save_f1_checkpoints: true
+
+# Explicitly exclude topological losses from every recipe in this sweep.
+topology:
+  betti_h0:
+    enabled: false
+    log_only: true
+    weight: 0.0
+  betti_h1:
+    enabled: false
+    log_only: true
+    weight: 0.0
+

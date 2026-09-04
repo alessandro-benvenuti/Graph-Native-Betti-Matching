@@ -1,0 +1,9 @@
+defaults:
+  - pretrain_common.yaml
+
+experiment:
+  name: pretrain_boundary_mixed_baseline_seed364505
+
+tracking:
+  tags: [gnbm, boundary-data, mixed-pretrain, baseline, ddp]
+

@@ -19,7 +19,7 @@ $WORK/projects/Graph-Native-Betti-Matching       repository
 $WORK/venvs/vascular-graph-extraction-h100-torch231
 $WORK/logs/graph-native-betti-matching           Slurm stdout/stderr
 $SCRATCH/datasets/plants_3d2cut/patches_3d       Plants data
-$SCRATCH/datasets/syntheticMRI/new_patches       full MRI patch dataset
+$SCRATCH/datasets/syntheticMRI/new_patches_boundary  boundary-corrected MRI patches
 $SCRATCH/experiments/gnbm                        run outputs/checkpoints
 ```
 
@@ -34,7 +34,7 @@ cd "$WORK/projects/Graph-Native-Betti-Matching"
 source cluster/jean_zay/env.sh
 
 export PLANTS_DATASET="$SCRATCH/datasets/plants_3d2cut/patches_3d"
-export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches"
+export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches_boundary"
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm"
 ```
 
@@ -105,7 +105,7 @@ Required variables:
 |---|---|---|
 | `WORK` | Jean-Zay path | Supplied by Jean-Zay. Holds repository, venv and logs. |
 | `SCRATCH` | Jean-Zay path | Supplied by Jean-Zay. Holds datasets and run outputs. |
-| `SYNTHETIC_MRI_DATASET` | dataset root | Must contain `train`, `val`, and their `raw`, `seg`, `vtp` directories. Full-data runs use `.../syntheticMRI/new_patches`. |
+| `SYNTHETIC_MRI_DATASET` | dataset root | Must contain materialized `train`, `val`, and `test` splits with `raw`, `seg`, and `vtp` directories. Current runs use `.../syntheticMRI/new_patches_boundary`. The sibling `new_patches.csv` is provenance metadata; the loader does not reconstruct splits from it. |
 | `GNBM_OUTPUT_DIR` | directory | Parent of every run. Put it under `$SCRATCH`. |
 
 Optional launcher variables:
@@ -130,7 +130,8 @@ Additional repository scripts expose a few script-specific controls:
 
 | Variable | Used by | Meaning |
 |---|---|---|
-| `GNBM_PRETRAIN_QOS`, `GNBM_FINETUNE_QOS` | historical 600-epoch focal/edge matrix launchers | Separate stage QoS values. |
+| `GNBM_BOUNDARY_SWEEP_DRY_RUN` | `submit_boundary_gamma_sweep_500.sh` | `1` validates and prints the current five-pipeline sweep without submitting; `0` submits. |
+| `GNBM_PRETRAIN_QOS`, `GNBM_FINETUNE_QOS` | current boundary sweep and historical focal/edge matrix launchers | Separate stage QoS values. |
 | `GNBM_MATRIX_DRY_RUN` | `submit_focal_matrix_600.sh` | `1` validates and prints the matrix without submitting it; `0` submits. |
 | `GNBM_ABLATION_DRY_RUN` | `submit_edge_candidate_ablation_600.sh` | Equivalent dry-run switch for the edge-candidate ablation. |
 | `GNBM_MRI_CHECKPOINT` | debug smoke launcher | Required model checkpoint used by the bounded integration test. |
@@ -148,7 +149,7 @@ Example: a fresh four-H100 run initialized from model weights:
 cd "$WORK/projects/Graph-Native-Betti-Matching"
 source cluster/jean_zay/env.sh
 
-export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches"
+export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches_boundary"
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm"
 export GNBM_INITIAL_WEIGHTS="$SCRATCH/checkpoints/checkpoint_epoch=280.pt"
 unset GNBM_RESUME_CHECKPOINT GNBM_AUTO_RESUME
@@ -168,7 +169,42 @@ bash cluster/jean_zay/submit_train.sh \
 The wrapper prints the job ID and log path. It performs only preflight checks
 on the login node; training runs in Slurm.
 
-## 5. Full two-stage pipelines
+## 5. Current boundary-data gamma sweep
+
+The current controlled experiment set contains five two-stage pipelines:
+
+1. baseline;
+2. node focal with node gamma `2.0`;
+3. node focal plus matched--matched edge focal with edge gamma `0.5`;
+4. the same with edge gamma `1.0`;
+5. the same with edge gamma `2.0`.
+
+Each pipeline performs 100 mixed-pretraining epochs followed by up to 500
+MRI-only fine-tuning epochs. Fine-tuning uses validation edge mAP for
+50-epoch patience. Both stages retain rolling best-edge-mAP, best-node-F1,
+and best-edge-F1 checkpoints. Betti losses are disabled and have weight zero.
+
+Submit the complete set with:
+
+```bash
+bash cluster/jean_zay/submit_boundary_gamma_sweep_500.sh
+```
+
+The launcher defaults to one H100 for pretraining, four H100s for fine-tuning,
+the `qos_gpu_h100-t4` QoS, and a 100-hour limit for both stages. Override these
+with `GNBM_PRETRAIN_GPUS`, `GNBM_FINETUNE_GPUS`, `GNBM_PRETRAIN_QOS`,
+`GNBM_FINETUNE_QOS`, `GNBM_PRETRAIN_WALLTIME`, and
+`GNBM_FINETUNE_WALLTIME`. Set `GNBM_BOUNDARY_SWEEP_DRY_RUN=1` to validate and
+print all ten stages without submitting them.
+
+The launcher forces W&B offline mode because Jean-Zay compute nodes cannot
+reach W&B. Synchronize the run directory from a login node after completion.
+
+The dependent MRI job uses the matching pretraining run's
+`best_metric_checkpoint.pt`, selected by maximum validation edge mAP, as
+initial weights.
+
+### Historical two-stage pipelines
 
 These launchers submit limited-MRI mixed pretraining and dependent full-MRI
 fine-tuning automatically:
@@ -312,7 +348,7 @@ Example Slurm test-set evaluation:
 cd "$WORK/projects/Graph-Native-Betti-Matching"
 source cluster/jean_zay/env.sh
 
-export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches"
+export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches_boundary"
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm"
 
 export EVAL_CONFIG="configs/experiments/full_dataset_node_focal/finetune.yaml"

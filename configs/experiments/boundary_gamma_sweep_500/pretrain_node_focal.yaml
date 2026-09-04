@@ -1,0 +1,10 @@
+defaults:
+  - pretrain_common.yaml
+  - ../../losses/node_focal_unweighted_immediate.yaml
+
+experiment:
+  name: pretrain_boundary_mixed_node_focal_seed364505
+
+tracking:
+  tags: [gnbm, boundary-data, mixed-pretrain, node-focal, ddp]
+

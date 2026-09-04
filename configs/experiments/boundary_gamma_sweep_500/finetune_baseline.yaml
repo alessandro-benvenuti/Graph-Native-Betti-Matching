@@ -1,0 +1,9 @@
+defaults:
+  - finetune_common.yaml
+
+experiment:
+  name: finetune_boundary_mri500_baseline_seed364505
+
+tracking:
+  tags: [gnbm, boundary-data, mri-finetune, baseline, ddp]
+
