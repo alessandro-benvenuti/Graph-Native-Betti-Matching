@@ -25,7 +25,6 @@ mkdir -p "$report_dir" "$output_dir"
   echo "case=$case_name"
   echo "host=$(hostname)"
   echo "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  echo "git_commit=$(git -C "$repo_dir" rev-parse HEAD)"
   echo "config=$config"
   echo "dataset=$SYNTHETIC_MRI_DATASET"
   echo "gpus=$gpus"
@@ -35,7 +34,6 @@ mkdir -p "$report_dir" "$output_dir"
   "$GNBM_VENV/bin/python" -c 'import sys, torch; print("python=" + sys.version.split()[0]); print("torch=" + torch.__version__); print("cuda=" + str(torch.version.cuda)); print("cudnn=" + str(torch.backends.cudnn.version()))'
   nvidia-smi --query-gpu=index,name,uuid,memory.total,driver_version --format=csv,noheader
 } > "$report_dir/system-info.txt" 2>&1
-git -C "$repo_dir" status --short > "$report_dir/git-status.txt"
 cp "$repo_dir/$config" "$report_dir/benchmark-config.yaml"
 
 nvidia-smi \

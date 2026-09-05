@@ -282,7 +282,8 @@ is the representative warmed-up measurement. The submission command prints a rep
 `comparison.txt` contains throughput and epoch-time speedups; each case also
 preserves `performance.jsonl`, peak allocation, two-second GPU telemetry,
 allocated GPU-hours, resolved configuration, dataset manifest, train log, and
-software/hardware provenance.
+software/hardware provenance. Benchmark jobs do not invoke Git; synchronize and
+inspect the checkout yourself before submission.
 
 ### Historical two-stage pipelines
 
