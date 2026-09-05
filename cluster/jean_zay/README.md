@@ -26,6 +26,17 @@ launchers must use account `vnc@a100`, partition `gpu_p5`, constraint `a100`,
 and either `qos_gpu_a100-dev` (two-hour limit) or `qos_gpu_a100-t3`
 (twenty-hour limit).
 
+After creating the A100 environment, run the migration smoke test and then the
+full-data scaling benchmark:
+
+```bash
+source cluster/jean_zay/env_a100.sh
+bash cluster/jean_zay/submit_debug_a100.sh
+bash cluster/jean_zay/submit_a100_full_dataset_benchmark.sh
+```
+
+Do not launch the production gamma sweep until both checks pass.
+
 The virtual environment lives outside Git at
 `$WORK/venvs/vascular-graph-extraction-h100-torch231`; the repository `.venv`
 entry is only a symbolic link. The dataset, initial checkpoint, and outputs

@@ -61,6 +61,44 @@ H100 `sm_90` build. Source exactly one architecture environment before using
 its matching launcher. Do not use the existing H100 launcher after sourcing
 `env_a100.sh`; the A100 launcher is introduced and validated separately.
 
+After environment creation, validate the complete A100 path before any
+benchmark or production run:
+
+```bash
+source cluster/jean_zay/env_a100.sh
+export GNBM_MRI_CHECKPOINT="$SCRATCH/checkpoints/checkpoint_epoch=280.pt"
+export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm-a100-debug"
+bash cluster/jean_zay/submit_debug_a100.sh
+```
+
+The smoke job uses one A100 under `qos_gpu_a100-dev`, compiles the custom
+operator for `sm_80`, checks CUDA forward/backward and checkpoint compatibility,
+and performs a one-epoch training/resume-payload check.
+
+After it succeeds, compare equivalent global-batch-32 layouts on the complete
+boundary MRI dataset:
+
+```bash
+bash cluster/jean_zay/submit_a100_full_dataset_benchmark.sh
+```
+
+This submits independent `1 x 32`, `2 x 16`, and `4 x 8` A100 development
+jobs. The command prints their IDs, report directory, and final summarization
+command. All three preserve optimizer-step semantics because their global batch
+is 32.
+
+The generic A100 segment launcher is:
+
+```bash
+bash cluster/jean_zay/submit_train_a100.sh CONFIG_PATH UNIQUE_RUN_NAME
+```
+
+It accepts one, two, four, or eight A100s on one `gpu_p5` node. Use
+`qos_gpu_a100-dev` for at most two hours or `qos_gpu_a100-t3` for at most twenty
+hours. Runs longer than twenty hours must use `latest_checkpoint.pt` and
+subsequent segments with `GNBM_AUTO_RESUME=1` and the same GPU count/global
+batch.
+
 ## 2. Configuration composition
 
 A YAML file may inherit one or more other YAML files:
