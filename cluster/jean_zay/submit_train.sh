@@ -27,12 +27,12 @@ venv="${GNBM_VENV:-$WORK/venvs/vascular-graph-extraction-h100-torch231}"
 python_bin="$venv/bin/python"
 if [[ ! -x "$python_bin" ]]; then
   echo "Project Python is not executable: $python_bin" >&2
-  echo "Source cluster/jean_zay/env.sh before submitting." >&2
+  echo "Source cluster/jean_zay/env_h100.sh before submitting." >&2
   exit 2
 fi
 if ! "$python_bin" -c 'import medpy, nibabel, pyvista' >/dev/null 2>&1; then
   echo "The project Jean-Zay environment is missing dataset reader dependencies: $python_bin" >&2
-  echo "Run cluster/jean_zay/setup_environment.sh, then source env.sh again." >&2
+  echo "Run cluster/jean_zay/setup_environment.sh, then source env_h100.sh again." >&2
   exit 2
 fi
 if [[ -n "${GNBM_INITIAL_WEIGHTS:-}" && -n "${GNBM_RESUME_CHECKPOINT:-}" ]]; then

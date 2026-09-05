@@ -14,7 +14,7 @@ if [[ ! -d "$root" ]]; then
 fi
 
 cd "$repo_dir"
-source cluster/jean_zay/env.sh
+source cluster/jean_zay/env_h100.sh
 unset WANDB_MODE
 
 mapfile -t runs < <(

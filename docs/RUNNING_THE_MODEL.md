@@ -1,7 +1,9 @@
 # Running the 3D RelationFormer model
 
 This guide describes the supported training and evaluation interfaces in this
-repository, with Jean-Zay H100 examples. It separates three kinds of settings:
+repository, with separate Jean-Zay H100 and A100 environments. The production
+launchers remain H100-specific until the A100 smoke test and benchmark are
+validated. It separates three kinds of settings:
 
 1. environment variables used by shell launchers and YAML expansion;
 2. command-line arguments accepted by `train.py` and `evaluate.py`;
@@ -17,6 +19,7 @@ The expected layout is:
 ```text
 $WORK/projects/Graph-Native-Betti-Matching       repository
 $WORK/venvs/vascular-graph-extraction-h100-torch231
+$WORK/venvs/vascular-graph-extraction-a100-torch230
 $WORK/logs/graph-native-betti-matching           Slurm stdout/stderr
 $SCRATCH/datasets/plants_3d2cut/patches_3d       Plants data
 $SCRATCH/datasets/syntheticMRI/new_patches_boundary  boundary-corrected MRI patches
@@ -27,11 +30,11 @@ Never run training or GPU evaluation on a login node. The login node is only
 for preparing the environment, validating configuration, submitting jobs,
 checking logs, and synchronizing offline W&B runs.
 
-Initialize a login shell with:
+Initialize an H100 login shell with:
 
 ```bash
 cd "$WORK/projects/Graph-Native-Betti-Matching"
-source cluster/jean_zay/env.sh
+source cluster/jean_zay/env_h100.sh
 
 export PLANTS_DATASET="$SCRATCH/datasets/plants_3d2cut/patches_3d"
 export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches_boundary"
@@ -41,6 +44,22 @@ export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm"
 Run `bash cluster/jean_zay/setup_environment.sh` once if the external virtual
 environment has not been created. The environment inherits Jean-Zay's PyTorch
 2.3.1 H100 module; do not install another PyTorch into it.
+
+For A100 migration, create and activate the separate environment with:
+
+```bash
+cd "$WORK/projects/Graph-Native-Betti-Matching"
+bash cluster/jean_zay/setup_environment_a100.sh
+source cluster/jean_zay/env_a100.sh
+```
+
+The A100 environment inherits `arch/a100` with
+`pytorch-gpu/py3/2.3.0` (CUDA 12.2), uses
+`$WORK/venvs/vascular-graph-extraction-a100-torch230`, compiles CUDA extensions
+for compute capability `8.0`, and keeps its extension cache separate from the
+H100 `sm_90` build. Source exactly one architecture environment before using
+its matching launcher. Do not use the existing H100 launcher after sourcing
+`env_a100.sh`; the A100 launcher is introduced and validated separately.
 
 ## 2. Configuration composition
 
@@ -137,7 +156,7 @@ Additional repository scripts expose a few script-specific controls:
 | `GNBM_MRI_CHECKPOINT` | debug smoke launcher | Required model checkpoint used by the bounded integration test. |
 | `GNBM_FORCE_REBUILD_OPS` | CUDA-extension build script | `1` forces a rebuild; leave unset unless source or the PyTorch/CUDA environment changed. |
 
-`env.sh` also permits overriding `UV_CACHE_DIR`, `TORCH_EXTENSIONS_DIR`,
+`env_h100.sh` also permits overriding `UV_CACHE_DIR`, `TORCH_EXTENSIONS_DIR`,
 `XDG_CACHE_HOME`, `MPLCONFIGDIR`, `TMPDIR`, `TORCH_CUDA_ARCH_LIST`,
 `OMP_NUM_THREADS`, and `MAX_JOBS`. These are runtime/cache/build controls, not
 experiment hyperparameters. The checked defaults are appropriate for the
@@ -147,7 +166,7 @@ Example: a fresh four-H100 run initialized from model weights:
 
 ```bash
 cd "$WORK/projects/Graph-Native-Betti-Matching"
-source cluster/jean_zay/env.sh
+source cluster/jean_zay/env_h100.sh
 
 export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches_boundary"
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm"
@@ -211,7 +230,7 @@ the controlled batch-8 versus batch-32 benchmark:
 
 ```bash
 cd "$WORK/projects/Graph-Native-Betti-Matching"
-source cluster/jean_zay/env.sh
+source cluster/jean_zay/env_h100.sh
 bash cluster/jean_zay/submit_h100_batch_benchmark.sh
 ```
 
@@ -369,7 +388,7 @@ Example Slurm test-set evaluation:
 
 ```bash
 cd "$WORK/projects/Graph-Native-Betti-Matching"
-source cluster/jean_zay/env.sh
+source cluster/jean_zay/env_h100.sh
 
 export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches_boundary"
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm"
@@ -389,7 +408,7 @@ sbatch \
   --output="$WORK/logs/graph-native-betti-matching/%x-%j.out" \
   --error="$WORK/logs/graph-native-betti-matching/%x-%j.err" \
   --export=ALL,EVAL_CONFIG,EVAL_CHECKPOINT,EVAL_OUTPUT \
-  --wrap='source "$WORK/projects/Graph-Native-Betti-Matching/cluster/jean_zay/env.sh" && "$GNBM_VENV/bin/python" -u evaluate.py --config "$EVAL_CONFIG" --checkpoint "$EVAL_CHECKPOINT" --output-dir "$EVAL_OUTPUT" --dataset synthetic_mri --split test --batch-size 32 --workers 4 --device cuda --visualizations 16'
+  --wrap='source "$WORK/projects/Graph-Native-Betti-Matching/cluster/jean_zay/env_h100.sh" && "$GNBM_VENV/bin/python" -u evaluate.py --config "$EVAL_CONFIG" --checkpoint "$EVAL_CHECKPOINT" --output-dir "$EVAL_OUTPUT" --dataset synthetic_mri --split test --batch-size 32 --workers 4 --device cuda --visualizations 16'
 ```
 
 If the complete test evaluation exceeds two hours, use `qos_gpu_h100-t3` and
@@ -400,7 +419,7 @@ an appropriate time up to `20:00:00`. Evaluation does not modify the checkpoint.
 The repository stores no secret. Authenticate once on the login node:
 
 ```bash
-source cluster/jean_zay/env.sh
+source cluster/jean_zay/env_h100.sh
 wandb login --verify
 ```
 

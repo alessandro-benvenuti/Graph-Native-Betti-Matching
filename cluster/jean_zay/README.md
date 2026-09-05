@@ -3,13 +3,28 @@
 For the complete training, evaluation, environment-variable, CLI, YAML, and
 checkpoint reference, see [`../../docs/RUNNING_THE_MODEL.md`](../../docs/RUNNING_THE_MODEL.md).
 
-This directory targets Jean Zay's dedicated H100 partition:
+This directory currently provides production launchers for Jean Zay's H100
+partition and separate environment setup for the A100 migration:
 
 - `arch/h100` architecture modules;
 - PyTorch 2.3.1 supplied by Jean Zay;
 - the CUDA 12 runtime supplied with that PyTorch module;
 - one to four H100 GPUs on one node through torchrun/DDP;
 - project account `vnc@h100` on partition `gpu_p6`.
+
+The A100 environment uses `arch/a100`, PyTorch 2.3.0 with CUDA 12.2,
+`$WORK/venvs/vascular-graph-extraction-a100-torch230`, and an independent
+`sm_80` extension cache. Create and activate it with:
+
+```bash
+bash cluster/jean_zay/setup_environment_a100.sh
+source cluster/jean_zay/env_a100.sh
+```
+
+Do not submit the H100 Slurm scripts from the A100 environment. Dedicated A100
+launchers must use account `vnc@a100`, partition `gpu_p5`, constraint `a100`,
+and either `qos_gpu_a100-dev` (two-hour limit) or `qos_gpu_a100-t3`
+(twenty-hour limit).
 
 The virtual environment lives outside Git at
 `$WORK/venvs/vascular-graph-extraction-h100-torch231`; the repository `.venv`
@@ -56,7 +71,7 @@ venv.
 For an interactive shell after setup:
 
 ```bash
-source cluster/jean_zay/env.sh
+source cluster/jean_zay/env_h100.sh
 ```
 
 Log in to W&B once from the login node after activating the environment:
@@ -68,7 +83,7 @@ wandb login --verify
 `wandb login` stores the credential outside the repository. Alternatively,
 export `WANDB_API_KEY` in the submitting shell; never put the key in YAML or a
 committed shell script. The non-secret entity and project are defined in
-`cluster/jean_zay/wandb_env.sh`, which is loaded automatically by `env.sh` in
+`cluster/jean_zay/wandb_env.sh`, which is loaded automatically by `env_h100.sh` in
 both interactive and batch environments. The configured project is:
 
 ```text

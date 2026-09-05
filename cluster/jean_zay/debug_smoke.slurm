@@ -17,7 +17,7 @@
 set -eo pipefail
 
 repo_dir="${GNBM_REPO_DIR:-$SLURM_SUBMIT_DIR}"
-source "$repo_dir/cluster/jean_zay/env.sh"
+source "$repo_dir/cluster/jean_zay/env_h100.sh"
 set -u
 
 # Debug allocations verify the training path without creating cloud runs.

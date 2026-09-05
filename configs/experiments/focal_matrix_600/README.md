@@ -44,7 +44,7 @@ every epoch. Test splits remain held out from training and model selection.
 Submit from a Jean Zay login node after setting both dataset paths:
 
 ```bash
-source cluster/jean_zay/env.sh
+source cluster/jean_zay/env_h100.sh
 export PLANTS_DATASET="$SCRATCH/datasets/plants_3d2cut/patches_3d"
 export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/patches/syntheticMRI"
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm"
@@ -71,7 +71,7 @@ completed runs from a login node with:
 bash cluster/jean_zay/sync_wandb_offline.sh "$GNBM_OUTPUT_DIR"
 ```
 
-`env.sh` loads the non-secret W&B entity and project from
+`env_h100.sh` loads the non-secret W&B entity and project from
 `cluster/jean_zay/wandb_env.sh`. The matrix launcher assigns every pretraining
 and finetuning run to the W&B group `focal-matrix-600-seed364505`. W&B login is
 a one-time per-user cluster setup and its API key must remain outside Git.

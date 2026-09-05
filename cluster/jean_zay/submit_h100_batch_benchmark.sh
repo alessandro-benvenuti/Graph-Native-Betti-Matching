@@ -9,7 +9,7 @@ if ! command -v sbatch >/dev/null 2>&1; then
 fi
 for name in WORK SCRATCH SYNTHETIC_MRI_DATASET; do
   if [[ -z "${!name:-}" ]]; then
-    echo "$name is not set; source cluster/jean_zay/env.sh first." >&2
+    echo "$name is not set; source cluster/jean_zay/env_h100.sh first." >&2
     exit 2
   fi
 done

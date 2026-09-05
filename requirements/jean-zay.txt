@@ -2,7 +2,7 @@
 # W&B and its dependencies are installed separately by setup_environment.sh.
 #
 # PyTorch, torchvision, and torchaudio are intentionally absent: Jean Zay's
-# H100-specific pytorch-gpu/py3/2.3.1 module supplies the PyTorch/CUDA stack.
+# The architecture-specific Jean-Zay module supplies the PyTorch/CUDA stack.
 # The local MultiScaleDeformableAttention3D package is also absent and is built
 # from models/ops for H100 compute capability 9.0.
 absl-py==2.5.0
