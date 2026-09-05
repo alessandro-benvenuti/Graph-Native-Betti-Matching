@@ -14,8 +14,10 @@ if [[ ! -d "$root" ]]; then
 fi
 
 cd "$repo_dir"
-source cluster/jean_zay/env_h100.sh
+source cluster/jean_zay/env_a100.sh
 unset WANDB_MODE
+sync_entity="${GNBM_WANDB_SYNC_ENTITY:-alessandrobenvenuti2002-politecnico-di-torino}"
+sync_project="${GNBM_WANDB_SYNC_PROJECT:-focal-loss}"
 
 mapfile -t runs < <(
   find "$root" -type d -path '*/wandb/offline-run-*' -print | sort
@@ -26,8 +28,23 @@ if [[ "${#runs[@]}" -eq 0 ]]; then
 fi
 
 echo "Found ${#runs[@]} offline W&B run(s) under $root"
+echo "Destination: $sync_entity/$sync_project"
+declare -A seen_run_ids=()
 for run in "${runs[@]}"; do
   echo
   echo "Syncing $run"
-  wandb sync "$run"
+  run_file="$(find "$run" -maxdepth 1 -type f -name 'run-*.wandb' -print -quit)"
+  if [[ -z "$run_file" ]]; then
+    echo "No W&B run file found in $run" >&2
+    exit 1
+  fi
+  run_id="${run_file##*/run-}"
+  run_id="${run_id%.wandb}"
+  if [[ -n "${seen_run_ids[$run_id]:-}" ]]; then
+    wandb sync --append --id "$run_id" \
+      --entity "$sync_entity" --project "$sync_project" "$run"
+  else
+    wandb sync --entity "$sync_entity" --project "$sync_project" "$run"
+    seen_run_ids[$run_id]=1
+  fi
 done

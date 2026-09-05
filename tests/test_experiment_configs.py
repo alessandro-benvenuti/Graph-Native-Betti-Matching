@@ -431,6 +431,20 @@ class ExperimentConfigTests(unittest.TestCase):
             self.assertIn(recipe, launcher)
         self.assertIn("best_metric_checkpoint.pt", launcher)
         self.assertIn("GNBM_BOUNDARY_SWEEP_DRY_RUN", launcher)
+        self.assertIn("submit_train_a100.sh", launcher)
+        self.assertIn("qos_gpu_a100-t3", launcher)
+        self.assertIn('GNBM_PRETRAIN_GPUS:-4', launcher)
+        self.assertIn('GNBM_FINETUNE_GPUS:-2', launcher)
+        self.assertIn('GNBM_BOUNDARY_WANDB_PROJECT:-focal-loss', launcher)
+        self.assertIn('GNBM_PRETRAIN_SEGMENTS:-1', launcher)
+        self.assertIn('GNBM_FINETUNE_SEGMENTS:-10', launcher)
+        self.assertIn('afterany:', launcher)
+        self.assertIn('GNBM_AUTO_RESUME=1', launcher)
+        a100_submitter = (
+            ROOT / "cluster" / "jean_zay" / "submit_train_a100.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("train_a100.slurm", a100_submitter)
+        self.assertIn("GNBM_DEPENDENCY", a100_submitter)
 
     def test_edge_candidate_ablation_completes_missing_recipe_cells(self):
         paths = ROOT / "configs" / "experiments" / "edge_candidate_ablation_600"

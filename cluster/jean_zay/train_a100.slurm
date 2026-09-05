@@ -22,6 +22,12 @@ args=(
   --run-name "$GNBM_RUN_NAME"
   --device cuda
 )
+
+completion_marker="$GNBM_OUTPUT_DIR/$GNBM_RUN_NAME/training-complete"
+if [[ -f "$completion_marker" ]]; then
+  echo "Training is already complete: $completion_marker"
+  exit 0
+fi
 if [[ -n "${GNBM_BATCH_SIZE:-}" ]]; then
   args+=(--batch-size "$GNBM_BATCH_SIZE")
 fi
@@ -62,3 +68,8 @@ else
     --nproc_per_node="$gpus" \
     train.py --distributed "${args[@]}"
 fi
+
+# Reaching this point means train.py completed all configured epochs or stopped
+# normally through early stopping. A Slurm timeout never reaches this marker.
+touch "$completion_marker"
+echo "Training complete: $completion_marker"

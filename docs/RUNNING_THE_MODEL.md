@@ -188,6 +188,7 @@ Additional repository scripts expose a few script-specific controls:
 | Variable | Used by | Meaning |
 |---|---|---|
 | `GNBM_BOUNDARY_SWEEP_DRY_RUN` | `submit_boundary_gamma_sweep_500.sh` | `1` validates and prints the current five-pipeline sweep without submitting; `0` submits. |
+| `GNBM_PRETRAIN_SEGMENTS`, `GNBM_FINETUNE_SEGMENTS` | `submit_boundary_gamma_sweep_500.sh` | Number of chained 20-hour A100 jobs per stage; defaults are `1` and `10`. |
 | `GNBM_PRETRAIN_QOS`, `GNBM_FINETUNE_QOS` | current boundary sweep and historical focal/edge matrix launchers | Separate stage QoS values. |
 | `GNBM_MATRIX_DRY_RUN` | `submit_focal_matrix_600.sh` | `1` validates and prints the matrix without submitting it; `0` submits. |
 | `GNBM_ABLATION_DRY_RUN` | `submit_edge_candidate_ablation_600.sh` | Equivalent dry-run switch for the edge-candidate ablation. |
@@ -247,15 +248,29 @@ Submit the complete set with:
 bash cluster/jean_zay/submit_boundary_gamma_sweep_500.sh
 ```
 
-The launcher defaults to one H100 for pretraining, four H100s for fine-tuning,
-the `qos_gpu_h100-t4` QoS, and a 100-hour limit for both stages. Override these
+The launcher defaults to four A100s with batch 8 per GPU for pretraining and
+two A100s with batch 16 per GPU for fine-tuning. Both use
+`qos_gpu_a100-t3` and a 20-hour segment. Override these
 with `GNBM_PRETRAIN_GPUS`, `GNBM_FINETUNE_GPUS`, `GNBM_PRETRAIN_QOS`,
 `GNBM_FINETUNE_QOS`, `GNBM_PRETRAIN_WALLTIME`, and
 `GNBM_FINETUNE_WALLTIME`. Set `GNBM_BOUNDARY_SWEEP_DRY_RUN=1` to validate and
 print all ten stages without submitting them.
 
+The launcher submits one pretraining segment and automatically chains ten
+fine-tuning segments by default. A segment after the first uses
+`afterany` so a normal Slurm `TIMEOUT` advances to the next job, where
+`latest_checkpoint.pt` restores the complete training state. When training
+reaches its configured epoch or early stopping triggers, it creates
+`training-complete`; any surplus segment that eventually starts sees that
+marker and exits immediately. The GPU count and global batch remain unchanged
+across the chain. Adjust the safety margin with `GNBM_PRETRAIN_SEGMENTS` and
+`GNBM_FINETUNE_SEGMENTS` before initial submission, not while a run is active.
+
 The launcher forces W&B offline mode because Jean-Zay compute nodes cannot
-reach W&B. Synchronize the run directory from a login node after completion.
+reach W&B. It also pins this campaign to the new `focal-loss` project even if
+the submitting shell still contains the old project name. Override that only
+with `GNBM_BOUNDARY_WANDB_PROJECT`. Synchronize the run directory from a login
+node after a segment or after completion.
 
 The dependent MRI job uses the matching pretraining run's
 `best_metric_checkpoint.pt`, selected by maximum validation edge mAP, as
@@ -458,7 +473,7 @@ an appropriate time up to `20:00:00`. Evaluation does not modify the checkpoint.
 The repository stores no secret. Authenticate once on the login node:
 
 ```bash
-source cluster/jean_zay/env_h100.sh
+source cluster/jean_zay/env_a100.sh
 wandb login --verify
 ```
 
@@ -478,6 +493,14 @@ Synchronize completed offline runs from the login node:
 ```bash
 bash cluster/jean_zay/sync_wandb_offline.sh "$GNBM_OUTPUT_DIR"
 ```
+
+The sync helper explicitly uploads to
+`alessandrobenvenuti2002-politecnico-di-torino/focal-loss`. Use
+`GNBM_WANDB_SYNC_PROJECT` only when intentionally uploading historical runs to
+a different project. For a training run split across multiple offline A100
+segments, keep every segment directory and sync them together after the model
+run finishes. The helper orders the directories and uses W&B append mode for
+later segments sharing the same run ID.
 
 ## 9. YAML reference
 
