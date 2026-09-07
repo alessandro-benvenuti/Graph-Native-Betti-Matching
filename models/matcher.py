@@ -15,6 +15,55 @@ def _empty_assignment():
     return empty, empty.clone()
 
 
+@torch.no_grad()
+def score_candidate_structures(
+    tokens: torch.Tensor,
+    relation_embed: nn.Module,
+    candidate_indices,
+    *,
+    object_queries: int,
+    relation_tokens: int,
+    pair_chunk_size: int,
+):
+    """Return symmetric relation probabilities for each query candidate pool."""
+
+    if pair_chunk_size <= 0:
+        raise ValueError("pair_chunk_size must be positive")
+    object_features = tokens[..., :object_queries, :]
+    shared_relations = tokens[
+        ..., object_queries : object_queries + relation_tokens, :
+    ]
+    structures = []
+    for batch, raw_candidates in enumerate(candidate_indices):
+        candidates = raw_candidates.to(tokens.device, dtype=torch.long)
+        count = int(candidates.numel())
+        structure = tokens.new_zeros((count, count))
+        pairs = torch.combinations(
+            torch.arange(count, device=tokens.device), r=2
+        )
+        selected_features = object_features[batch, candidates]
+        for chunk in pairs.split(pair_chunk_size):
+            left = selected_features[chunk[:, 0]]
+            right = selected_features[chunk[:, 1]]
+            if relation_tokens:
+                relation = shared_relations[batch].reshape(1, -1).expand(
+                    chunk.shape[0], -1
+                )
+                forward = torch.cat((left, right, relation), dim=-1)
+                reverse = torch.cat((right, left, relation), dim=-1)
+            else:
+                forward = torch.cat((left, right), dim=-1)
+                reverse = torch.cat((right, left), dim=-1)
+            probabilities = 0.5 * (
+                relation_embed(forward).softmax(-1)[:, 1]
+                + relation_embed(reverse).softmax(-1)[:, 1]
+            )
+            structure[chunk[:, 0], chunk[:, 1]] = probabilities
+            structure[chunk[:, 1], chunk[:, 0]] = probabilities
+        structures.append(structure)
+    return structures
+
+
 class HungarianMatcher(nn.Module):
     """Match predicted queries to graph nodes using class and L1 costs."""
 
@@ -244,6 +293,7 @@ class FusedGromovWassersteinMatcher(nn.Module):
         *,
         predicted_structure=None,
         candidate_indices=None,
+        return_transport: bool = False,
     ):
         if predicted_structure is None:
             raise ValueError("FGW matching requires predicted_structure")
@@ -261,11 +311,13 @@ class FusedGromovWassersteinMatcher(nn.Module):
         ):
             raise ValueError("FGW structures/candidates must contain one item per sample")
         assignments = []
+        transports = []
         for sample in range(batch_size):
             truth = target_nodes[sample].to(predicted_nodes.device)
             target_count = int(truth.shape[0])
             if target_count == 0:
                 assignments.append(_empty_assignment())
+                transports.append(np.empty((0, 0), dtype=np.float64))
                 continue
             if target_count > query_count:
                 raise ValueError(
@@ -315,6 +367,9 @@ class FusedGromovWassersteinMatcher(nn.Module):
                 raise RuntimeError("FGW transport violates the fixed target marginal")
             local_source, matched_target = self.harden_transport(transport)
             assignments.append((candidates.cpu()[local_source], matched_target))
+            transports.append(transport)
+        if return_transport:
+            return assignments, transports
         return assignments
 
 
@@ -345,4 +400,5 @@ __all__ = [
     "FusedGromovWassersteinMatcher",
     "HungarianMatcher",
     "build_matcher",
+    "score_candidate_structures",
 ]

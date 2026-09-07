@@ -60,15 +60,18 @@ class FGWMatcherTests(unittest.TestCase):
             "nodes": [torch.tensor([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])],
             "edges": [torch.tensor([[0, 1]])],
         }
-        source, target = matcher(
+        assignments, transports = matcher(
             outputs,
             targets,
             predicted_structure=[torch.zeros((3, 3))],
             candidate_indices=[torch.arange(3)],
-        )[0]
+            return_transport=True,
+        )
+        source, target = assignments[0]
         self.assertEqual(len(source), 2)
         self.assertEqual(len(source.unique()), 2)
         self.assertEqual(sorted(target.tolist()), [0, 1])
+        self.assertEqual(transports[0].shape, (2, 3))
 
     def test_real_solver_returns_valid_fixed_marginal(self):
         feature_cost = np.array(

@@ -111,6 +111,8 @@ def _dataset_for_split(
     settings: Mapping,
     config: Mapping,
     split: str,
+    *,
+    augment_override: Optional[bool] = None,
 ):
     data = config["data"]
     augmentation = config["augmentation"]
@@ -129,7 +131,11 @@ def _dataset_for_split(
         # Config-driven builds require actual root/{train,val} splits. This
         # prevents a direct leaf from being reused as both train and validation.
         allow_direct_root=False,
-        augment=(split == "train" and bool(data["train_augmentation"])),
+        augment=(
+            split == "train" and bool(data["train_augmentation"])
+            if augment_override is None
+            else bool(augment_override)
+        ),
     )
     if name == "plants":
         image_size = data["image_size"]
@@ -303,11 +309,11 @@ def build_evaluation_loader(
     max_samples: Optional[int] = None,
     sample_ids: Optional[Sequence[str]] = None,
 ):
-    """Build an unshuffled, augmentation-free loader for one configured dataset."""
+    """Build an unshuffled, augmentation-free loader for one configured split."""
 
     split = split.strip().lower()
-    if split not in {"val", "test"}:
-        raise ValueError("Evaluation split must be 'val' or 'test'")
+    if split not in {"train", "val", "test"}:
+        raise ValueError("Evaluation split must be 'train', 'val', or 'test'")
     datasets = config["data"]["datasets"]
     if dataset_name not in datasets:
         raise ValueError(
@@ -319,8 +325,17 @@ def build_evaluation_loader(
     # Discover the complete split before applying an evaluation-only cap. In
     # particular, Plants intentionally preserves legacy filesystem order for
     # training, which must not make a metric smoke-test subset nondeterministic.
-    settings["validation_samples"] = None
-    dataset = _dataset_for_split(dataset_name, settings, config, split)
+    if split == "train":
+        settings["train_samples"] = None
+    else:
+        settings["validation_samples"] = None
+    dataset = _dataset_for_split(
+        dataset_name,
+        settings,
+        config,
+        split,
+        augment_override=False,
+    )
     if hasattr(dataset, "records"):
         dataset.records.sort(key=lambda record: record.sample_id)
     if max_samples is not None and sample_ids is not None:

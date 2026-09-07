@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from boxes import box_cxcyczwhd_to_xyxyzz, generalized_box_iou_3d
-from models.matcher import build_matcher
+from models.matcher import build_matcher, score_candidate_structures
 
 from .betti_h0 import h0_betti_matching_loss
 from .betti_h1 import cycle_space_matching_loss
@@ -383,30 +383,16 @@ class GraphCriterion(nn.Module):
     def _matching_structure(self, tokens, candidate_indices):
         """Score all query pairs for a structure-aware matcher without a graph."""
 
-        batch_size = tokens.shape[0]
-        object_tokens = tokens[..., : self.object_queries, :]
-        relation_tokens = tokens[
-            ..., self.object_queries : self.object_queries + self.relation_tokens, :
-        ]
-        chunk_size = int(
-            self.config["model"]["matcher"].get("pair_chunk_size", 1024)
+        return score_candidate_structures(
+            tokens,
+            self.relation_embed,
+            candidate_indices,
+            object_queries=self.object_queries,
+            relation_tokens=self.relation_tokens,
+            pair_chunk_size=int(
+                self.config["model"]["matcher"].get("pair_chunk_size", 1024)
+            ),
         )
-        structures = []
-        for batch in range(batch_size):
-            candidates = candidate_indices[batch].to(tokens.device)
-            count = int(candidates.numel())
-            structure = tokens.new_zeros((count, count))
-            pairs = torch.combinations(
-                torch.arange(count, device=tokens.device), r=2
-            )
-            for chunk in pairs.split(chunk_size):
-                probabilities = self._symmetric_edge_probabilities(
-                    object_tokens[batch, candidates], relation_tokens[batch], chunk
-                )
-                structure[chunk[:, 0], chunk[:, 1]] = probabilities
-                structure[chunk[:, 1], chunk[:, 0]] = probabilities
-            structures.append(structure)
-        return structures
 
     def loss_topology(self, tokens, target_edges, assignments):
         zero = tokens.sum() * 0.0

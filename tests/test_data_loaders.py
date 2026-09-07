@@ -502,13 +502,14 @@ class CompositionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             dataset_root = root / "synthetic"
-            for folder in ("raw", "seg", "vtp"):
-                (dataset_root / "test" / folder).mkdir(parents=True)
-            for index in range(3):
-                sample = f"sample_{index:06d}"
-                (dataset_root / "test" / "raw" / f"{sample}_data.nii.gz").touch()
-                (dataset_root / "test" / "seg" / f"{sample}_seg.nii.gz").touch()
-                (dataset_root / "test" / "vtp" / f"{sample}_graph.vtp").touch()
+            for split in ("train", "test"):
+                for folder in ("raw", "seg", "vtp"):
+                    (dataset_root / split / folder).mkdir(parents=True)
+                for index in range(3):
+                    sample = f"sample_{index:06d}"
+                    (dataset_root / split / "raw" / f"{sample}_data.nii.gz").touch()
+                    (dataset_root / split / "seg" / f"{sample}_seg.nii.gz").touch()
+                    (dataset_root / split / "vtp" / f"{sample}_graph.vtp").touch()
             repository = Path(__file__).resolve().parents[1]
             config = load_config(
                 repository / "configs" / "finetune_synthetic_mri.yaml",
@@ -530,6 +531,15 @@ class CompositionTests(unittest.TestCase):
                 [record.sample_id for record in loader.dataset.records],
                 ["sample_000000", "sample_000001"],
             )
+
+            training = build_evaluation_loader(
+                config,
+                dataset_name="synthetic_mri",
+                split="train",
+                max_samples=2,
+            )
+            self.assertEqual(len(training.dataset), 2)
+            self.assertFalse(training.dataset.augment)
 
             selected = build_evaluation_loader(
                 config,
