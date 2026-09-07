@@ -5,7 +5,9 @@ model:
     node_cost: 5.0
     structure_weight: 0.2
     candidate_count: 32
-    max_iter: 100
+    # POT shares this limit between the outer conditional-gradient loop and
+    # each network-simplex partial-transport subproblem.
+    max_iter: 10000
     tolerance: 1.0e-7
     random_state: 0
     pair_chunk_size: 1024

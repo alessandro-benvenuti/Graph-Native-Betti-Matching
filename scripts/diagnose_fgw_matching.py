@@ -46,7 +46,7 @@ def _parser():
     parser.add_argument("--alphas", type=float, nargs="+", default=(0.1, 0.2, 0.4))
     parser.add_argument("--candidate-count", type=int, default=32)
     parser.add_argument("--pair-chunk-size", type=int, default=1024)
-    parser.add_argument("--max-iter", type=int, default=100)
+    parser.add_argument("--max-iter", type=int, default=10_000)
     parser.add_argument("--tolerance", type=float, default=1e-7)
     parser.add_argument("--progress-every", type=int, default=5)
     return parser

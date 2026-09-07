@@ -138,7 +138,7 @@ class FusedGromovWassersteinMatcher(nn.Module):
         *,
         dimensions: int = 3,
         candidate_count: int = 32,
-        max_iter: int = 100,
+        max_iter: int = 10_000,
         tolerance: float = 1e-7,
         random_state: int = 0,
     ):
