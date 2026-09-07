@@ -1,6 +1,7 @@
 """Contracts for the controlled MRI finetuning ablation matrix."""
 
 from pathlib import Path
+import copy
 import unittest
 
 from configs import load_config
@@ -359,6 +360,36 @@ class ExperimentConfigTests(unittest.TestCase):
         self.assertIn("GNBM_FINETUNE_WALLTIME", launcher)
         self.assertIn("baseline", launcher)
         self.assertIn("nodefocal_edgefocal_mm", launcher)
+
+    def test_controlled_fgw_changes_only_identity_and_matcher(self):
+        paths = ROOT / "configs" / "experiments" / "full_dataset_comparison"
+        hungarian = load_config(
+            paths / "finetune_nodefocal_edgefocal_mm.yaml", environment=ENVIRONMENT
+        )
+        fgw = load_config(
+            paths / "finetune_nodefocal_edgefocal_mm_fgw_controlled.yaml",
+            environment=ENVIRONMENT,
+        )
+        self.assertNotEqual(fgw["experiment"]["name"], hungarian["experiment"]["name"])
+        self.assertEqual(fgw["model"]["matcher"]["type"], "fgw")
+        self.assertEqual(hungarian["model"]["matcher"]["type"], "hungarian")
+        normalized = copy.deepcopy(fgw)
+        normalized["experiment"]["name"] = hungarian["experiment"]["name"]
+        normalized["model"]["matcher"] = copy.deepcopy(hungarian["model"]["matcher"])
+        self.assertEqual(normalized, hungarian)
+
+    def test_controlled_fgw_smoke_is_bounded(self):
+        path = (
+            ROOT / "configs" / "experiments" / "full_dataset_comparison"
+            / "smoke_nodefocal_edgefocal_mm_fgw_controlled.yaml"
+        )
+        config = load_config(path, environment=ENVIRONMENT)
+        dataset = config["data"]["datasets"]["synthetic_mri"]
+        self.assertEqual(config["model"]["matcher"]["type"], "fgw")
+        self.assertEqual(config["training"]["epochs"], 1)
+        self.assertEqual(dataset["train_samples"], 2)
+        self.assertEqual(dataset["validation_samples"], 1)
+        self.assertFalse(config["data"]["train_augmentation"])
 
     def test_boundary_gamma_sweep_contract(self):
         paths = ROOT / "configs" / "experiments" / "boundary_gamma_sweep_500"

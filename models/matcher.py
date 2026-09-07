@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+import warnings
 from typing import Mapping
 
 import numpy as np
@@ -13,6 +15,60 @@ from torch import nn
 def _empty_assignment():
     empty = torch.empty(0, dtype=torch.int64)
     return empty, empty.clone()
+
+
+def fgw_objective_terms(
+    feature_cost,
+    target_structure,
+    predicted_structure,
+    transport,
+    alpha: float,
+):
+    """Evaluate the squared-loss FGW objective without a rank-four tensor."""
+
+    feature_cost = np.asarray(feature_cost, dtype=np.float64)
+    target_structure = np.asarray(target_structure, dtype=np.float64)
+    predicted_structure = np.asarray(predicted_structure, dtype=np.float64)
+    transport = np.asarray(transport, dtype=np.float64)
+    if transport.shape != feature_cost.shape:
+        raise ValueError("transport and feature cost must have the same shape")
+    if target_structure.shape != (transport.shape[0], transport.shape[0]):
+        raise ValueError("target structure has an incompatible shape")
+    if predicted_structure.shape != (transport.shape[1], transport.shape[1]):
+        raise ValueError("predicted structure has an incompatible shape")
+    if not all(
+        np.isfinite(value).all()
+        for value in (
+            feature_cost,
+            target_structure,
+            predicted_structure,
+            transport,
+        )
+    ):
+        raise ValueError("FGW objective inputs must be finite")
+    if not 0.0 <= float(alpha) <= 1.0:
+        raise ValueError("alpha must lie in [0, 1]")
+
+    row_mass = transport.sum(axis=1)
+    column_mass = transport.sum(axis=0)
+    feature = float(np.sum(feature_cost * transport))
+    structural = float(
+        row_mass @ np.square(target_structure) @ row_mass
+        + column_mass @ np.square(predicted_structure) @ column_mass
+        - 2.0
+        * np.sum(
+            (target_structure @ transport) * (transport @ predicted_structure)
+        )
+    )
+    # Roundoff can produce a tiny negative value for this sum of squares.
+    if structural < 0.0 and abs(structural) < 1e-12:
+        structural = 0.0
+    total = (1.0 - float(alpha)) * feature + float(alpha) * structural
+    return {
+        "feature": feature,
+        "structural": structural,
+        "weighted_total": float(total),
+    }
 
 
 @torch.no_grad()
@@ -162,6 +218,8 @@ class FusedGromovWassersteinMatcher(nn.Module):
         self.candidate_count = int(candidate_count)
         self.max_iter = int(max_iter)
         self.tolerance = float(tolerance)
+        # Accepted for configuration compatibility. The unary initialization
+        # and POT conditional-gradient path used here contain no random step.
         self.random_state = int(random_state)
 
     def _feature_cost(self, outputs: Mapping, truth: torch.Tensor, sample: int):
@@ -201,11 +259,11 @@ class FusedGromovWassersteinMatcher(nn.Module):
             selected_set = set(selected)
             requested = min(query_count, max(target_count, self.candidate_count))
             for index in object_probability[sample].argsort(descending=True).tolist():
+                if len(selected) >= requested:
+                    break
                 if index not in selected_set:
                     selected.append(index)
                     selected_set.add(index)
-                if len(selected) == requested:
-                    break
             candidates.append(
                 torch.as_tensor(
                     selected, dtype=torch.long, device=predicted_nodes.device
@@ -252,7 +310,58 @@ class FusedGromovWassersteinMatcher(nn.Module):
             torch.as_tensor(target, dtype=torch.int64),
         )
 
-    def _solve_transport(self, feature_cost, target_structure, predicted_structure):
+    @staticmethod
+    def validate_transport(transport, target_count, query_count, tolerance=1e-7):
+        """Validate the partial-transport invariants and return a float array."""
+
+        plan = np.asarray(transport, dtype=np.float64)
+        if plan.shape != (target_count, query_count):
+            raise RuntimeError("FGW solver returned an unexpected transport shape")
+        if not np.isfinite(plan).all() or (plan < -tolerance).any():
+            raise RuntimeError("FGW solver returned an invalid transport plan")
+        represented_mass = float(
+            np.full(target_count, 1.0 / target_count, dtype=np.float64).sum()
+        )
+        absolute_tolerance = max(float(tolerance), 1e-8)
+        if not np.allclose(
+            plan.sum(axis=1),
+            1.0 / target_count,
+            rtol=1e-5,
+            atol=absolute_tolerance,
+        ):
+            raise RuntimeError("FGW transport violates the fixed target marginal")
+        if (plan.sum(axis=0) > 1.0 / target_count + absolute_tolerance).any():
+            raise RuntimeError("FGW transport violates prediction capacity")
+        if not np.isclose(
+            plan.sum(), represented_mass, rtol=1e-5, atol=absolute_tolerance
+        ):
+            raise RuntimeError("FGW transport violates total transported mass")
+        return plan
+
+    @staticmethod
+    def initial_transport(feature_cost):
+        """Return the feasible uniform-mass unary Hungarian initialization."""
+
+        feature_cost = np.asarray(feature_cost, dtype=np.float64)
+        if feature_cost.ndim != 2 or feature_cost.shape[0] == 0:
+            raise ValueError("feature_cost must have at least one target row")
+        target_count, query_count = feature_cost.shape
+        if target_count > query_count:
+            raise ValueError("feature_cost must have at least as many columns as rows")
+        initial_target, initial_source = linear_sum_assignment(feature_cost)
+        target_mass = np.full(target_count, 1.0 / target_count, dtype=np.float64)
+        initial = np.zeros((target_count, query_count), dtype=np.float64)
+        initial[initial_target, initial_source] = target_mass[initial_target]
+        return initial
+
+    def _solve_transport(
+        self,
+        feature_cost,
+        target_structure,
+        predicted_structure,
+        *,
+        return_diagnostics: bool = False,
+    ):
         try:
             from ot.gromov import partial_fused_gromov_wasserstein
         except ImportError as error:
@@ -270,24 +379,78 @@ class FusedGromovWassersteinMatcher(nn.Module):
 
         # The unary Hungarian plan is feasible for the partial problem and gives
         # the non-convex solver a stable, injective initialization.
-        initial_target, initial_source = linear_sum_assignment(feature_cost)
-        initial = np.zeros((target_count, query_count), dtype=np.float64)
-        initial[initial_target, initial_source] = target_mass[initial_target]
+        initial = self.initial_transport(feature_cost)
+        # Use the represented sum rather than the literal 1.0. For node counts
+        # such as 15, floating-point summation can make sum(target_mass) one ULP
+        # smaller than 1, which POT otherwise rejects as an infeasible mass.
+        transported_mass = float(target_mass.sum())
 
-        return partial_fused_gromov_wasserstein(
-            feature_cost,
-            target_structure,
-            predicted_structure,
-            p=target_mass,
-            q=query_capacity,
-            m=1.0,
-            loss_fun="square_loss",
-            symmetric=True,
-            alpha=self.structure_weight,
-            G0=initial,
-            numItermax=self.max_iter,
-            tol=self.tolerance,
-        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = partial_fused_gromov_wasserstein(
+                feature_cost,
+                target_structure,
+                predicted_structure,
+                p=target_mass,
+                q=query_capacity,
+                m=transported_mass,
+                loss_fun="square_loss",
+                symmetric=True,
+                alpha=self.structure_weight,
+                G0=initial,
+                numItermax=self.max_iter,
+                tol=self.tolerance,
+                log=return_diagnostics,
+                warn=True,
+            )
+        if not return_diagnostics:
+            return result
+
+        transport, solver_log = result
+        history = [float(value) for value in solver_log.get("loss", ())]
+        iterations = max(0, len(history) - 1)
+        tolerance_met = None
+        relative_change = None
+        absolute_change = None
+        if len(history) >= 2:
+            absolute_change = abs(history[-1] - history[-2])
+            relative_change = (
+                absolute_change / abs(history[-1])
+                if history[-1] != 0.0
+                else None
+            )
+            tolerance_met = bool(
+                absolute_change < self.tolerance
+                or (
+                    relative_change is not None
+                    and relative_change < self.tolerance
+                )
+            )
+        diagnostics = {
+            "iterations": iterations,
+            "iteration_limit": self.max_iter,
+            "tolerance": self.tolerance,
+            "tolerance_met": tolerance_met,
+            "termination_evidence": (
+                "tolerance_met"
+                if tolerance_met
+                else "iteration_limit"
+                if iterations >= self.max_iter
+                else "not_exposed_by_pot"
+            ),
+            "last_absolute_objective_change": absolute_change,
+            "last_relative_objective_change": relative_change,
+            "pot_objective_history": history,
+            "pot_final_objective": (
+                float(solver_log["partial_fgw_dist"])
+                if "partial_fgw_dist" in solver_log
+                else None
+            ),
+            "emd_result_code": solver_log.get("result_code"),
+            "emd_warning": solver_log.get("warning"),
+            "warnings": [str(item.message) for item in caught],
+        }
+        return transport, diagnostics
 
     @torch.no_grad()
     def forward(
@@ -298,6 +461,7 @@ class FusedGromovWassersteinMatcher(nn.Module):
         predicted_structure=None,
         candidate_indices=None,
         return_transport: bool = False,
+        return_diagnostics: bool = False,
     ):
         if predicted_structure is None:
             raise ValueError("FGW matching requires predicted_structure")
@@ -316,12 +480,16 @@ class FusedGromovWassersteinMatcher(nn.Module):
             raise ValueError("FGW structures/candidates must contain one item per sample")
         assignments = []
         transports = []
+        solver_diagnostics = []
         for sample in range(batch_size):
             truth = target_nodes[sample].to(predicted_nodes.device)
             target_count = int(truth.shape[0])
             if target_count == 0:
                 assignments.append(_empty_assignment())
                 transports.append(np.empty((0, 0), dtype=np.float64))
+                solver_diagnostics.append(
+                    {"iterations": 0, "termination_evidence": "empty_target"}
+                )
                 continue
             if target_count > query_count:
                 raise ValueError(
@@ -352,33 +520,36 @@ class FusedGromovWassersteinMatcher(nn.Module):
                 raise ValueError("predicted structure does not match its candidate pool")
             prediction_structure.fill_diagonal_(0.0)
 
-            transport = self._solve_transport(
+            solve_args = (
                 feature_cost.detach().double().cpu().numpy(),
                 truth_structure.detach().double().cpu().numpy(),
                 prediction_structure.detach().double().cpu().numpy(),
             )
-            transport = np.asarray(transport, dtype=np.float64)
-            if transport.shape != (target_count, candidates.numel()):
-                raise RuntimeError("FGW solver returned an unexpected transport shape")
-            if not np.isfinite(transport).all() or (transport < -self.tolerance).any():
-                raise RuntimeError("FGW solver returned an invalid transport plan")
-            if not np.allclose(
-                transport.sum(axis=1),
-                1.0 / target_count,
-                rtol=1e-5,
-                atol=max(self.tolerance, 1e-8),
-            ):
-                raise RuntimeError("FGW transport violates the fixed target marginal")
-            if (
-                transport.sum(axis=0)
-                > 1.0 / target_count + max(self.tolerance, 1e-8)
-            ).any():
-                raise RuntimeError("FGW transport violates prediction capacity")
+            solve_started = time.perf_counter()
+            solved = (
+                self._solve_transport(*solve_args, return_diagnostics=True)
+                if return_diagnostics
+                else self._solve_transport(*solve_args)
+            )
+            solve_seconds = time.perf_counter() - solve_started
+            if return_diagnostics:
+                transport, diagnostics = solved
+                diagnostics["solver_seconds"] = solve_seconds
+                solver_diagnostics.append(diagnostics)
+            else:
+                transport = solved
+            transport = self.validate_transport(
+                transport, target_count, int(candidates.numel()), self.tolerance
+            )
             local_source, matched_target = self.harden_transport(transport)
             assignments.append((candidates.cpu()[local_source], matched_target))
             transports.append(transport)
+        if return_transport and return_diagnostics:
+            return assignments, transports, solver_diagnostics
         if return_transport:
             return assignments, transports
+        if return_diagnostics:
+            return assignments, solver_diagnostics
         return assignments
 
 
@@ -409,5 +580,6 @@ __all__ = [
     "FusedGromovWassersteinMatcher",
     "HungarianMatcher",
     "build_matcher",
+    "fgw_objective_terms",
     "score_candidate_structures",
 ]

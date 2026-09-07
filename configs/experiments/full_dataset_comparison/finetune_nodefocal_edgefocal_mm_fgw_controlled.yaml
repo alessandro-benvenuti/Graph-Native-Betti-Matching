@@ -1,0 +1,6 @@
+defaults:
+  - finetune_nodefocal_edgefocal_mm.yaml
+  - ../../matchers/fgw.yaml
+
+experiment:
+  name: finetune_full_mri_nodefocal_edgefocal_mm_fgw_controlled_seed364505

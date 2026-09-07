@@ -1,0 +1,32 @@
+defaults:
+  - finetune_nodefocal_edgefocal_mm_fgw_controlled.yaml
+
+experiment:
+  name: smoke_full_mri_nodefocal_edgefocal_mm_fgw_controlled_seed364505
+
+runtime:
+  workers: 0
+
+data:
+  batch_size: 1
+  validation_batch_size: 1
+  train_augmentation: false
+  datasets:
+    synthetic_mri:
+      train_samples: 2
+      validation_samples: 1
+
+training:
+  epochs: 1
+  early_stopping:
+    enabled: false
+  checkpoint:
+    policy: none
+
+evaluation:
+  interval_epochs: 1
+  training_metrics:
+    enabled: false
+    save_f1_checkpoints: false
+    max_samples: 2
+    save_best_checkpoint: false

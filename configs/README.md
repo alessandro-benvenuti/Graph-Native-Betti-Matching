@@ -111,6 +111,19 @@ at most one target. Partial transport lets surplus predictions remain unmatched.
 The returned transport is projected globally to one-to-one hard matches before
 the existing node, edge, and topology losses run.
 
+The feature classification cost is the baseline's `-p(object)`, not
+`-log(p(object))`. Both structural matrices are similarities: loop-free binary
+GT adjacency and symmetric predicted edge probabilities. The solver is POT's
+non-entropic partial FGW conditional-gradient method with EMD subproblems.
+Uniform target masses and candidate capacities are deliberate. They constrain
+the soft plan but do not make it integral; global hardening supplies the final
+unique assignment and can increase the FGW objective. Diagnostic mode reports
+that projection gap rather than silently reverting to Hungarian.
+
+`random_state` is accepted in older composed configurations for compatibility,
+but it is unused: this solver path has no stochastic initialization. New FGW
+overlays omit it.
+
 Scoring the complete graph of 120 queries would require 7,140 undirected query
 pairs, or 14,280 ordered relation evaluations after symmetrization, per sample.
 `candidate_count` bounds this work. The candidate pool always contains every
@@ -126,6 +139,12 @@ defaults:
   - finetune_synthetic_mri_focal.yaml
   - matchers/fgw.yaml
 ```
+
+The controlled full-data comparison is
+`experiments/full_dataset_comparison/finetune_nodefocal_edgefocal_mm_fgw_controlled.yaml`.
+It inherits the checkpoint baseline and changes only the experiment name and
+matcher. Its `smoke_...` derivative bounds data and runtime for a one-epoch
+integration check; it is not a scientific comparison recipe.
 
 ## Model compatibility values
 

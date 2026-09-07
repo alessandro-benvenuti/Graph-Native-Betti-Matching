@@ -9,5 +9,4 @@ model:
     # each network-simplex partial-transport subproblem.
     max_iter: 10000
     tolerance: 1.0e-7
-    random_state: 0
     pair_chunk_size: 1024

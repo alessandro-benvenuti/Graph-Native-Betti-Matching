@@ -8,6 +8,8 @@ import torch
 
 from scripts.diagnose_fgw_matching import (
     assignment_metrics,
+    objective_diagnostics,
+    summarize_by_target_count,
     summarize_rows,
     transport_metrics,
 )
@@ -41,7 +43,44 @@ class FGWDiagnosticTests(unittest.TestCase):
         self.assertEqual(metrics["matched_query_ids"], [2, 1])
         self.assertAlmostEqual(metrics["coordinate_l1_mean"], 0.0)
         self.assertAlmostEqual(metrics["gt_edge_probability_mean"], 0.9)
+        self.assertAlmostEqual(metrics["gt_edge_squared_error"], 0.01)
+        self.assertEqual(metrics["gt_edge_pair_count"], 1)
+        self.assertEqual(metrics["gt_nonedge_pair_count"], 0)
+        self.assertEqual(metrics["nonedge_metrics_undefined"], 1)
         self.assertTrue(metrics["hard_unique"])
+
+    def test_assignment_metrics_counts_edgeless_and_tiny_undefined_cases(self):
+        metrics = assignment_metrics(
+            torch.zeros((1, 3)),
+            torch.zeros((1, 2)),
+            torch.zeros((1, 3)),
+            torch.empty((0, 2), dtype=torch.long),
+            torch.tensor([0]),
+            torch.zeros((1, 1)),
+            (torch.tensor([0]), torch.tensor([0])),
+            dimensions=3,
+        )
+        self.assertEqual(metrics["graph_too_small_for_pair_metrics"], 1)
+        self.assertEqual(metrics["edge_metrics_undefined"], 1)
+        self.assertEqual(metrics["nonedge_metrics_undefined"], 1)
+
+    def test_objective_diagnostics_reports_projection_gap(self):
+        feature = np.array([[0.0, 1.0], [1.0, 0.0]])
+        structure = np.array([[0.0, 1.0], [1.0, 0.0]])
+        soft = np.full((2, 2), 0.25)
+        observed = objective_diagnostics(
+            feature,
+            structure,
+            structure,
+            soft,
+            (torch.tensor([0, 1]), torch.tensor([0, 1])),
+            torch.tensor([0, 1]),
+            0.5,
+        )
+        self.assertAlmostEqual(observed["initial_objective"], 0.0)
+        self.assertGreater(observed["soft_objective_change_vs_hungarian"], 0.0)
+        self.assertAlmostEqual(observed["hard_objective_change_vs_hungarian"], 0.0)
+        self.assertLess(observed["hardening_objective_gap"], 0.0)
 
     def test_transport_metrics_detect_collisions_and_diffusion(self):
         concentrated = np.array([[0.5, 0.0], [0.5, 0.0]])
@@ -65,6 +104,20 @@ class FGWDiagnosticTests(unittest.TestCase):
         self.assertEqual(summary["fgw"]["samples"], 2)
         self.assertAlmostEqual(summary["fgw"]["metric"], 2.0)
         self.assertAlmostEqual(summary["fgw"]["other"], 2.0)
+
+    def test_summary_groups_by_graph_size_and_counts_undefined_metrics(self):
+        rows = [
+            {"method": "fgw", "target_count": 1, "edge_metrics_undefined": 1},
+            {"method": "fgw", "target_count": 2, "edge_metrics_undefined": 0},
+        ]
+        grouped = summarize_by_target_count(rows)
+        self.assertEqual(set(grouped), {"1", "2"})
+        self.assertEqual(
+            grouped["1"]["fgw"]["undefined_or_failure_counts"][
+                "edge_metrics_undefined"
+            ],
+            1,
+        )
 
 
 if __name__ == "__main__":

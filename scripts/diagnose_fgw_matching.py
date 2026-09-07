@@ -8,8 +8,10 @@ import copy
 import csv
 import json
 import math
+import platform
 from pathlib import Path
 import random
+import subprocess
 import sys
 import time
 
@@ -28,6 +30,7 @@ from models.checkpoint import load_legacy_model_checkpoint
 from models.matcher import (
     FusedGromovWassersteinMatcher,
     HungarianMatcher,
+    fgw_objective_terms,
     score_candidate_structures,
 )
 
@@ -154,6 +157,12 @@ def assignment_metrics(
     nonedge_mask = upper & ~edge_mask
     edge_mean = _safe_mean(aligned_structure[edge_mask])
     nonedge_mean = _safe_mean(aligned_structure[nonedge_mask])
+    edge_squared_error = _safe_mean(
+        (aligned_structure[edge_mask] - truth_structure[edge_mask]).square()
+    )
+    nonedge_squared_error = _safe_mean(
+        (aligned_structure[nonedge_mask] - truth_structure[nonedge_mask]).square()
+    )
     structural_mse = _safe_mean(
         (aligned_structure[upper] - truth_structure[upper]).square()
     )
@@ -164,9 +173,17 @@ def assignment_metrics(
         "coordinate_l1_mean": _safe_mean(coordinate_l1),
         "matched_object_probability_mean": _safe_mean(object_probability[source]),
         "structural_mse": structural_mse,
+        "gt_edge_squared_error": edge_squared_error,
+        "gt_nonedge_squared_error": nonedge_squared_error,
         "gt_edge_probability_mean": edge_mean,
         "gt_nonedge_probability_mean": nonedge_mean,
         "edge_nonedge_separation": edge_mean - nonedge_mean,
+        "gt_edge_pair_count": int(edge_mask.sum()),
+        "gt_nonedge_pair_count": int(nonedge_mask.sum()),
+        "graph_pair_count": int(upper.sum()),
+        "graph_too_small_for_pair_metrics": int(target_count < 2),
+        "edge_metrics_undefined": int(not bool(edge_mask.any())),
+        "nonedge_metrics_undefined": int(not bool(nonedge_mask.any())),
         "hard_unique": True,
     }
     if reference_assignment is None:
@@ -214,6 +231,63 @@ def transport_metrics(transport):
     }
 
 
+def objective_diagnostics(
+    feature_cost,
+    target_structure,
+    predicted_structure,
+    soft_transport,
+    hard_assignment,
+    candidates,
+    alpha,
+):
+    """Compare initial, final soft, and globally hardened FGW objectives."""
+
+    feature_cost = np.asarray(feature_cost, dtype=np.float64)
+    initial = FusedGromovWassersteinMatcher.initial_transport(feature_cost)
+    target_count = feature_cost.shape[0]
+    hard = np.zeros_like(feature_cost)
+    assignment = _assignment_vector(hard_assignment, target_count)
+    local_by_global = {
+        int(query): local for local, query in enumerate(candidates.long().cpu().tolist())
+    }
+    for target, query in enumerate(assignment.tolist()):
+        hard[target, local_by_global[query]] = 1.0 / target_count
+    stages = {
+        "initial": fgw_objective_terms(
+            feature_cost, target_structure, predicted_structure, initial, alpha
+        ),
+        "soft": fgw_objective_terms(
+            feature_cost, target_structure, predicted_structure, soft_transport, alpha
+        ),
+        "hard": fgw_objective_terms(
+            feature_cost, target_structure, predicted_structure, hard, alpha
+        ),
+    }
+    names = {
+        "feature": "feature_term",
+        "structural": "structural_term",
+        "weighted_total": "objective",
+    }
+    result = {
+        f"{stage}_{names[name]}": value
+        for stage, terms in stages.items()
+        for name, value in terms.items()
+    }
+    initial_total = stages["initial"]["weighted_total"]
+    result.update(
+        soft_objective_change_vs_hungarian=(
+            stages["soft"]["weighted_total"] - initial_total
+        ),
+        hard_objective_change_vs_hungarian=(
+            stages["hard"]["weighted_total"] - initial_total
+        ),
+        hardening_objective_gap=(
+            stages["hard"]["weighted_total"] - stages["soft"]["weighted_total"]
+        ),
+    )
+    return result
+
+
 def summarize_rows(rows):
     """Aggregate finite numeric diagnostics independently for every method."""
 
@@ -233,8 +307,67 @@ def summarize_rows(rows):
             ]
             if values:
                 metrics[name] = float(np.mean(values))
-        summaries[method] = {"samples": len(selected), **metrics}
+        undefined_counts = {
+            name: sum(int(bool(row.get(name))) for row in selected)
+            for name in (
+                "graph_too_small_for_pair_metrics",
+                "edge_metrics_undefined",
+                "nonedge_metrics_undefined",
+                "invariant_failure",
+            )
+        }
+        summaries[method] = {
+            "samples": len(selected),
+            **metrics,
+            "undefined_or_failure_counts": undefined_counts,
+        }
     return summaries
+
+
+def summarize_by_target_count(rows):
+    """Group method summaries by ground-truth graph size."""
+
+    counts = sorted(
+        {int(row["target_count"]) for row in rows if "target_count" in row}
+    )
+    return {
+        str(count): summarize_rows(
+            [row for row in rows if row.get("target_count") == count]
+        )
+        for count in counts
+    }
+
+
+def _run_metadata():
+    def git(*arguments):
+        try:
+            return subprocess.run(
+                ("git", *arguments),
+                cwd=REPOSITORY_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return None
+
+    try:
+        import ot
+        pot_version = ot.__version__
+    except ImportError:
+        pot_version = None
+    status = git("status", "--short")
+    return {
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "torch": torch.__version__,
+        "numpy": np.__version__,
+        "pot": pot_version,
+        "git_revision": git("rev-parse", "HEAD"),
+        "git_branch": git("branch", "--show-current"),
+        "git_has_local_changes": None if status is None else bool(status),
+        "git_status_short": None if status is None else status.splitlines(),
+    }
 
 
 def _json_safe(value):
@@ -331,18 +464,27 @@ def run_diagnostic(model, loader, config, device, args):
         method_results = {}
         for alpha, matcher in fgw_matchers.items():
             started = time.perf_counter()
-            assignments, transports = matcher(
-                predictions,
-                targets,
-                predicted_structure=structures,
-                candidate_indices=candidates,
-                return_transport=True,
-            )
-            method_results[alpha] = (
-                assignments,
-                transports,
-                time.perf_counter() - started,
-            )
+            try:
+                assignments, transports, diagnostics = matcher(
+                    predictions,
+                    targets,
+                    predicted_structure=structures,
+                    candidate_indices=candidates,
+                    return_transport=True,
+                    return_diagnostics=True,
+                )
+                method_results[alpha] = {
+                    "assignments": assignments,
+                    "transports": transports,
+                    "diagnostics": diagnostics,
+                    "elapsed": time.perf_counter() - started,
+                    "error": None,
+                }
+            except Exception as error:
+                method_results[alpha] = {
+                    "elapsed": time.perf_counter() - started,
+                    "error": f"{type(error).__name__}: {error}",
+                }
 
         for local_index in range(batch_count):
             sample_id = f"sample_{sample_index:06d}"
@@ -373,10 +515,34 @@ def run_diagnostic(model, loader, config, device, args):
                     **baseline,
                     "model_forward_seconds": forward_seconds / batch_count,
                     "structure_scoring_seconds": 0.0,
+                    "relation_scoring_seconds": 0.0,
                     "matcher_seconds": hungarian_seconds / batch_count,
+                    "solver_seconds": 0.0,
+                    "invariant_failure": 0,
                 }
             )
-            for alpha, (assignments, transports, elapsed) in method_results.items():
+            for alpha, result in method_results.items():
+                if result["error"] is not None:
+                    rows.append(
+                        {
+                            "sample_id": sample_id,
+                            "source_sample_id": source_sample_id,
+                            "method": f"fgw_alpha_{alpha:g}",
+                            "target_count": int(targets["nodes"][local_index].shape[0]),
+                            "candidate_count": int(candidates[local_index].numel()),
+                            "invariant_failure": 1,
+                            "failure": result["error"],
+                            "model_forward_seconds": forward_seconds / batch_count,
+                            "structure_scoring_seconds": structure_seconds / batch_count,
+                            "relation_scoring_seconds": structure_seconds / batch_count,
+                            "matcher_seconds": result["elapsed"] / batch_count,
+                            "solver_seconds": float("nan"),
+                        }
+                    )
+                    continue
+                assignments = result["assignments"]
+                transports = result["transports"]
+                diagnostics = result["diagnostics"][local_index]
                 metrics = assignment_metrics(
                     **common_metrics,
                     assignment=assignments[local_index],
@@ -390,6 +556,54 @@ def run_diagnostic(model, loader, config, device, args):
                     metrics[name + "_delta_vs_hungarian"] = (
                         metrics[name] - baseline[name]
                     )
+                target_count = int(targets["nodes"][local_index].shape[0])
+                feature_cost = matcher._feature_cost(
+                    predictions, targets["nodes"][local_index], local_index
+                )[:, candidates[local_index]].detach().double().cpu().numpy()
+                truth_structure = matcher.target_structure(
+                    target_count,
+                    targets["edges"][local_index],
+                    dtype=structures[local_index].dtype,
+                    device=structures[local_index].device,
+                ).detach().double().cpu().numpy()
+                prediction_structure = (
+                    structures[local_index].detach().double().cpu().numpy().copy()
+                )
+                np.fill_diagonal(prediction_structure, 0.0)
+                objectives = objective_diagnostics(
+                    feature_cost,
+                    truth_structure,
+                    prediction_structure,
+                    transports[local_index],
+                    assignments[local_index],
+                    candidates[local_index],
+                    alpha,
+                )
+                reference_queries = set(
+                    _assignment_vector(reference, target_count).tolist()
+                )
+                matched_queries = set(metrics["matched_query_ids"])
+                retained = len(reference_queries & matched_queries)
+                mapping_changed = bool(metrics["changed_any"])
+                if alpha == 0.0:
+                    unary_delta = objectives["hard_feature_term"] - objectives[
+                        "initial_feature_term"
+                    ]
+                    alpha_zero_status = (
+                        "same_mapping"
+                        if not mapping_changed
+                        else "tied_optimum"
+                        if abs(unary_delta) <= args.tolerance
+                        else "unary_cost_regression"
+                    )
+                else:
+                    unary_delta = float("nan")
+                    alpha_zero_status = "not_applicable"
+                flat_solver = {
+                    f"solver_{name}": value
+                    for name, value in diagnostics.items()
+                    if name != "solver_seconds"
+                }
                 rows.append(
                     {
                         "sample_id": sample_id,
@@ -397,9 +611,26 @@ def run_diagnostic(model, loader, config, device, args):
                         "method": f"fgw_alpha_{alpha:g}",
                         **metrics,
                         **transport_metrics(transports[local_index]),
+                        **objectives,
+                        **flat_solver,
+                        "alpha_zero_status": alpha_zero_status,
+                        "alpha_zero_unary_cost_delta": unary_delta,
+                        "candidate_extra_query_count": int(candidates[local_index].numel()) - target_count,
+                        "candidate_retains_all_hungarian_queries": int(
+                            reference_queries.issubset(
+                                set(candidates[local_index].long().cpu().tolist())
+                            )
+                        ),
+                        "query_subset_changed_vs_hungarian": int(
+                            matched_queries != reference_queries
+                        ),
+                        "query_subset_replaced_fraction": 1.0 - retained / target_count,
+                        "invariant_failure": 0,
                         "model_forward_seconds": forward_seconds / batch_count,
                         "structure_scoring_seconds": structure_seconds / batch_count,
-                        "matcher_seconds": elapsed / batch_count,
+                        "relation_scoring_seconds": structure_seconds / batch_count,
+                        "matcher_seconds": result["elapsed"] / batch_count,
+                        "solver_seconds": diagnostics.get("solver_seconds", float("nan")),
                     }
                 )
             sample_index += 1
@@ -452,6 +683,7 @@ def main():
         "dataset": dataset_name,
         "split": args.split,
         "methods": summarize_rows(rows),
+        "by_target_count": summarize_by_target_count(rows),
     }
     (output_dir / "summary.json").write_text(
         json.dumps(_json_safe(summary), indent=2, sort_keys=True) + "\n",
@@ -469,6 +701,20 @@ def main():
         "progress_every": args.progress_every,
         "ignored_removed_parameters": list(report.ignored_removed),
         "augmentation": False,
+        "seed": seed,
+        "device": str(device),
+        "versions_and_revision": _run_metadata(),
+        "solver": {
+            "name": "POT partial_fused_gromov_wasserstein",
+            "algorithm": "conditional_gradient_with_emd",
+            "loss_fun": "square_loss",
+            "symmetric": True,
+            "max_iter": args.max_iter,
+            "tolerance": args.tolerance,
+            "initialization": "unary_hungarian",
+            "target_mass": "uniform_1_over_target_count",
+            "candidate_capacity": "uniform_1_over_target_count",
+        },
     }
     (output_dir / "metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
