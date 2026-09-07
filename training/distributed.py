@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 import os
 
 import torch
@@ -36,10 +37,17 @@ def initialize_distributed(enabled: bool):
     if world_size == 1:
         return 0, 1, 0
     if not torch.cuda.is_available():
-        raise RuntimeError("distributed H100 training requires CUDA")
+        raise RuntimeError("distributed GPU training requires CUDA")
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", init_method="env://")
+    timeout_minutes = int(os.environ.get("GNBM_DISTRIBUTED_TIMEOUT_MINUTES", "120"))
+    if timeout_minutes <= 0:
+        raise ValueError("GNBM_DISTRIBUTED_TIMEOUT_MINUTES must be positive")
+    dist.init_process_group(
+        backend="nccl",
+        init_method="env://",
+        timeout=timedelta(minutes=timeout_minutes),
+    )
     return dist.get_rank(), dist.get_world_size(), local_rank
 
 

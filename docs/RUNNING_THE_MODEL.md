@@ -276,6 +276,13 @@ The dependent MRI job uses the matching pretraining run's
 `best_metric_checkpoint.pt`, selected by maximum validation edge mAP, as
 initial weights.
 
+During multi-GPU validation, only rank 0 evaluates the complete validation and
+metric loaders. Non-primary ranks wait through a shared-filesystem rendezvous
+instead of entering an NCCL collective while evaluation is running. This avoids
+the ten-minute NCCL watchdog failures caused by long rank-0-only evaluation.
+The A100 environment also gives ordinary distributed collectives a two-hour
+safety timeout for large checkpoint writes.
+
 ### Development-QoS batch-size benchmark
 
 Before committing the full boundary-data sweep to a larger global batch, run

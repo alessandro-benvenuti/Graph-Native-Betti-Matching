@@ -68,6 +68,20 @@ def distributed_worker(rank, directory):
 
 
 class TrainingSelectionTests(unittest.TestCase):
+    def test_non_primary_reads_rank_zero_validation_flags(self):
+        with tempfile.TemporaryDirectory() as directory:
+            trainer = setup(directory)
+            trainer.rank, trainer.world_size = 1, 2
+            path = Path(directory) / "flags.json"
+            path.write_text(json.dumps({
+                "epoch": 5,
+                "flags": [True, False, True, False, True],
+            }))
+            self.assertEqual(
+                trainer._exchange_validation_flags(path, 5),
+                (True, False, True, False, True),
+            )
+
     def test_separate_winners_and_forced_final_latest(self):
         with tempfile.TemporaryDirectory() as directory:
             trainer = setup(directory)

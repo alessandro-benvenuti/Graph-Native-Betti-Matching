@@ -153,6 +153,35 @@ class Trainer:
     def _distributed(self):
         return self.world_size > 1 and dist.is_initialized()
 
+    def _exchange_validation_flags(self, path, epoch, flags=None):
+        """Share rank-0 evaluation decisions without a long-lived NCCL call."""
+        path = Path(path)
+        if self.is_primary:
+            payload = {
+                "epoch": int(epoch),
+                "flags": [bool(value) for value in flags],
+            }
+            _write_json(path, payload)
+            return tuple(payload["flags"])
+
+        deadline = time.monotonic() + 2 * 60 * 60
+        while True:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, json.JSONDecodeError):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        "Timed out waiting for rank-0 validation decisions: {}".format(path)
+                    )
+                time.sleep(1.0)
+                continue
+            if payload.get("epoch") != int(epoch):
+                raise RuntimeError("Stale validation synchronization file: {}".format(path))
+            values = payload.get("flags")
+            if not isinstance(values, list) or len(values) != 5:
+                raise RuntimeError("Invalid validation synchronization file: {}".format(path))
+            return tuple(bool(value) for value in values)
+
     def _reduce_epoch_totals(self, sums, batches):
         if not self._distributed():
             return sums, batches
@@ -387,8 +416,14 @@ class Trainer:
             stop_training = False
             pending_records = []
             monitored_metrics = {}
+            validation_sync_path = None
             if epoch % validation_interval == 0 or epoch == epochs:
                 if self._distributed():
+                    validation_sync_path = (
+                        output.parent / ".validation_sync" / "epoch={}.json".format(epoch)
+                    )
+                    if self.is_primary:
+                        validation_sync_path.unlink(missing_ok=True)
                     dist.barrier()
                 if self.is_primary:
                     validation = evaluate_loss(
@@ -534,14 +569,22 @@ class Trainer:
                         ))
 
                 if self._distributed():
-                    flags = torch.tensor(
-                        [save_best_validation, save_best_metric, save_node_f1, save_edge_f1, stop_training],
-                        dtype=torch.uint8,
-                        device=self.device,
-                    )
-                    dist.broadcast(flags, src=0)
-                    save_best_validation, save_best_metric, save_node_f1, save_edge_f1, stop_training = (
-                        bool(value) for value in flags.tolist()
+                    (
+                        save_best_validation,
+                        save_best_metric,
+                        save_node_f1,
+                        save_edge_f1,
+                        stop_training,
+                    ) = self._exchange_validation_flags(
+                        validation_sync_path,
+                        epoch,
+                        (
+                            save_best_validation,
+                            save_best_metric,
+                            save_node_f1,
+                            save_edge_f1,
+                            stop_training,
+                        ),
                     )
 
             paths = []
@@ -592,6 +635,12 @@ class Trainer:
                     })
             if self._distributed():
                 dist.barrier()
+                if self.is_primary and validation_sync_path is not None:
+                    validation_sync_path.unlink(missing_ok=True)
+                    try:
+                        validation_sync_path.parent.rmdir()
+                    except OSError:
+                        pass
             if stop_training:
                 break
 __all__ = ["Trainer", "evaluate_loss", "train_step"]
