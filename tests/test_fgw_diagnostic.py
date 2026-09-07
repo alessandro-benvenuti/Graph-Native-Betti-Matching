@@ -48,9 +48,12 @@ class FGWDiagnosticTests(unittest.TestCase):
         metrics = transport_metrics(concentrated)
         self.assertEqual(metrics["soft_argmax_collisions"], 1)
         self.assertAlmostEqual(metrics["normalized_row_entropy"], 0.0)
+        self.assertAlmostEqual(metrics["max_prediction_capacity_ratio"], 2.0)
+        self.assertAlmostEqual(metrics["transport_total_mass"], 1.0)
 
         diffuse = transport_metrics(np.full((2, 2), 0.25))
         self.assertAlmostEqual(diffuse["normalized_row_entropy"], 1.0)
+        self.assertAlmostEqual(diffuse["max_prediction_capacity_ratio"], 1.0)
 
     def test_summary_ignores_nonfinite_and_nonnumeric_values(self):
         rows = [

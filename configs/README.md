@@ -23,7 +23,7 @@ configuration before a dataset is constructed.
   specialization configurations for the seven unweighted-focal recipes.
 - `losses/`: reusable focal and Betti overlays containing only loss changes;
   they never modify datasets, model architecture, or optimization settings.
-- `matchers/fgw.yaml`: semi-relaxed Fused Gromov-Wasserstein matching followed
+- `matchers/fgw.yaml`: partial Fused Gromov-Wasserstein matching followed
   by a hard one-to-one projection.
 - `smoke_mixed_focal_betti.yaml`: one-epoch, four-sample integration check for
   the complete focal + topology training path.
@@ -106,9 +106,10 @@ resolved configuration fully describes an experiment.
 ## FGW matcher
 
 The FGW overlay replaces only the training-time matcher. Ground-truth nodes are
-the fixed-mass source measure, prediction queries are the relaxed target
-measure, and the returned transport is projected globally to one-to-one hard
-matches before the existing node, edge, and topology losses run.
+the fixed-mass source measure, and every candidate prediction has capacity for
+at most one target. Partial transport lets surplus predictions remain unmatched.
+The returned transport is projected globally to one-to-one hard matches before
+the existing node, edge, and topology losses run.
 
 Scoring the complete graph of 120 queries would require 7,140 undirected query
 pairs, or 14,280 ordered relation evaluations after symmetrization, per sample.

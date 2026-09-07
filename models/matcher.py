@@ -121,11 +121,11 @@ class HungarianMatcher(nn.Module):
 
 
 class FusedGromovWassersteinMatcher(nn.Module):
-    """Match nodes with semi-relaxed FGW followed by one-to-one projection.
+    """Match nodes with partial FGW followed by one-to-one projection.
 
-    Ground-truth nodes are the fixed-mass source measure and prediction queries
-    are the relaxed target measure. This lets the coupling select a subset of
-    surplus RelationFormer queries before the final discrete projection.
+    Ground-truth nodes carry all transported mass while each prediction query
+    has capacity for at most one target. This lets the coupling select a subset
+    of surplus RelationFormer queries without allowing many-to-one matches.
     """
 
     requires_structure = True
@@ -254,7 +254,7 @@ class FusedGromovWassersteinMatcher(nn.Module):
 
     def _solve_transport(self, feature_cost, target_structure, predicted_structure):
         try:
-            from ot.gromov import semirelaxed_fused_gromov_wasserstein
+            from ot.gromov import partial_fused_gromov_wasserstein
         except ImportError as error:
             raise ImportError(
                 "The FGW matcher requires Python Optimal Transport (POT). "
@@ -263,26 +263,30 @@ class FusedGromovWassersteinMatcher(nn.Module):
 
         target_count, query_count = feature_cost.shape
         target_mass = np.full(target_count, 1.0 / target_count, dtype=np.float64)
+        # Partial OT interprets these as column capacities. Giving every query
+        # the same capacity as one target prevents two targets from consuming
+        # the same prediction while allowing surplus predictions to stay empty.
+        query_capacity = np.full(query_count, 1.0 / target_count, dtype=np.float64)
 
-        # This sparse coordinate/class plan is feasible for the semi-relaxed
-        # problem and gives the non-convex solver a stable initialization.
+        # The unary Hungarian plan is feasible for the partial problem and gives
+        # the non-convex solver a stable, injective initialization.
         initial_target, initial_source = linear_sum_assignment(feature_cost)
         initial = np.zeros((target_count, query_count), dtype=np.float64)
         initial[initial_target, initial_source] = target_mass[initial_target]
 
-        return semirelaxed_fused_gromov_wasserstein(
+        return partial_fused_gromov_wasserstein(
             feature_cost,
             target_structure,
             predicted_structure,
             p=target_mass,
+            q=query_capacity,
+            m=1.0,
             loss_fun="square_loss",
             symmetric=True,
             alpha=self.structure_weight,
             G0=initial,
-            max_iter=self.max_iter,
-            tol_rel=self.tolerance,
-            tol_abs=self.tolerance,
-            random_state=self.random_state,
+            numItermax=self.max_iter,
+            tol=self.tolerance,
         )
 
     @torch.no_grad()
@@ -365,6 +369,11 @@ class FusedGromovWassersteinMatcher(nn.Module):
                 atol=max(self.tolerance, 1e-8),
             ):
                 raise RuntimeError("FGW transport violates the fixed target marginal")
+            if (
+                transport.sum(axis=0)
+                > 1.0 / target_count + max(self.tolerance, 1e-8)
+            ).any():
+                raise RuntimeError("FGW transport violates prediction capacity")
             local_source, matched_target = self.harden_transport(transport)
             assignments.append((candidates.cpu()[local_source], matched_target))
             transports.append(transport)

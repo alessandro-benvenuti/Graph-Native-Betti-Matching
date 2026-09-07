@@ -181,11 +181,17 @@ def assignment_metrics(
 
 
 def transport_metrics(transport):
-    """Return concentration diagnostics for a semi-relaxed plan."""
+    """Return concentration diagnostics for a partial transport plan."""
 
     plan = np.asarray(transport, dtype=np.float64)
     if plan.size == 0:
-        return {"soft_argmax_collisions": 0, "normalized_row_entropy": 0.0}
+        return {
+            "soft_argmax_collisions": 0,
+            "normalized_row_entropy": 0.0,
+            "active_prediction_columns": 0,
+            "max_prediction_capacity_ratio": 0.0,
+            "transport_total_mass": 0.0,
+        }
     conditional = np.clip(plan, 0.0, None)
     conditional = conditional / np.maximum(
         conditional.sum(axis=1, keepdims=True), 1e-15
@@ -197,9 +203,14 @@ def transport_metrics(transport):
     else:
         entropy = np.zeros_like(entropy)
     collisions = plan.shape[0] - len(np.unique(np.argmax(plan, axis=1)))
+    column_mass = plan.sum(axis=0)
+    capacity = 1.0 / plan.shape[0]
     return {
         "soft_argmax_collisions": int(collisions),
         "normalized_row_entropy": float(np.mean(entropy)),
+        "active_prediction_columns": int(np.count_nonzero(column_mass > 1e-12)),
+        "max_prediction_capacity_ratio": float(column_mass.max() / capacity),
+        "transport_total_mass": float(plan.sum()),
     }
 
 

@@ -7,7 +7,11 @@ import numpy as np
 import torch
 
 from configs import load_config
-from models.matcher import FusedGromovWassersteinMatcher, build_matcher
+from models.matcher import (
+    FusedGromovWassersteinMatcher,
+    HungarianMatcher,
+    build_matcher,
+)
 
 
 class FGWMatcherTests(unittest.TestCase):
@@ -88,9 +92,40 @@ class FGWMatcherTests(unittest.TestCase):
         self.assertTrue(np.isfinite(transport).all())
         self.assertTrue((transport >= -1e-8).all())
         self.assertTrue(np.allclose(transport.sum(axis=1), [0.5, 0.5]))
+        self.assertTrue((transport.sum(axis=0) <= 0.5 + 1e-8).all())
         source, target = self.matcher.harden_transport(transport)
         self.assertEqual(len(source.unique()), 2)
         self.assertEqual(sorted(target.tolist()), [0, 1])
+
+    def test_zero_structure_weight_reproduces_hungarian(self):
+        outputs = {
+            "pred_logits": torch.zeros((1, 3, 2)),
+            "pred_nodes": torch.tensor(
+                [[[0.04, 0.0, 0.0], [0.20, 0.0, 0.0], [0.90, 0.0, 0.0]]]
+            ),
+        }
+        targets = {
+            "nodes": [
+                torch.tensor([[0.0, 0.0, 0.0], [0.10, 0.0, 0.0]])
+            ],
+            "edges": [torch.tensor([[0, 1]])],
+        }
+        hungarian = HungarianMatcher(class_cost=0.0, node_cost=1.0)
+        partial_fgw = FusedGromovWassersteinMatcher(
+            class_cost=0.0,
+            node_cost=1.0,
+            structure_weight=0.0,
+            candidate_count=3,
+        )
+        expected = hungarian(outputs, targets)[0]
+        observed = partial_fgw(
+            outputs,
+            targets,
+            predicted_structure=[torch.zeros((3, 3))],
+            candidate_indices=[torch.arange(3)],
+        )[0]
+        self.assertEqual(expected[0].tolist(), observed[0].tolist())
+        self.assertEqual(expected[1].tolist(), observed[1].tolist())
 
     def test_candidate_pool_retains_unary_matches_and_is_bounded(self):
         matcher = FusedGromovWassersteinMatcher(
