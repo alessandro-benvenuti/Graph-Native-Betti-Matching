@@ -363,7 +363,7 @@ Important files are:
 | `checkpoint_epoch=N.pt` | Periodic archive when an interval policy is selected. |
 | `best-metric.json`, `best-node-f1.json`, `best-edge-f1.json` | Winner epoch, iteration, value and checkpoint provenance. |
 | `early-stopping.json` | Current patience state. |
-| `training-status.json` | Terminal epoch and either `early_stopping` or `max_epochs`. |
+| `training-status.json` | Terminal epoch and `early_stopping`, `execution_stop`, or `max_epochs`. |
 | `wandb-run.json` | W&B identity/provenance. |
 
 All checkpoints are written below `GNBM_OUTPUT_DIR`, so setting that variable

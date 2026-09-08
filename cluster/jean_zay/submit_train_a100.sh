@@ -64,7 +64,8 @@ if [[ -n "${GNBM_INITIAL_WEIGHTS:-}" && ! -f "$GNBM_INITIAL_WEIGHTS" \
   echo "Initial checkpoint does not exist: $GNBM_INITIAL_WEIGHTS" >&2
   exit 2
 fi
-if [[ -n "${GNBM_RESUME_CHECKPOINT:-}" && ! -f "$GNBM_RESUME_CHECKPOINT" ]]; then
+if [[ -n "${GNBM_RESUME_CHECKPOINT:-}" && ! -f "$GNBM_RESUME_CHECKPOINT" \
+      && "${GNBM_ALLOW_PENDING_RESUME:-0}" != "1" ]]; then
   echo "Resume checkpoint does not exist: $GNBM_RESUME_CHECKPOINT" >&2
   exit 2
 fi

@@ -1,0 +1,8 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: fgw_pilot_pretrained_continue_hungarian_e15_seed364505
+
+training:
+  stop_after_epoch: 15

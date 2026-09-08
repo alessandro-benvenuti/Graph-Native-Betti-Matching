@@ -1,0 +1,24 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: fgw_pilot_pretrained_continue_fgw_a04_e15_seed364505
+
+model:
+  matcher:
+    type: fgw
+    class_cost: 2.0
+    node_cost: 5.0
+    structure_weight: 0.4
+    candidate_count: 32
+    max_iter: 10000
+    tolerance: 1.0e-7
+    pair_chunk_size: 1024
+    schedule:
+      type: linear
+      start_epoch: 6
+      ramp_epochs: 5
+      initial_weight: 0.0
+
+training:
+  stop_after_epoch: 15

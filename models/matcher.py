@@ -197,6 +197,7 @@ class FusedGromovWassersteinMatcher(nn.Module):
         max_iter: int = 10_000,
         tolerance: float = 1e-7,
         random_state: int = 0,
+        schedule: Mapping | None = None,
     ):
         super().__init__()
         if class_cost == 0 and node_cost == 0:
@@ -213,7 +214,23 @@ class FusedGromovWassersteinMatcher(nn.Module):
             raise ValueError("tolerance must be positive")
         self.class_cost = float(class_cost)
         self.node_cost = float(node_cost)
-        self.structure_weight = float(structure_weight)
+        self.target_structure_weight = float(structure_weight)
+        self.schedule = dict(schedule or {})
+        if self.schedule:
+            if self.schedule.get("type") != "linear":
+                raise ValueError("FGW schedule.type must be linear")
+            start_epoch = self.schedule.get("start_epoch")
+            ramp_epochs = self.schedule.get("ramp_epochs")
+            if not isinstance(start_epoch, int) or start_epoch <= 0:
+                raise ValueError("FGW schedule.start_epoch must be positive")
+            if not isinstance(ramp_epochs, int) or ramp_epochs <= 0:
+                raise ValueError("FGW schedule.ramp_epochs must be positive")
+            initial_weight = float(self.schedule.get("initial_weight", 0.0))
+            if not 0.0 <= initial_weight <= self.target_structure_weight:
+                raise ValueError(
+                    "FGW schedule.initial_weight must lie between 0 and the target"
+                )
+        self.structure_weight = self._scheduled_structure_weight(epoch=1)
         self.dimensions = int(dimensions)
         self.candidate_count = int(candidate_count)
         self.max_iter = int(max_iter)
@@ -221,6 +238,33 @@ class FusedGromovWassersteinMatcher(nn.Module):
         # Accepted for configuration compatibility. The unary initialization
         # and POT conditional-gradient path used here contain no random step.
         self.random_state = int(random_state)
+
+    def _scheduled_structure_weight(self, epoch: int) -> float:
+        """Return the effective FGW alpha for a global training epoch."""
+
+        if not self.schedule:
+            return self.target_structure_weight
+        if self.schedule.get("type") != "linear":
+            raise ValueError("FGW schedule.type must be linear")
+        start_epoch = int(self.schedule["start_epoch"])
+        ramp_epochs = int(self.schedule["ramp_epochs"])
+        initial_weight = float(self.schedule.get("initial_weight", 0.0))
+        if epoch < start_epoch:
+            return initial_weight
+        fraction = min(1.0, (int(epoch) - start_epoch + 1) / ramp_epochs)
+        return initial_weight + fraction * (
+            self.target_structure_weight - initial_weight
+        )
+
+    def set_training_progress(
+        self, epoch: int, progress_percent: float = 0.0
+    ) -> None:
+        """Advance an epoch-based schedule; progress is accepted for API symmetry."""
+
+        del progress_percent
+        self.structure_weight = self._scheduled_structure_weight(
+            max(1, int(epoch))
+        )
 
     def _feature_cost(self, outputs: Mapping, truth: torch.Tensor, sample: int):
         predicted_nodes = outputs["pred_nodes"]
@@ -572,6 +616,7 @@ def build_matcher(config: Mapping, dimensions: int | None = None) -> nn.Module:
             max_iter=matcher["max_iter"],
             tolerance=matcher["tolerance"],
             random_state=matcher.get("random_state", 0),
+            schedule=matcher.get("schedule"),
         )
     raise ValueError("matcher.type must be hungarian or fgw")
 

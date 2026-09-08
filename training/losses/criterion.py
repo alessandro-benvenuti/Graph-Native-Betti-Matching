@@ -108,6 +108,9 @@ class GraphCriterion(nn.Module):
     def set_training_progress(self, epoch: int, progress_percent: float) -> None:
         self.epoch = max(1, int(epoch))
         self.progress_percent = min(100.0, max(0.0, float(progress_percent)))
+        setter = getattr(self.matcher, "set_training_progress", None)
+        if setter is not None:
+            setter(self.epoch, self.progress_percent)
 
     def _classification_gamma(self, configuration, progress_percent):
         gamma = float(configuration.get("focal_gamma", 2.0))
@@ -488,6 +491,10 @@ class GraphCriterion(nn.Module):
             losses[name] * self.weights[name]
             for name in self.enabled_losses
         )
+        if hasattr(self.matcher, "structure_weight"):
+            losses["matcher_structure_weight"] = losses["total"].new_tensor(
+                float(self.matcher.structure_weight)
+            )
         for name in ("betti_h0", "betti_h1"):
             if self.topology[name]["enabled"] and not self.topology[name]["log_only"]:
                 losses["total"] = losses["total"] + losses[name + "_weighted"]

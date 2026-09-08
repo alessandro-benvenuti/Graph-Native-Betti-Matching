@@ -1,0 +1,9 @@
+defaults:
+  - continue_fgw_a04.yaml
+
+experiment:
+  name: fgw_pilot_pretrained_continue_fgw_a08_e15_seed364505
+
+model:
+  matcher:
+    structure_weight: 0.8

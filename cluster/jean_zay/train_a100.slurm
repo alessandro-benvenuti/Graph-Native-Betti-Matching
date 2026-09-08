@@ -69,7 +69,7 @@ else
     train.py --distributed "${args[@]}"
 fi
 
-# Reaching this point means train.py completed all configured epochs or stopped
-# normally through early stopping. A Slurm timeout never reaches this marker.
+# Reaching this point means train.py completed its configured execution stage,
+# maximum epochs, or early stopping. A Slurm timeout never reaches this marker.
 touch "$completion_marker"
 echo "Training complete: $completion_marker"

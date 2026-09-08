@@ -178,6 +178,23 @@ class GraphCriterionTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(tokens.grad).all())
         self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
 
+    def test_training_progress_propagates_to_fgw_schedule(self):
+        config = _config()
+        matcher = FusedGromovWassersteinMatcher(
+            class_cost=2.0,
+            node_cost=5.0,
+            structure_weight=0.6,
+            schedule={
+                "type": "linear",
+                "start_epoch": 6,
+                "ramp_epochs": 5,
+                "initial_weight": 0.0,
+            },
+        )
+        criterion = GraphCriterion(config, matcher, CountingRelationHead())
+        criterion.set_training_progress(8, 20.0)
+        self.assertAlmostEqual(matcher.structure_weight, 0.36)
+
     def test_betti_terms_reach_relation_head(self):
         config = _config()
         for name in ("betti_h0", "betti_h1"):

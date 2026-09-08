@@ -1,0 +1,40 @@
+defaults:
+  - ../full_dataset_comparison/finetune_nodefocal_edgefocal_mm.yaml
+
+data:
+  datasets:
+    synthetic_mri:
+      # Fixed pilot subset: enough graphs to observe rare matcher changes while
+      # using only one quarter of the training set. Validation uses all 200.
+      train_samples: 1024
+      validation_samples: null
+      sample_cap_selection: seeded_random
+      sample_cap_seed: 364505
+
+training:
+  # Every stage retains this horizon so resumed branches share one LR schedule.
+  epochs: 50
+  stop_after_epoch: null
+  early_stopping:
+    enabled: false
+  checkpoint:
+    # The controlled comparison is at epoch 15; avoid inheriting a "best"
+    # value from the trunk that has no corresponding file in a branch folder.
+    policy: interval
+    interval_epochs: 5
+    latest_interval_epochs: 1
+
+evaluation:
+  interval_epochs: 1
+  training_metrics:
+    enabled: true
+    save_f1_checkpoints: false
+    dataset: synthetic_mri
+    max_samples: null
+    selection_metric: edge_mAP
+    selection_mode: max
+    save_best_checkpoint: false
+
+tracking:
+  group: fgw-branch-pilot-seed364505
+  tags: [gnbm, fgw, branch-pilot, limited-data, seed364505]

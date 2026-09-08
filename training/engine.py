@@ -89,7 +89,11 @@ def train_step(
 
 
 @torch.no_grad()
-def evaluate_loss(model, criterion, loader, config: Mapping, device):
+def evaluate_loss(
+    model, criterion, loader, config: Mapping, device, *, epoch: int | None = None
+):
+    if epoch is not None:
+        criterion.set_training_progress(epoch, 0.0)
     model.eval()
     totals = {}
     batches = 0
@@ -248,6 +252,10 @@ class Trainer:
 
     def fit(self, start_epoch=0, start_iteration=0, trainer_state=None):
         epochs = int(self.config["training"]["epochs"])
+        configured_stop = self.config["training"].get("stop_after_epoch")
+        final_epoch = (
+            epochs if configured_stop is None else min(epochs, int(configured_stop))
+        )
         total_iterations = epochs * len(self.train_loader)
         global_iteration = int(start_iteration)
         output = (
@@ -303,7 +311,7 @@ class Trainer:
                 best_metric = float(record["value"])
         best_validation = float(trainer_state.get("best_validation", float("inf")))
 
-        for epoch in range(int(start_epoch) + 1, epochs + 1):
+        for epoch in range(int(start_epoch) + 1, final_epoch + 1):
             sampler = getattr(self.train_loader, "sampler", None)
             if hasattr(sampler, "set_epoch"):
                 sampler.set_epoch(epoch)
@@ -417,7 +425,7 @@ class Trainer:
             pending_records = []
             monitored_metrics = {}
             validation_sync_path = None
-            if epoch % validation_interval == 0 or epoch == epochs:
+            if epoch % validation_interval == 0 or epoch == final_epoch:
                 if self._distributed():
                     validation_sync_path = (
                         output.parent / ".validation_sync" / "epoch={}.json".format(epoch)
@@ -432,6 +440,7 @@ class Trainer:
                         self.validation_loader,
                         self.config,
                         self.device,
+                        epoch=epoch,
                     )
                     print(
                         "validation epoch={} total={:.6f}".format(
@@ -597,11 +606,11 @@ class Trainer:
             if save_edge_f1:
                 paths.append(output / "best_edge_f1_checkpoint.pt")
             if policy in {"interval", "interval_and_best"} and (
-                epoch % interval == 0 or epoch == epochs
+                epoch % interval == 0 or epoch == final_epoch
             ):
                 paths.append(output / "checkpoint_epoch={}.pt".format(epoch))
             if policy != "none" and (
-                epoch % latest_interval == 0 or epoch == epochs or stop_training
+                epoch % latest_interval == 0 or epoch == final_epoch or stop_training
             ):
                 paths.append(output / "latest_checkpoint.pt")
             self._save_checkpoints(
@@ -627,11 +636,20 @@ class Trainer:
                     _write_json(output.parent / "early-stopping.json", stopping.state_dict())
                     if stopping.last_epoch == epoch and hasattr(self.tracker, "log_stopping"):
                         self.tracker.log_stopping(stopping.state_dict())
-                if stop_training or epoch == epochs:
+                if stop_training or epoch == final_epoch:
                     _write_json(output.parent / "training-status.json", {
-                        "reason": "early_stopping" if stop_training else "max_epochs",
+                        "reason": (
+                            "early_stopping"
+                            if stop_training
+                            else (
+                                "execution_stop"
+                                if final_epoch < epochs
+                                else "max_epochs"
+                            )
+                        ),
                         "epoch": epoch, "iteration": global_iteration,
                         "max_epochs": epochs,
+                        "stop_after_epoch": configured_stop,
                     })
             if self._distributed():
                 dist.barrier()

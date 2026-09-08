@@ -577,6 +577,74 @@ class ExperimentConfigTests(unittest.TestCase):
             self.assertEqual(config["topology"][name]["warmup_epochs"], 0)
             self.assertEqual(config["topology"][name]["ramp_epochs"], 0)
 
+    def test_fgw_branch_pilot_shares_state_horizon_and_fixed_subset(self):
+        paths = ROOT / "configs" / "experiments" / "fgw_branch_pilot"
+        names = (
+            "trunk_hungarian",
+            "continue_hungarian",
+            "continue_fgw_a04",
+            "continue_fgw_a06",
+            "continue_fgw_a08",
+        )
+        configs = {
+            name: load_config(paths / f"{name}.yaml", environment=ENVIRONMENT)
+            for name in names
+        }
+        for config in configs.values():
+            dataset = config["data"]["datasets"]["synthetic_mri"]
+            self.assertEqual(dataset["train_samples"], 1024)
+            self.assertIsNone(dataset["validation_samples"])
+            self.assertEqual(dataset["sample_cap_selection"], "seeded_random")
+            self.assertEqual(dataset["sample_cap_seed"], 364505)
+            self.assertEqual(config["training"]["epochs"], 50)
+            self.assertFalse(config["training"]["early_stopping"]["enabled"])
+            self.assertEqual(config["training"]["checkpoint"]["policy"], "interval")
+            self.assertFalse(
+                config["evaluation"]["training_metrics"]["save_best_checkpoint"]
+            )
+            self.assertIn("pretrained", config["experiment"]["name"])
+            self.assertEqual(
+                config["loss"]["node"]["classification"]["name"], "focal"
+            )
+            self.assertEqual(
+                config["loss"]["edge"]["classification"]["name"], "focal"
+            )
+            self.assertFalse(
+                config["loss"]["edge"]["candidates"]["include_unmatched"]
+            )
+
+        self.assertEqual(
+            configs["trunk_hungarian"]["training"]["stop_after_epoch"], 5
+        )
+        for name in names[1:]:
+            self.assertEqual(configs[name]["training"]["stop_after_epoch"], 15)
+        self.assertEqual(
+            configs["continue_hungarian"]["model"]["matcher"]["type"],
+            "hungarian",
+        )
+        for name, target in (
+            ("continue_fgw_a04", 0.4),
+            ("continue_fgw_a06", 0.6),
+            ("continue_fgw_a08", 0.8),
+        ):
+            matcher = configs[name]["model"]["matcher"]
+            self.assertEqual(matcher["type"], "fgw")
+            self.assertEqual(matcher["structure_weight"], target)
+            self.assertEqual(matcher["schedule"]["start_epoch"], 6)
+            self.assertEqual(matcher["schedule"]["ramp_epochs"], 5)
+
+        launcher = (
+            ROOT / "cluster" / "jean_zay" / "submit_fgw_branch_pilot.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "pretrain_full_mixed_nodefocal_edgefocal_mm_seed364505/models/best_checkpoint.pt",
+            launcher,
+        )
+        self.assertLess(
+            launcher.index("unset GNBM_INITIAL_WEIGHTS"),
+            launcher.index('export GNBM_RESUME_CHECKPOINT="$trunk_checkpoint"'),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

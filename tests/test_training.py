@@ -1,6 +1,7 @@
 """CPU smoke tests for optimization, training steps, and resume state."""
 
 import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -265,6 +266,45 @@ class TrainingTests(unittest.TestCase):
             checkpoints = list(models.glob("*.pt")) if models.exists() else []
 
         self.assertEqual(checkpoints, [])
+
+    def test_execution_stop_preserves_full_scheduler_horizon_and_checkpoint(self):
+        config = _config()
+        config["training"]["epochs"] = 10
+        config["training"]["stop_after_epoch"] = 2
+        config["training"]["warmup_epochs"] = 0
+        config["training"]["checkpoint"]["policy"] = "interval"
+        config["training"]["checkpoint"]["interval_epochs"] = 5
+        config["training"]["checkpoint"]["latest_interval_epochs"] = 5
+        config["evaluation"]["interval_epochs"] = 5
+        model = TinyGraphModel()
+        criterion = GraphCriterion(config, build_matcher(config), model.relation_embed)
+        optimizer = build_optimizer(config, model)
+        scheduler = build_scheduler(config, optimizer, iterations_per_epoch=1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            config["experiment"]["output_dir"] = directory
+            config["experiment"]["name"] = "execution-stop-test"
+            Trainer(
+                model,
+                criterion,
+                criterion,
+                optimizer,
+                scheduler,
+                [_batch()],
+                [_batch()],
+                config,
+                torch.device("cpu"),
+            ).fit()
+            run = Path(directory) / "execution-stop-test"
+            checkpoint = load_runtime_state(run / "models/latest_checkpoint.pt")
+            status = json.loads((run / "training-status.json").read_text())
+
+        self.assertEqual(checkpoint["epoch"], 2)
+        self.assertEqual(scheduler.last_epoch, 2)
+        self.assertGreater(optimizer.param_groups[0]["lr"], 0.0)
+        self.assertEqual(status["reason"], "execution_stop")
+        self.assertEqual(status["max_epochs"], 10)
+        self.assertEqual(status["stop_after_epoch"], 2)
 
 
 if __name__ == "__main__":

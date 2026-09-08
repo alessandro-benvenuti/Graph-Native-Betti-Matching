@@ -371,6 +371,25 @@ class FGWMatcherTests(unittest.TestCase):
         )
         self.assertIsInstance(build_matcher(config), FusedGromovWassersteinMatcher)
 
+    def test_linear_schedule_uses_global_epochs_and_reaches_target(self):
+        matcher = FusedGromovWassersteinMatcher(
+            class_cost=1.0,
+            node_cost=1.0,
+            structure_weight=0.8,
+            schedule={
+                "type": "linear",
+                "start_epoch": 6,
+                "ramp_epochs": 5,
+                "initial_weight": 0.0,
+            },
+        )
+        self.assertEqual(matcher.structure_weight, 0.0)
+        expected = {5: 0.0, 6: 0.16, 8: 0.48, 10: 0.8, 15: 0.8}
+        for epoch, weight in expected.items():
+            with self.subTest(epoch=epoch):
+                matcher.set_training_progress(epoch)
+                self.assertAlmostEqual(matcher.structure_weight, weight)
+
 
 if __name__ == "__main__":
     unittest.main()

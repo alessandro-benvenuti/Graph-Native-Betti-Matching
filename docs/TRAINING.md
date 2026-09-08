@@ -160,10 +160,15 @@ count fields remain per-patch means. W&B records selected epochs under
 `checkpoints/<metric>` in the run summary and logs the patience clock under
 `stopping/*`. W&B checkpoint *values* are logged, not the large weight files.
 
+`training.stop_after_epoch` can end a staged execution before the configured
+maximum while preserving the scheduler's full `training.epochs` horizon. The
+final staged checkpoint is still written, and `training-status.json` records
+`execution_stop`.
+
 On early stop, rank zero broadcasts the decision so all DDP workers stop
 together after the final `latest_checkpoint.pt` is saved. `early-stopping.json`
-records the clock and `training-status.json` reports `early_stopping` versus
-`max_epochs`. The checkpoint stores patience and F1 winners, so interruption
+records the clock and `training-status.json` distinguishes `early_stopping`,
+`execution_stop`, and `max_epochs`. The checkpoint stores patience and F1 winners, so interruption
 resume does not reset them. Resume from `latest_checkpoint.pt` in the same run
 directory. Changed stopping settings are rejected on strict resume; an already
 early-stopped checkpoint does not restart itself. Older checkpoints lacking

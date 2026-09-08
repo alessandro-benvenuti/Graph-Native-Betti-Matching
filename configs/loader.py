@@ -265,6 +265,31 @@ def validate_config(config: Mapping[str, Any]) -> None:
         )
         if not isinstance(matcher.get("random_state", 0), int):
             raise ConfigError("model.matcher.random_state must be an integer")
+        schedule = matcher.get("schedule")
+        if schedule is not None:
+            if not isinstance(schedule, Mapping):
+                raise ConfigError("model.matcher.schedule must be a mapping")
+            if schedule.get("type") != "linear":
+                raise ConfigError("model.matcher.schedule.type must be linear")
+            _positive_int(
+                schedule.get("start_epoch"),
+                "model.matcher.schedule.start_epoch",
+            )
+            _positive_int(
+                schedule.get("ramp_epochs"),
+                "model.matcher.schedule.ramp_epochs",
+            )
+            try:
+                initial_weight = float(schedule.get("initial_weight", 0.0))
+            except (TypeError, ValueError) as error:
+                raise ConfigError(
+                    "model.matcher.schedule.initial_weight must be numeric"
+                ) from error
+            if not 0 <= initial_weight <= structure_weight:
+                raise ConfigError(
+                    "model.matcher.schedule.initial_weight must lie between 0 "
+                    "and structure_weight"
+                )
 
     datasets = data.get("datasets")
     if not isinstance(datasets, Mapping) or not datasets:
@@ -395,7 +420,16 @@ def validate_config(config: Mapping[str, Any]) -> None:
     training = config.get("training")
     if not isinstance(training, Mapping):
         raise ConfigError("training must be a mapping")
-    _positive_int(training.get("epochs"), "training.epochs")
+    epochs = _positive_int(training.get("epochs"), "training.epochs")
+    stop_after_epoch = training.get("stop_after_epoch")
+    if stop_after_epoch is not None:
+        stop_after_epoch = _positive_int(
+            stop_after_epoch, "training.stop_after_epoch"
+        )
+        if stop_after_epoch > epochs:
+            raise ConfigError(
+                "training.stop_after_epoch cannot exceed training.epochs"
+            )
     if training.get("input") not in {"image", "segmentation"}:
         raise ConfigError("training.input must be image or segmentation")
     optimizer = training.get("optimizer")

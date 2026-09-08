@@ -97,6 +97,8 @@ training:
   input: image
   start_epoch: 0
   epochs: null
+  # Optional operational pause that preserves the full scheduler horizon.
+  stop_after_epoch: null
   early_stopping:
     enabled: false
     monitor: edge_mAP
