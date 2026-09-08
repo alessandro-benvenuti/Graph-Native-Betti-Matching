@@ -645,6 +645,46 @@ class ExperimentConfigTests(unittest.TestCase):
             launcher.index('export GNBM_RESUME_CHECKPOINT="$trunk_checkpoint"'),
         )
 
+    def test_fgw_replications_vary_training_seed_not_subset(self):
+        paths = ROOT / "configs" / "experiments" / "fgw_branch_pilot"
+        for seed in (364506, 364507):
+            configurations = {
+                method: load_config(
+                    paths / f"{method}_seed{seed}.yaml",
+                    environment=ENVIRONMENT,
+                )
+                for method in (
+                    "trunk_hungarian",
+                    "continue_hungarian",
+                    "continue_fgw_a04",
+                    "continue_fgw_a08",
+                )
+            }
+            for config in configurations.values():
+                dataset = config["data"]["datasets"]["synthetic_mri"]
+                self.assertEqual(config["experiment"]["seed"], seed)
+                self.assertEqual(dataset["train_samples"], 1024)
+                self.assertEqual(dataset["sample_cap_seed"], 364505)
+                self.assertEqual(config["training"]["epochs"], 50)
+            self.assertEqual(
+                configurations["trunk_hungarian"]["training"]["stop_after_epoch"],
+                5,
+            )
+            for method in (
+                "continue_hungarian",
+                "continue_fgw_a04",
+                "continue_fgw_a08",
+            ):
+                self.assertEqual(
+                    configurations[method]["training"]["stop_after_epoch"], 15
+                )
+
+        launcher = (
+            ROOT / "cluster" / "jean_zay" / "submit_fgw_replications.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("seeds=(364506 364507)", launcher)
+        self.assertIn("methods=(hungarian fgw_a04 fgw_a08)", launcher)
+
 
 if __name__ == "__main__":
     unittest.main()

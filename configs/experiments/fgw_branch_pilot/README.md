@@ -50,3 +50,18 @@ submitted, because those jobs strictly resume the trunk's complete state.
 The launcher refuses to proceed if any of the five run directories already
 exists. The continuation jobs are submitted with an `afterok` dependency and
 start in parallel only after the trunk succeeds.
+
+## Final replication
+
+After the seed-364505 pilot, submit two independent training replications with:
+
+```bash
+bash cluster/jean_zay/submit_fgw_replications.sh
+```
+
+This creates Hungarian trunks for experiment seeds 364506 and 364507. Each
+trunk has three dependent continuations: Hungarian, FGW alpha 0.4, and FGW
+alpha 0.8. The dataset subset remains fixed with `sample_cap_seed: 364505`, so
+the replications measure training-order and augmentation variability rather
+than dataset-membership variability. Alpha 0.6 is excluded because the first
+pilot left it largely dominated by 0.4, except for beta-1 error.

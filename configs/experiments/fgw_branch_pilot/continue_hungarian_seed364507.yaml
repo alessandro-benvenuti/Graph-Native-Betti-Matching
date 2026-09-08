@@ -1,0 +1,6 @@
+defaults:
+  - continue_hungarian.yaml
+
+experiment:
+  name: fgw_pilot_pretrained_continue_hungarian_e15_seed364507
+  seed: 364507
