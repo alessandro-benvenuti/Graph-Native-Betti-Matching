@@ -399,6 +399,61 @@ def _write_csv(path, rows):
             )
 
 
+def format_console_summary(summary):
+    """Return a compact terminal report while detailed artifacts stay on disk."""
+
+    methods = summary["methods"]
+    baseline = methods.get("hungarian", {})
+    lines = [
+        (
+            f"FGW diagnostic: dataset={summary['dataset']} split={summary['split']} "
+            f"samples={int(baseline.get('samples', 0))}"
+        ),
+        (
+            "method          graphs changed  targets changed  coordinate Δ  "
+            "structure Δ  edge-sep Δ   soft obj Δ   hard obj Δ   "
+            "projection gap  iterations  solver ms  failures"
+        ),
+    ]
+    for method, values in methods.items():
+        if method == "hungarian":
+            continue
+        samples = int(values.get("samples", 0))
+        changed_graphs = int(round(float(values.get("changed_any", 0.0)) * samples))
+        failures = int(
+            values.get("undefined_or_failure_counts", {}).get(
+                "invariant_failure", 0
+            )
+        )
+        lines.append(
+            f"{method:<15} "
+            f"{changed_graphs:>3}/{samples:<3} "
+            f"{float(values.get('changed_target_fraction', float('nan'))):>14.4%} "
+            f"{float(values.get('coordinate_l1_mean_delta_vs_hungarian', float('nan'))):>13.6g} "
+            f"{float(values.get('structural_mse_delta_vs_hungarian', float('nan'))):>12.6g} "
+            f"{float(values.get('edge_nonedge_separation_delta_vs_hungarian', float('nan'))):>11.6g} "
+            f"{float(values.get('soft_objective_change_vs_hungarian', float('nan'))):>12.6g} "
+            f"{float(values.get('hard_objective_change_vs_hungarian', float('nan'))):>12.6g} "
+            f"{float(values.get('hardening_objective_gap', float('nan'))):>15.6g} "
+            f"{float(values.get('solver_iterations', float('nan'))):>10.2f} "
+            f"{1000.0 * float(values.get('solver_seconds', float('nan'))):>9.3f} "
+            f"{failures:>8}"
+        )
+    alpha_zero = methods.get("fgw_alpha_0")
+    if alpha_zero is not None:
+        lines.append(
+            "alpha-zero check: "
+            f"unary cost Δ={float(alpha_zero.get('alpha_zero_unary_cost_delta', float('nan'))):.6g}, "
+            f"changed graphs={float(alpha_zero.get('changed_any', float('nan'))):.4%}, "
+            f"capacity ratio={float(alpha_zero.get('max_prediction_capacity_ratio', float('nan'))):.6g}"
+        )
+    lines.append(
+        "Detailed results: summary.json, per-sample.csv, per-sample.json, "
+        "metadata.json, resolved-config.yaml"
+    )
+    return "\n".join(lines)
+
+
 @torch.no_grad()
 def run_diagnostic(model, loader, config, device, args):
     model.eval()
@@ -722,7 +777,7 @@ def main():
     )
     with (output_dir / "resolved-config.yaml").open("w", encoding="utf-8") as handle:
         yaml.safe_dump(config, handle, sort_keys=False)
-    print(json.dumps(_json_safe(summary), indent=2, sort_keys=True))
+    print(format_console_summary(summary))
 
 
 if __name__ == "__main__":

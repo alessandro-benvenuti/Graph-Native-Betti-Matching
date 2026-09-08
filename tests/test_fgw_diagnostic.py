@@ -8,6 +8,7 @@ import torch
 
 from scripts.diagnose_fgw_matching import (
     assignment_metrics,
+    format_console_summary,
     objective_diagnostics,
     summarize_by_target_count,
     summarize_rows,
@@ -118,6 +119,38 @@ class FGWDiagnosticTests(unittest.TestCase):
             ],
             1,
         )
+
+    def test_console_summary_is_compact_and_omits_graph_size_dump(self):
+        summary = {
+            "dataset": "synthetic_mri",
+            "split": "val",
+            "methods": {
+                "hungarian": {"samples": 50},
+                "fgw_alpha_0": {
+                    "samples": 50,
+                    "changed_any": 0.0,
+                    "changed_target_fraction": 0.0,
+                    "coordinate_l1_mean_delta_vs_hungarian": 0.0,
+                    "structural_mse_delta_vs_hungarian": 0.0,
+                    "edge_nonedge_separation_delta_vs_hungarian": 0.0,
+                    "soft_objective_change_vs_hungarian": 0.0,
+                    "hard_objective_change_vs_hungarian": 0.0,
+                    "hardening_objective_gap": 0.0,
+                    "solver_iterations": 1.0,
+                    "solver_seconds": 0.0005,
+                    "alpha_zero_unary_cost_delta": 0.0,
+                    "max_prediction_capacity_ratio": 1.0,
+                    "undefined_or_failure_counts": {"invariant_failure": 0},
+                },
+            },
+            "by_target_count": {"16": {"large": "detail"}},
+        }
+        report = format_console_summary(summary)
+        self.assertIn("fgw_alpha_0", report)
+        self.assertIn("0/50", report)
+        self.assertIn("alpha-zero check", report)
+        self.assertNotIn("by_target_count", report)
+        self.assertLess(len(report.splitlines()), 10)
 
 
 if __name__ == "__main__":
