@@ -54,11 +54,15 @@ for split in train val; do
   done
 done
 
-echo "Running A100 configuration and dataset preflight on the login node..."
-(
-  cd "$repo_dir"
-  "$python_bin" cluster/jean_zay/preflight_training.py --config "$config"
-)
+if [[ "${GNBM_SKIP_PREFLIGHT:-0}" == "1" ]]; then
+  echo "Skipping preflight already completed by the campaign launcher."
+else
+  echo "Running A100 configuration and dataset preflight on the login node..."
+  (
+    cd "$repo_dir"
+    "$python_bin" cluster/jean_zay/preflight_training.py --config "$config"
+  )
+fi
 if [[ -n "${GNBM_INITIAL_WEIGHTS:-}" && ! -f "$GNBM_INITIAL_WEIGHTS" \
       && "${GNBM_ALLOW_PENDING_INITIAL_WEIGHTS:-0}" != "1" ]]; then
   echo "Initial checkpoint does not exist: $GNBM_INITIAL_WEIGHTS" >&2
@@ -112,13 +116,17 @@ if [[ -n "${GNBM_DEPENDENCY:-}" ]]; then
     echo "GNBM_DEPENDENCY must look like afterok:12345 or afterany:12345." >&2
     exit 2
   fi
-  dependency_args+=(--dependency="$GNBM_DEPENDENCY")
+  dependency_args+=(
+    --dependency="$GNBM_DEPENDENCY"
+    --kill-on-invalid-dep=yes
+  )
 fi
 
 log_dir="$WORK/logs/graph-native-betti-matching/a100"
 mkdir -p "$log_dir" "$GNBM_OUTPUT_DIR"
 submission="$(sbatch \
   "${dependency_args[@]}" \
+  --job-name="$run_name" \
   --chdir="$repo_dir" \
   --nodes=1 \
   --ntasks=1 \
@@ -134,5 +142,5 @@ submission="$(sbatch \
 echo "$submission"
 job_id="${submission##* }"
 echo "Queue: squeue -j $job_id"
-echo "Log:   $log_dir/gnbm-a100-train-$job_id.out"
+echo "Log:   $log_dir/$run_name-$job_id.out"
 echo "GPUs:  $gpus A100(s), global batch=$((gpus * ${GNBM_BATCH_SIZE:-32}))"

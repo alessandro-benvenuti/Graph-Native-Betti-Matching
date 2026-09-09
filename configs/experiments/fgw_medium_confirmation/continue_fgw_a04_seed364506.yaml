@@ -1,0 +1,6 @@
+defaults:
+  - continue_fgw_a04.yaml
+
+experiment:
+  name: fgw_medium_pretrained_continue_fgw_a04_e100_seed364506
+  seed: 364506

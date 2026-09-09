@@ -685,6 +685,83 @@ class ExperimentConfigTests(unittest.TestCase):
         self.assertIn("seeds=(364506 364507)", launcher)
         self.assertIn("methods=(hungarian fgw_a04 fgw_a08)", launcher)
 
+    def test_fgw_medium_confirmation_contract(self):
+        paths = ROOT / "configs" / "experiments" / "fgw_medium_confirmation"
+        configurations = {}
+        for seed in (364505, 364506, 364507):
+            suffix = "" if seed == 364505 else f"_seed{seed}"
+            for method in (
+                "trunk_hungarian",
+                "continue_hungarian",
+                "continue_fgw_a04",
+            ):
+                config = load_config(
+                    paths / f"{method}{suffix}.yaml",
+                    environment=ENVIRONMENT,
+                )
+                configurations[(seed, method)] = config
+                dataset = config["data"]["datasets"]["synthetic_mri"]
+                self.assertEqual(config["experiment"]["seed"], seed)
+                self.assertEqual(dataset["train_samples"], 8192)
+                self.assertIsNone(dataset["validation_samples"])
+                self.assertEqual(dataset["sample_cap_selection"], "seeded_random")
+                self.assertEqual(dataset["sample_cap_seed"], 364505)
+                self.assertEqual(config["training"]["epochs"], 100)
+                self.assertFalse(config["training"]["early_stopping"]["enabled"])
+                self.assertEqual(
+                    config["training"]["checkpoint"]["interval_epochs"], 100
+                )
+                self.assertEqual(config["evaluation"]["interval_epochs"], 2)
+                self.assertIsNone(
+                    config["evaluation"]["training_metrics"]["max_samples"]
+                )
+                self.assertEqual(
+                    config["loss"]["node"]["classification"]["name"], "focal"
+                )
+                self.assertEqual(
+                    config["loss"]["edge"]["classification"]["name"], "focal"
+                )
+
+            self.assertEqual(
+                configurations[(seed, "trunk_hungarian")]["training"][
+                    "stop_after_epoch"
+                ],
+                5,
+            )
+            for method in ("continue_hungarian", "continue_fgw_a04"):
+                self.assertEqual(
+                    configurations[(seed, method)]["training"]["stop_after_epoch"],
+                    100,
+                )
+            fgw = configurations[(seed, "continue_fgw_a04")]["model"]["matcher"]
+            self.assertEqual(fgw["type"], "fgw")
+            self.assertEqual(fgw["structure_weight"], 0.4)
+            self.assertEqual(fgw["schedule"]["start_epoch"], 6)
+            self.assertEqual(fgw["schedule"]["ramp_epochs"], 5)
+
+    def test_fgw_medium_launcher_preflights_complete_matrix_first(self):
+        launcher = (
+            ROOT
+            / "cluster"
+            / "jean_zay"
+            / "submit_fgw_medium_confirmation.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("seeds=(364505 364506 364507)", launcher)
+        self.assertIn("GNBM_SKIP_PREFLIGHT=1", launcher)
+        self.assertIn("GNBM_ALLOW_PENDING_RESUME=1", launcher)
+        self.assertIn("afterok:", launcher)
+        self.assertIn("fgw_a04", launcher)
+        self.assertLess(
+            launcher.index("preflight_training.py"),
+            launcher.index("trunk_submission="),
+        )
+
+        submitter = (
+            ROOT / "cluster" / "jean_zay" / "submit_train_a100.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--kill-on-invalid-dep=yes", submitter)
+        self.assertIn('--job-name="$run_name"', submitter)
+
 
 if __name__ == "__main__":
     unittest.main()

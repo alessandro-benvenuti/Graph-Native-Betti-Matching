@@ -1,0 +1,6 @@
+defaults:
+  - trunk_hungarian.yaml
+
+experiment:
+  name: fgw_medium_pretrained_trunk_hungarian_e5_seed364506
+  seed: 364506
