@@ -20,7 +20,8 @@ sync_entity="${GNBM_WANDB_SYNC_ENTITY:-alessandrobenvenuti2002-politecnico-di-to
 sync_project="${GNBM_WANDB_SYNC_PROJECT:-focal-loss}"
 
 mapfile -t runs < <(
-  find "$root" -type d -path '*/wandb/offline-run-*' -print | sort
+  find "$root" -type d -name 'offline-run-*' -path '*/wandb/offline-run-*' \
+    -prune -print | sort
 )
 if [[ "${#runs[@]}" -eq 0 ]]; then
   echo "No offline W&B runs found under $root"
@@ -29,7 +30,7 @@ fi
 
 echo "Found ${#runs[@]} offline W&B run(s) under $root"
 echo "Destination: $sync_entity/$sync_project"
-declare -A seen_run_ids=()
+failed_runs=()
 for run in "${runs[@]}"; do
   echo
   echo "Syncing $run"
@@ -40,11 +41,20 @@ for run in "${runs[@]}"; do
   fi
   run_id="${run_file##*/run-}"
   run_id="${run_id%.wandb}"
-  if [[ -n "${seen_run_ids[$run_id]:-}" ]]; then
-    wandb sync --append --id "$run_id" \
-      --entity "$sync_entity" --project "$sync_project" "$run"
-  else
-    wandb sync --entity "$sync_entity" --project "$sync_project" "$run"
-    seen_run_ids[$run_id]=1
+  # Every invocation is retry-safe: --append can create the destination when
+  # absent and appends when an earlier attempt or segment already created it.
+  # The legacy reader tolerates the truncated tail commonly left when Slurm
+  # terminates an offline process at its wall-time limit.
+  if ! wandb sync --legacy --append --id "$run_id" \
+    --entity "$sync_entity" --project "$sync_project" "$run"; then
+    echo "W&B sync failed; continuing with the remaining runs: $run" >&2
+    failed_runs+=("$run")
   fi
 done
+
+if (( ${#failed_runs[@]} > 0 )); then
+  echo >&2
+  echo "Failed to synchronize ${#failed_runs[@]} offline run(s):" >&2
+  printf '  %s\n' "${failed_runs[@]}" >&2
+  exit 1
+fi
