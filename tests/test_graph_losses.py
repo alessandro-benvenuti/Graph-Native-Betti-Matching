@@ -208,6 +208,39 @@ class GraphCriterionTests(unittest.TestCase):
         losses["total"].backward()
         self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
 
+    def test_node_aware_betti_reaches_unmatched_node_logits(self):
+        config = _config()
+        config["topology"]["complex"].update(
+            mode="node_aware",
+            aggregation="hybrid",
+            alpha=0.5,
+            unmatched_object_threshold=0.0,
+            max_active_unmatched=1,
+        )
+        for name in ("betti_h0", "betti_h1"):
+            config["topology"][name].update(
+                enabled=True, log_only=False, weight=0.2
+            )
+        criterion, relation = self._criterion(config)
+        tokens, predictions, targets = _batch()
+        assignments = [
+            (torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))
+        ]
+
+        topology = criterion.loss_topology(
+            tokens,
+            predictions["pred_logits"],
+            targets["edges"],
+            assignments,
+        )
+        loss = topology["betti_h0"] + topology["betti_h1"]
+        loss.backward()
+
+        unmatched_gradient = predictions["pred_logits"].grad[0, 3]
+        self.assertTrue(torch.isfinite(loss))
+        self.assertGreater(float(unmatched_gradient.abs().sum()), 0.0)
+        self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
+
     def test_validation_uses_stationary_full_betti_weight(self):
         config = _config()
         config["topology"]["betti_h0"].update(

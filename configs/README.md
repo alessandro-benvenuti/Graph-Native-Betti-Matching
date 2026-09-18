@@ -23,6 +23,8 @@ configuration before a dataset is constructed.
   specialization configurations for the seven unweighted-focal recipes.
 - `losses/`: reusable focal and Betti overlays containing only loss changes;
   they never modify datasets, model architecture, or optimization settings.
+  `losses/betti_node_edge.yaml` enables the node-aware filtered complex while
+  the existing `losses/betti.yaml` preserves matched-only topology.
 - `matchers/hungarian.yaml`: explicit safety overlay loaded by both canonical
   training roots and therefore by ordinary baseline, focal, and Betti recipes.
 - `matchers/fgw.yaml`: opt-in partial Fused Gromov-Wasserstein matching followed
@@ -30,6 +32,8 @@ configuration before a dataset is constructed.
   Hungarian overlay.
 - `smoke_mixed_focal_betti.yaml`: one-epoch, four-sample integration check for
   the complete focal + topology training path.
+- `smoke_mixed_focal_betti_node_edge.yaml`: the corresponding node-aware
+  topology smoke run with hybrid node/edge confidence.
 - `overfit_synthetic_mri_focal_betti.yaml`: ten-epoch fixed eight-sample MRI
   overfit check with augmentation disabled and one best checkpoint.
 

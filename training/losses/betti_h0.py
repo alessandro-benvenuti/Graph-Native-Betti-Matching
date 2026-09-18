@@ -1,4 +1,4 @@
-"""Induced graph H0 Betti matching for Hungarian-matched RelationFormer nodes."""
+"""Induced graph H0 matching for matched-only or node-aware filtrations."""
 
 from __future__ import annotations
 
@@ -146,6 +146,38 @@ def _graph_from_probabilities(
     )
 
 
+def _graph_from_node_and_edge_probabilities(
+    node_probabilities: Sequence[float],
+    edge_probabilities: Sequence[float],
+    edge_order: Tuple[Edge, ...],
+    *,
+    num_vertices: int,
+    terminal_value: float,
+) -> _FilteredGraph:
+    if len(node_probabilities) != num_vertices:
+        raise ValueError("node_probabilities must contain one value per vertex.")
+    if len(edge_probabilities) != len(edge_order):
+        raise ValueError("edge_probabilities must contain one value per edge.")
+    vertex_values = {
+        vertex: terminal_value * (1.0 - float(node_probabilities[vertex]))
+        for vertex in range(num_vertices)
+    }
+    raw_edge_values = tuple(
+        terminal_value * (1.0 - float(probability))
+        for probability in edge_probabilities
+    )
+    edge_values = tuple(
+        max(value, vertex_values[edge[0]], vertex_values[edge[1]])
+        for edge, value in zip(edge_order, raw_edge_values)
+    )
+    return _FilteredGraph(
+        tuple(range(num_vertices)),
+        vertex_values,
+        edge_order,
+        edge_values,
+    )
+
+
 def _pairs(graph: _FilteredGraph) -> Tuple[H0Pair, ...]:
     union_find = _UnionFind(graph)
     result = []
@@ -205,8 +237,15 @@ def compute_h0_matching(
     *,
     num_vertices: int,
     terminal_value: float = 1.0,
+    detached_node_probabilities: Optional[Sequence[float]] = None,
+    target_node_presence: Optional[Sequence[float]] = None,
 ) -> H0Matching:
-    """Compute extended union-induced H0 matching on detached values."""
+    """Compute extended union-induced H0 matching on detached values.
+
+    Without node probabilities this preserves the original edge-derived
+    vertex births. With them, vertices use ``1-q`` and target presence marks
+    padded unmatched slots as absent at the terminal filtration value.
+    """
     edge_order = tuple(_edge(*edge) for edge in candidate_edges)
     truth = {_edge(*edge) for edge in true_edges}
     if not truth <= set(edge_order):
@@ -215,18 +254,40 @@ def compute_h0_matching(
         1.0 if edge in truth else 0.0
         for edge in edge_order
     )
-    prediction = _graph_from_probabilities(
-        detached_edge_probabilities,
-        edge_order,
-        num_vertices=num_vertices,
-        terminal_value=terminal_value,
-    )
-    target = _graph_from_probabilities(
-        target_probabilities,
-        edge_order,
-        num_vertices=num_vertices,
-        terminal_value=terminal_value,
-    )
+    if detached_node_probabilities is None:
+        if target_node_presence is not None:
+            raise ValueError(
+                "target_node_presence requires detached_node_probabilities."
+            )
+        prediction = _graph_from_probabilities(
+            detached_edge_probabilities,
+            edge_order,
+            num_vertices=num_vertices,
+            terminal_value=terminal_value,
+        )
+        target = _graph_from_probabilities(
+            target_probabilities,
+            edge_order,
+            num_vertices=num_vertices,
+            terminal_value=terminal_value,
+        )
+    else:
+        if target_node_presence is None:
+            target_node_presence = (1.0,) * num_vertices
+        prediction = _graph_from_node_and_edge_probabilities(
+            detached_node_probabilities,
+            detached_edge_probabilities,
+            edge_order,
+            num_vertices=num_vertices,
+            terminal_value=terminal_value,
+        )
+        target = _graph_from_node_and_edge_probabilities(
+            target_node_presence,
+            target_probabilities,
+            edge_order,
+            num_vertices=num_vertices,
+            terminal_value=terminal_value,
+        )
     comparison = _minimum_union(prediction, target)
     prediction_pairs = _pairs(prediction)
     target_pairs = _pairs(target)
@@ -313,8 +374,10 @@ def h0_betti_matching_loss(
     unmatched_weight: float = 1.0,
     diagonal_factor: float = 0.5,
     normalize: bool = True,
+    node_probabilities: Optional[torch.Tensor] = None,
+    target_node_presence: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, H0Matching]:
-    """Evaluate induced H0 matching on the original probability tensor."""
+    """Evaluate induced H0 matching on the original probability tensors."""
     edge_order = tuple(
         _edge(*edge)
         for edge in candidate_edges.detach().cpu().tolist()
@@ -329,20 +392,41 @@ def h0_betti_matching_loss(
         truth,
         num_vertices=num_vertices,
         terminal_value=terminal_value,
+        detached_node_probabilities=(
+            None
+            if node_probabilities is None
+            else node_probabilities.detach().cpu().tolist()
+        ),
+        target_node_presence=(
+            None
+            if target_node_presence is None
+            else target_node_presence.detach().cpu().tolist()
+        ),
     )
     edge_filtration = terminal_value * (1.0 - edge_probabilities)
     node_filtration: Dict[int, torch.Tensor] = {}
-    for vertex in range(num_vertices):
-        incident = [
-            edge_probabilities[index]
-            for index, edge in enumerate(edge_order)
-            if vertex in edge
-        ]
-        node_filtration[vertex] = (
-            terminal_value * (1.0 - torch.stack(incident).max())
-            if incident
-            else edge_probabilities.new_tensor(terminal_value)
-        )
+    if node_probabilities is None:
+        for vertex in range(num_vertices):
+            incident = [
+                edge_probabilities[index]
+                for index, edge in enumerate(edge_order)
+                if vertex in edge
+            ]
+            node_filtration[vertex] = (
+                terminal_value * (1.0 - torch.stack(incident).max())
+                if incident
+                else edge_probabilities.new_tensor(terminal_value)
+            )
+    else:
+        if node_probabilities.ndim != 1 or len(node_probabilities) != num_vertices:
+            raise ValueError(
+                "node_probabilities must have shape [num_vertices]."
+            )
+        node_probabilities = node_probabilities.to(edge_probabilities.device)
+        node_filtration = {
+            vertex: terminal_value * (1.0 - node_probabilities[vertex])
+            for vertex in range(num_vertices)
+        }
 
     loss = edge_probabilities.sum() * 0.0
     for match in matching.matches:

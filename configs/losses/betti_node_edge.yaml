@@ -1,0 +1,19 @@
+topology:
+  complex:
+    mode: node_aware
+    aggregation: hybrid
+    alpha: 0.5
+    unmatched_object_threshold: 0.25
+    max_active_unmatched: 8
+  betti_h0:
+    enabled: true
+    log_only: false
+    weight: 0.1
+    warmup_epochs: 10
+    ramp_epochs: 20
+  betti_h1:
+    enabled: true
+    log_only: false
+    weight: 0.1
+    warmup_epochs: 10
+    ramp_epochs: 20

@@ -29,11 +29,31 @@ the optimized objective.
 
 ## Betti extensions
 
-`topology.betti_h0` and `topology.betti_h1` are independent switches. Both use
-the complete graph over Hungarian-matched nodes. Every undirected pair is
-scored in both endpoint orders and averaged. Discrete persistence matching uses
-detached probabilities, while selected filtration values retain gradients.
-Warmup, ramp, weight, normalization, and `log_only` are YAML-controlled.
+`topology.betti_h0` and `topology.betti_h1` are independent switches. Every
+undirected pair is scored in both endpoint orders and averaged. Discrete
+persistence matching uses detached probabilities, while selected filtration
+values retain gradients. Warmup, ramp, weight, normalization, and `log_only`
+are YAML-controlled.
+
+`topology.complex.mode: matched_only` preserves the original complete graph
+over matched queries. `node_aware` appends a capped top-confidence set of
+unmatched queries. Matched vertices use existence confidence `1`; selected
+unmatched vertices use their live object probability `q_i`. Edge confidence is
+one of
+
+```text
+min:     min(q_i, q_j, p_ij)
+product: q_i q_j p_ij
+hybrid:  alpha min(q_i, q_j, p_ij) + (1-alpha) q_i q_j p_ij
+```
+
+and the node/edge filtrations are `1-q_i` and `1-s_ij`. All three rules obey
+the face condition, and all reduce to the original edge filtration when both
+endpoints are matched. Top-k selection is detached; selected node and relation
+probabilities remain differentiable. H0 uses the single matched target
+component as the omitted reduced-H0 class, so node-aware H0 is skipped for an
+empty target. Coordinates and the discrete query selection receive no topology
+gradient.
 
 ## Focal loss and hard-negative mining
 

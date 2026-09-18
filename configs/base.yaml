@@ -166,6 +166,12 @@ loss:
       tolerance: 0.02
 
 topology:
+  complex:
+    mode: matched_only
+    aggregation: hybrid
+    alpha: 0.5
+    unmatched_object_threshold: 0.25
+    max_active_unmatched: 8
   betti_h0:
     enabled: false
     log_only: true

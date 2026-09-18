@@ -696,6 +696,16 @@ Edge balancing:
 
 ### Graph-native topology losses
 
+`topology.complex` selects the filtered graph shared by H0 and H1:
+
+| Key | Meaning |
+|---|---|
+| `mode` | `matched_only` preserves the original loss; `node_aware` appends selected unmatched queries. |
+| `aggregation` | Effective edge confidence: `min`, `product`, or `hybrid`. |
+| `alpha` | Hybrid weight in `[0,1]`; ignored by the pure rules. |
+| `unmatched_object_threshold` | Minimum detached object probability for an unmatched query to enter the candidate pool. |
+| `max_active_unmatched` | Top-confidence cap on unmatched topology vertices. |
+
 Both `topology.betti_h0` and `topology.betti_h1` support:
 
 | Key | Meaning |

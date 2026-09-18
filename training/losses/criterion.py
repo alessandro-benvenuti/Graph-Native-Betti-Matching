@@ -11,6 +11,7 @@ from torch import nn
 from boxes import box_cxcyczwhd_to_xyxyzz, generalized_box_iou_3d
 from models.matcher import build_matcher, score_candidate_structures
 
+from .betti_filtration import node_edge_confidences
 from .betti_h0 import h0_betti_matching_loss
 from .betti_h1 import cycle_space_matching_loss
 from .focal import (
@@ -397,36 +398,94 @@ class GraphCriterion(nn.Module):
             ),
         )
 
-    def loss_topology(self, tokens, target_edges, assignments):
+    def _topology_queries(self, node_logits, matched_source):
+        """Build the local matched or node-aware topology vertex set."""
+        matched_source = matched_source.to(
+            device=node_logits.device, dtype=torch.long
+        )
+        configuration = self.topology["complex"]
+        matched_count = int(matched_source.numel())
+        matched_probabilities = node_logits.new_ones(matched_count)
+        matched_presence = node_logits.new_ones(matched_count)
+        if configuration["mode"] == "matched_only":
+            return matched_source, matched_probabilities, matched_presence
+
+        _, _, active, _ = select_active_unmatched_queries(
+            node_logits,
+            matched_source,
+            object_threshold=float(
+                configuration["unmatched_object_threshold"]
+            ),
+            max_active_unmatched=int(
+                configuration["max_active_unmatched"]
+            ),
+        )
+        live_object_probability = node_logits.softmax(-1)[:, 1]
+        selected = torch.cat((matched_source, active), dim=0)
+        node_probabilities = torch.cat(
+            (matched_probabilities, live_object_probability[active]), dim=0
+        )
+        target_presence = torch.cat(
+            (matched_presence, node_logits.new_zeros(active.numel())), dim=0
+        )
+        return selected, node_probabilities, target_presence
+
+    def loss_topology(self, tokens, node_logits, target_edges, assignments):
         zero = tokens.sum() * 0.0
         metrics = {"betti_h0": zero, "betti_h1": zero}
+        enabled = {
+            name: bool(self.topology[name]["enabled"])
+            for name in ("betti_h0", "betti_h1")
+        }
+        if not any(enabled.values()):
+            return metrics
+        sample_losses = {"betti_h0": [], "betti_h1": []}
         object_tokens = tokens[..., : self.object_queries, :]
         relation_tokens = tokens[
             ..., self.object_queries : self.object_queries + self.relation_tokens, :
         ]
-        for name, minimum_nodes, loss_function in (
-            ("betti_h0", 2, h0_betti_matching_loss),
-            ("betti_h1", 3, cycle_space_matching_loss),
-        ):
-            configuration = self.topology[name]
-            if not configuration["enabled"]:
+        complex_configuration = self.topology["complex"]
+        node_aware = complex_configuration["mode"] == "node_aware"
+        for batch, (source, target) in enumerate(assignments):
+            source = source.to(tokens.device)
+            target = target.to(tokens.device)
+            matched_count = int(source.numel())
+            selected, node_probabilities, target_presence = self._topology_queries(
+                node_logits[batch], source
+            )
+            count = int(selected.numel())
+            if count < 2:
                 continue
-            sample_losses = []
-            for batch, (source, target) in enumerate(assignments):
-                source = source.to(tokens.device)
-                target = target.to(tokens.device)
-                count = int(source.numel())
-                if count < minimum_nodes:
+            pairs = torch.combinations(
+                torch.arange(count, device=tokens.device), r=2
+            )
+            raw_probabilities = self._symmetric_edge_probabilities(
+                object_tokens[batch, selected], relation_tokens[batch], pairs
+            )
+            probabilities = raw_probabilities
+            if node_aware:
+                probabilities = node_edge_confidences(
+                    node_probabilities,
+                    raw_probabilities,
+                    pairs,
+                    aggregation=complex_configuration["aggregation"],
+                    alpha=float(complex_configuration["alpha"]),
+                )
+            truth = self._local_true_edges(
+                target_edges[batch], target, tokens.device
+            )
+
+            for name, minimum_nodes, loss_function in (
+                ("betti_h0", 2, h0_betti_matching_loss),
+                ("betti_h1", 3, cycle_space_matching_loss),
+            ):
+                if not enabled[name] or count < minimum_nodes:
                     continue
-                pairs = torch.combinations(
-                    torch.arange(count, device=tokens.device), r=2
-                )
-                probabilities = self._symmetric_edge_probabilities(
-                    object_tokens[batch, source], relation_tokens[batch], pairs
-                )
-                truth = self._local_true_edges(
-                    target_edges[batch], target, tokens.device
-                )
+                # Reduced H0 needs a real target component as its fixed oldest
+                # class. Empty-target images remain covered by node focal/CE.
+                if name == "betti_h0" and node_aware and matched_count == 0:
+                    continue
+                configuration = self.topology[name]
                 keywords = dict(
                     num_vertices=count,
                     diagonal_factor=float(configuration["diagonal_factor"]),
@@ -436,6 +495,9 @@ class GraphCriterion(nn.Module):
                     keywords["unmatched_weight"] = float(
                         configuration["unmatched_weight"]
                     )
+                    if node_aware:
+                        keywords["node_probabilities"] = node_probabilities
+                        keywords["target_node_presence"] = target_presence
                 else:
                     keywords["false_positive_weight"] = float(
                         configuration["false_positive_weight"]
@@ -443,11 +505,17 @@ class GraphCriterion(nn.Module):
                     keywords["false_negative_weight"] = float(
                         configuration["false_negative_weight"]
                     )
-                sample_loss, _ = loss_function(probabilities, pairs, truth, **keywords)
-                if torch.isfinite(sample_loss):
-                    sample_losses.append(sample_loss)
-            if sample_losses:
-                metrics[name] = torch.stack(sample_losses).mean()
+                sample_loss, _ = loss_function(
+                    probabilities, pairs, truth, **keywords
+                )
+                if not bool(torch.isfinite(sample_loss)):
+                    raise FloatingPointError(
+                        f"non-finite {name} loss in batch item {batch}"
+                    )
+                sample_losses[name].append(sample_loss)
+        for name in metrics:
+            if sample_losses[name]:
+                metrics[name] = torch.stack(sample_losses[name]).mean()
         return metrics
 
     def forward(self, tokens, predictions, targets):
@@ -473,7 +541,12 @@ class GraphCriterion(nn.Module):
                 tokens, predictions["pred_logits"], targets["edges"], assignments
             ),
         }
-        topology_losses = self.loss_topology(tokens, targets["edges"], assignments)
+        topology_losses = self.loss_topology(
+            tokens,
+            predictions["pred_logits"],
+            targets["edges"],
+            assignments,
+        )
         for name, value in topology_losses.items():
             configuration = self.topology[name]
             weight = float(configuration["weight"])

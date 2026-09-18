@@ -1,0 +1,15 @@
+defaults:
+  - smoke_mixed.yaml
+  - losses/focal.yaml
+  - losses/betti_node_edge.yaml
+
+experiment:
+  name: smoke_mixed_focal_betti_node_edge
+
+topology:
+  betti_h0:
+    warmup_epochs: 0
+    ramp_epochs: 0
+  betti_h1:
+    warmup_epochs: 0
+    ramp_epochs: 0

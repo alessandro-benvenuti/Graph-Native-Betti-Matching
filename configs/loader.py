@@ -547,6 +547,36 @@ def validate_config(config: Mapping[str, Any]) -> None:
     topology = config.get("topology")
     if not isinstance(topology, Mapping):
         raise ConfigError("topology must be a mapping")
+    topology_complex = topology.get("complex")
+    if not isinstance(topology_complex, Mapping):
+        raise ConfigError("topology.complex must be a mapping")
+    if topology_complex.get("mode") not in {"matched_only", "node_aware"}:
+        raise ConfigError(
+            "topology.complex.mode must be matched_only or node_aware"
+        )
+    if topology_complex.get("aggregation") not in {"min", "product", "hybrid"}:
+        raise ConfigError(
+            "topology.complex.aggregation must be min, product, or hybrid"
+        )
+    try:
+        alpha = float(topology_complex.get("alpha", -1))
+        topology_threshold = float(
+            topology_complex.get("unmatched_object_threshold", -1)
+        )
+    except (TypeError, ValueError) as error:
+        raise ConfigError(
+            "topology.complex alpha/threshold must be numeric"
+        ) from error
+    if not 0.0 <= alpha <= 1.0:
+        raise ConfigError("topology.complex.alpha must lie in [0,1]")
+    if not 0.0 <= topology_threshold <= 1.0:
+        raise ConfigError(
+            "topology.complex.unmatched_object_threshold must lie in [0,1]"
+        )
+    _non_negative_int(
+        topology_complex.get("max_active_unmatched"),
+        "topology.complex.max_active_unmatched",
+    )
     for name in ("betti_h0", "betti_h1"):
         topology_loss = topology.get(name)
         location = f"topology.{name}"
