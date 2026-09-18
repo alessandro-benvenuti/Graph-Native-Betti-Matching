@@ -762,6 +762,41 @@ class ExperimentConfigTests(unittest.TestCase):
         self.assertIn("--kill-on-invalid-dep=yes", submitter)
         self.assertIn('--job-name="$run_name"', submitter)
 
+    def test_standard_training_roots_explicitly_pin_hungarian(self):
+        for name in ("pretrain_mixed.yaml", "finetune_synthetic_mri.yaml"):
+            path = ROOT / "configs" / name
+            raw = path.read_text(encoding="utf-8")
+            self.assertIn("matchers/hungarian.yaml", raw)
+            config = load_config(path, environment=ENVIRONMENT)
+            self.assertEqual(config["model"]["matcher"]["type"], "hungarian")
+
+        for path in (
+            ROOT / "configs" / "finetune_synthetic_mri_focal.yaml",
+            ROOT / "configs" / "experiments" / "finetune_mri" / "baseline.yaml",
+            ROOT / "configs" / "experiments" / "finetune_mri" / "betti.yaml",
+            ROOT / "configs" / "experiments" / "finetune_mri" / "focal_betti.yaml",
+            ROOT
+            / "configs"
+            / "experiments"
+            / "full_dataset_comparison"
+            / "finetune_nodefocal_edgefocal_mm.yaml",
+        ):
+            config = load_config(path, environment=ENVIRONMENT)
+            self.assertEqual(config["model"]["matcher"]["type"], "hungarian")
+
+    def test_fgw_configs_remain_explicit_opt_in_overrides(self):
+        for path in (
+            ROOT / "configs" / "finetune_synthetic_mri_focal_fgw.yaml",
+            ROOT / "configs" / "smoke_synthetic_mri_focal_fgw.yaml",
+            ROOT
+            / "configs"
+            / "experiments"
+            / "full_dataset_comparison"
+            / "finetune_nodefocal_edgefocal_mm_fgw_controlled.yaml",
+        ):
+            config = load_config(path, environment=ENVIRONMENT)
+            self.assertEqual(config["model"]["matcher"]["type"], "fgw")
+
 
 if __name__ == "__main__":
     unittest.main()

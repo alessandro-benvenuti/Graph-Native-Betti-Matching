@@ -1,5 +1,6 @@
 defaults:
   - base.yaml
+  - matchers/hungarian.yaml
 
 experiment:
   name: finetune_synthetic_mri

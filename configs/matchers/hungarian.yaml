@@ -1,0 +1,5 @@
+# Explicit safety overlay for every standard training recipe. FGW experiments
+# must deliberately load matchers/fgw.yaml after this file.
+model:
+  matcher:
+    type: hungarian

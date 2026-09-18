@@ -23,8 +23,11 @@ configuration before a dataset is constructed.
   specialization configurations for the seven unweighted-focal recipes.
 - `losses/`: reusable focal and Betti overlays containing only loss changes;
   they never modify datasets, model architecture, or optimization settings.
-- `matchers/fgw.yaml`: partial Fused Gromov-Wasserstein matching followed
-  by a hard one-to-one projection.
+- `matchers/hungarian.yaml`: explicit safety overlay loaded by both canonical
+  training roots and therefore by ordinary baseline, focal, and Betti recipes.
+- `matchers/fgw.yaml`: opt-in partial Fused Gromov-Wasserstein matching followed
+  by a hard one-to-one projection. Only FGW-named experiments load it after the
+  Hungarian overlay.
 - `smoke_mixed_focal_betti.yaml`: one-epoch, four-sample integration check for
   the complete focal + topology training path.
 - `overfit_synthetic_mri_focal_betti.yaml`: ten-epoch fixed eight-sample MRI
@@ -102,6 +105,11 @@ CLI overrides should be restricted to operational values such as paths, batch
 size, worker count, resume checkpoint, and run name. Scientific settings such as
 the loss type or balancing mode belong in version-controlled YAML files so the
 resolved configuration fully describes an experiment.
+
+The standard pretraining and finetuning roots explicitly load
+`matchers/hungarian.yaml`; setting an FGW structural weight to zero is not the
+supported way to request Hungarian matching. FGW is enabled only by loading
+`matchers/fgw.yaml` after the standard configuration.
 
 ## FGW matcher
 
