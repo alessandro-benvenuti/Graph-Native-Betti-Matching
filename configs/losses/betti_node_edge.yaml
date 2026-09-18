@@ -11,9 +11,12 @@ topology:
     weight: 0.1
     warmup_epochs: 10
     ramp_epochs: 20
+    unmatched_node_weight: 1.0
+    normalization: matched_mean
   betti_h1:
     enabled: true
     log_only: false
     weight: 0.1
     warmup_epochs: 10
     ramp_epochs: 20
+    normalization: matched_mean

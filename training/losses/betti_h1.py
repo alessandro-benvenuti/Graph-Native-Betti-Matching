@@ -431,6 +431,7 @@ def cycle_space_matching_loss(
     false_negative_weight: float = 1.0,
     diagonal_factor: float = 0.5,
     normalize: bool = True,
+    normalization: str = "feature_count",
 ) -> Tuple[torch.Tensor, CycleSpaceMatching]:
     """Return differentiable H1 loss and detached matching metadata."""
     if edge_probabilities.ndim != 1:
@@ -456,42 +457,54 @@ def cycle_space_matching_loss(
         terminal_value=terminal_value,
     )
 
+    if normalization not in {"feature_count", "matched_mean"}:
+        raise ValueError(
+            "normalization must be 'feature_count' or 'matched_mean'."
+        )
     edge_filtration = terminal_value * (1.0 - edge_probabilities)
-    loss = edge_probabilities.sum() * 0.0
+    zero = edge_probabilities.sum() * 0.0
+    matched_terms = []
     for match in matching.matches:
         prediction = matching.prediction_classes[match.prediction_index]
         target = matching.target_classes[match.target_index]
-        loss = loss + (
-            edge_filtration[prediction.birth_edge_index] - target.birth
-        ).pow(2)
+        matched_terms.append(
+            (edge_filtration[prediction.birth_edge_index] - target.birth).pow(2)
+        )
+    false_terms = []
     for index in matching.unmatched_prediction_indices:
         item = matching.prediction_classes[index]
         persistence = terminal_value - edge_filtration[item.birth_edge_index]
-        loss = (
-            loss
-            + diagonal_factor
+        false_terms.append(
+            diagonal_factor
             * false_positive_weight
             * persistence.pow(2)
         )
 
-    missed_constant = sum(
-        (
-            terminal_value
-            - matching.target_classes[index].birth
+    missed_terms = [
+        edge_probabilities.new_tensor(
+            diagonal_factor
+            * false_negative_weight
+            * (terminal_value - matching.target_classes[index].birth) ** 2
         )
-        ** 2
         for index in matching.unmatched_target_indices
-    )
-    loss = loss + edge_probabilities.new_tensor(
-        diagonal_factor * false_negative_weight * missed_constant
-    )
-    if normalize:
-        feature_count = (
-            matching.shared_rank
-            + matching.false_prediction_rank
-            + matching.missed_target_rank
+    ]
+    groups = (matched_terms, false_terms, missed_terms)
+    if not normalize:
+        loss = sum((sum(terms, zero) for terms in groups), zero)
+    elif normalization == "feature_count":
+        feature_count = sum(len(terms) for terms in groups)
+        loss = sum((sum(terms, zero) for terms in groups), zero) / max(
+            1, feature_count
         )
-        loss = loss / max(1, feature_count)
+    else:
+        matched_loss = (
+            sum(matched_terms, zero) / len(matched_terms)
+            if matched_terms
+            else zero
+        )
+        loss = matched_loss + sum(
+            (sum(terms, zero) for terms in groups[1:]), zero
+        )
     return loss, matching
 
 

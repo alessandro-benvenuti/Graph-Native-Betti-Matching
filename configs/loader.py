@@ -585,13 +585,20 @@ def validate_config(config: Mapping[str, Any]) -> None:
         for flag in ("enabled", "log_only", "normalize"):
             if not isinstance(topology_loss.get(flag), bool):
                 raise ConfigError(f"{location}.{flag} must be a boolean")
+        if topology_loss.get("normalization") not in {
+            "feature_count",
+            "matched_mean",
+        }:
+            raise ConfigError(
+                f"{location}.normalization must be feature_count or matched_mean"
+            )
         for count_name in ("warmup_epochs", "ramp_epochs"):
             _non_negative_int(
                 topology_loss.get(count_name), f"{location}.{count_name}"
             )
         value_names = ["weight", "diagonal_factor"]
         if name == "betti_h0":
-            value_names.append("unmatched_weight")
+            value_names.extend(("unmatched_weight", "unmatched_node_weight"))
         else:
             value_names.extend(
                 ("false_positive_weight", "false_negative_weight")

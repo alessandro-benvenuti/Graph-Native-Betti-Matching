@@ -63,11 +63,13 @@ class InteractiveVisualizationTests(unittest.TestCase):
         record = {
             "nodes_dhw": [[0, 0, 0], [0.2, 0.2, 0.2], [0.8, 0.8, 0.8]],
             "node_scores": [0.4, 0.9, 0.8],
+            "query_ids": [7, 24, 91],
             "edges": [[0, 1], [1, 2], [0, 2]],
             "edge_scores": [0.95, 0.75, 0.2],
         }
         result = filter_prediction(record, node_threshold=0.5, edge_threshold=0.7)
         np.testing.assert_array_equal(result.original_node_indices, [1, 2])
+        np.testing.assert_array_equal(result.query_ids, [24, 91])
         np.testing.assert_array_equal(result.edges, [[0, 1]])
         np.testing.assert_allclose(result.edge_scores, [0.75])
 

@@ -122,7 +122,18 @@ def _edge_coordinates(nodes_xyz, edges):
     return x, y, z
 
 
-def _add_graph(figure, nodes_xyz, edges, *, scores=None, edge_scores=None, color, name, visible):
+def _add_graph(
+    figure,
+    nodes_xyz,
+    edges,
+    *,
+    scores=None,
+    node_labels=None,
+    edge_scores=None,
+    color,
+    name,
+    visible,
+):
     import plotly.graph_objects as go
 
     if len(edges):
@@ -161,7 +172,11 @@ def _add_graph(figure, nodes_xyz, edges, *, scores=None, edge_scores=None, color
         hover = None
         if scores is not None:
             marker.update({"color": scores, "colorscale": "Blues", "cmin": 0, "cmax": 1, "colorbar": {"title": "Node confidence", "len": 0.45}})
-            hover = [f"node {index}<br>confidence={score:.3f}" for index, score in enumerate(scores)]
+            labels = range(len(scores)) if node_labels is None else node_labels
+            hover = [
+                f"query {int(label)}<br>local node {index}<br>confidence={score:.3f}"
+                for index, (label, score) in enumerate(zip(labels, scores))
+            ]
         figure.add_trace(go.Scatter3d(
             x=nodes_xyz[:, 0], y=nodes_xyz[:, 1], z=nodes_xyz[:, 2], mode="markers",
             marker=marker, text=hover, hovertemplate="%{text}<extra></extra>" if hover else None,
@@ -258,7 +273,17 @@ def main(argv=None):
     _add_mri_slices(figure, raw, visible=args.show_mri)
     _add_segmentation(figure, segmentation, visible=args.show_segmentation)
     _add_graph(figure, gt_xyz, gt_edges, color="#d62728", name="Ground truth", visible=args.show_ground_truth)
-    _add_graph(figure, predicted_xyz, prediction.edges, scores=prediction.node_scores, edge_scores=prediction.edge_scores, color="#1f77b4", name="Prediction", visible=args.show_prediction)
+    _add_graph(
+        figure,
+        predicted_xyz,
+        prediction.edges,
+        scores=prediction.node_scores,
+        node_labels=prediction.query_ids,
+        edge_scores=prediction.edge_scores,
+        color="#1f77b4",
+        name="Prediction",
+        visible=args.show_prediction,
+    )
     if args.error_analysis:
         classification = classify_visualization_errors(prediction.nodes_dhw, prediction.edges, gt_nodes, gt_edges, max_distance=args.match_distance)
         _add_error_overlays(figure, classification, predicted_xyz, gt_xyz)

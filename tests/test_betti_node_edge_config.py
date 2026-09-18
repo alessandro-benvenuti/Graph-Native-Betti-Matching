@@ -26,6 +26,15 @@ class NodeEdgeBettiConfigTests(unittest.TestCase):
         self.assertEqual(complex_config["aggregation"], "hybrid")
         self.assertEqual(complex_config["alpha"], 0.5)
         self.assertEqual(complex_config["max_active_unmatched"], 8)
+        self.assertEqual(
+            config["topology"]["betti_h0"]["normalization"], "matched_mean"
+        )
+        self.assertEqual(
+            config["topology"]["betti_h0"]["unmatched_node_weight"], 1.0
+        )
+        self.assertEqual(
+            config["topology"]["betti_h1"]["normalization"], "matched_mean"
+        )
 
     def test_invalid_complex_configuration_is_rejected(self):
         config = load_config(
@@ -42,6 +51,15 @@ class NodeEdgeBettiConfigTests(unittest.TestCase):
             invalid["topology"]["complex"][key] = value
             with self.subTest(key=key), self.assertRaises(ConfigError):
                 validate_config(invalid)
+
+    def test_invalid_topology_normalization_is_rejected(self):
+        config = load_config(
+            ROOT / "configs" / "pretrain_mixed.yaml",
+            environment=ENVIRONMENT,
+        )
+        config["topology"]["betti_h0"]["normalization"] = "unsafe"
+        with self.assertRaises(ConfigError):
+            validate_config(config)
 
 
 if __name__ == "__main__":

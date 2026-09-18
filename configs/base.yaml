@@ -179,8 +179,10 @@ topology:
     warmup_epochs: 0
     ramp_epochs: 0
     unmatched_weight: 1.0
+    unmatched_node_weight: 0.0
     diagonal_factor: 0.5
     normalize: true
+    normalization: feature_count
   betti_h1:
     enabled: false
     log_only: true
@@ -191,6 +193,7 @@ topology:
     false_negative_weight: 1.0
     diagonal_factor: 0.5
     normalize: true
+    normalization: feature_count
 
 evaluation:
   interval_epochs: 5

@@ -55,6 +55,13 @@ component as the omitted reduced-H0 class, so node-aware H0 is skipped for an
 empty target. Coordinates and the discrete query selection receive no topology
 gradient.
 
+Selected unmatched vertices also receive an explicit filtration mismatch:
+their predicted vertex filtration is `1-q_i`, while target absence is placed
+at filtration `1`, producing the penalty `q_i^2`. With `normalization:
+matched_mean`, genuine correspondences are averaged but false, missed, and
+absent-vertex penalties are summed. Adding another error therefore cannot
+dilute the existing loss through a larger feature-count denominator.
+
 ## Focal loss and hard-negative mining
 
 Node and edge classification can independently select `focal`. Hard-negative

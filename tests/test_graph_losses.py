@@ -219,8 +219,12 @@ class GraphCriterionTests(unittest.TestCase):
         )
         for name in ("betti_h0", "betti_h1"):
             config["topology"][name].update(
-                enabled=True, log_only=False, weight=0.2
+                enabled=True,
+                log_only=False,
+                weight=0.2,
+                normalization="matched_mean",
             )
+        config["topology"]["betti_h0"]["unmatched_node_weight"] = 1.0
         criterion, relation = self._criterion(config)
         tokens, predictions, targets = _batch()
         assignments = [
@@ -239,6 +243,7 @@ class GraphCriterionTests(unittest.TestCase):
         unmatched_gradient = predictions["pred_logits"].grad[0, 3]
         self.assertTrue(torch.isfinite(loss))
         self.assertGreater(float(unmatched_gradient.abs().sum()), 0.0)
+        self.assertGreater(float(unmatched_gradient[1]), 0.0)
         self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
 
     def test_validation_uses_stationary_full_betti_weight(self):

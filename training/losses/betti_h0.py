@@ -372,8 +372,10 @@ def h0_betti_matching_loss(
     num_vertices: int,
     terminal_value: float = 1.0,
     unmatched_weight: float = 1.0,
+    unmatched_node_weight: float = 0.0,
     diagonal_factor: float = 0.5,
     normalize: bool = True,
+    normalization: str = "feature_count",
     node_probabilities: Optional[torch.Tensor] = None,
     target_node_presence: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, H0Matching]:
@@ -428,37 +430,71 @@ def h0_betti_matching_loss(
             for vertex in range(num_vertices)
         }
 
-    loss = edge_probabilities.sum() * 0.0
+    if normalization not in {"feature_count", "matched_mean"}:
+        raise ValueError(
+            "normalization must be 'feature_count' or 'matched_mean'."
+        )
+    zero = edge_probabilities.sum() * 0.0
+    matched_terms = []
     for match in matching.matches:
         prediction = matching.prediction_pairs[match.prediction_index]
         target = matching.target_pairs[match.target_index]
-        loss = loss + (
-            node_filtration[prediction.birth_vertex] - target.birth
-        ).pow(2)
-        loss = loss + (
-            edge_filtration[prediction.death_edge_index] - target.death
-        ).pow(2)
+        matched_terms.append(
+            (node_filtration[prediction.birth_vertex] - target.birth).pow(2)
+            + (edge_filtration[prediction.death_edge_index] - target.death).pow(2)
+        )
+    false_terms = []
     for index in matching.unmatched_prediction_indices:
         pair = matching.prediction_pairs[index]
         persistence = (
             edge_filtration[pair.death_edge_index]
             - node_filtration[pair.birth_vertex]
         )
-        loss = loss + unmatched_weight * diagonal_factor * persistence.pow(2)
-    missed_constant = sum(
-        matching.target_pairs[index].persistence**2
-        for index in matching.unmatched_target_indices
-    )
-    loss = loss + edge_probabilities.new_tensor(
-        unmatched_weight * diagonal_factor * missed_constant
-    )
-    if normalize:
-        count = (
-            matching.matched_rank
-            + matching.false_prediction_rank
-            + matching.missed_target_rank
+        false_terms.append(
+            unmatched_weight * diagonal_factor * persistence.pow(2)
         )
-        loss = loss / max(1, count)
+    missed_terms = [
+        edge_probabilities.new_tensor(
+            unmatched_weight
+            * diagonal_factor
+            * matching.target_pairs[index].persistence**2
+        )
+        for index in matching.unmatched_target_indices
+    ]
+    node_terms = []
+    if (
+        node_probabilities is not None
+        and target_node_presence is not None
+        and unmatched_node_weight > 0.0
+    ):
+        target_presence = target_node_presence.to(edge_probabilities.device)
+        target_filtration = terminal_value * (1.0 - target_presence)
+        for vertex in torch.nonzero(
+            target_presence.detach() < 0.5, as_tuple=False
+        ).flatten().tolist():
+            node_terms.append(
+                unmatched_node_weight
+                * (node_filtration[vertex] - target_filtration[vertex]).pow(2)
+            )
+
+    groups = (matched_terms, false_terms, missed_terms, node_terms)
+    if not normalize:
+        loss = sum((sum(terms, zero) for terms in groups), zero)
+    elif normalization == "feature_count":
+        count = sum(len(terms) for terms in groups)
+        loss = sum((sum(terms, zero) for terms in groups), zero) / max(1, count)
+    else:
+        # Average only correspondence terms, whose count scales with target
+        # graph size.  False, missed, and absent-node penalties remain sums:
+        # adding an error can therefore never dilute existing supervision.
+        matched_loss = (
+            sum(matched_terms, zero) / len(matched_terms)
+            if matched_terms
+            else zero
+        )
+        loss = matched_loss + sum(
+            (sum(terms, zero) for terms in groups[1:]), zero
+        )
     return loss, matching
 
 

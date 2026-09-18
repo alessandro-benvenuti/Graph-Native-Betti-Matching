@@ -24,6 +24,7 @@ from training.evaluation.visualization import normalized_dhw_to_plot_xyz
 class FilteredPrediction:
     nodes_dhw: np.ndarray
     node_scores: np.ndarray
+    query_ids: np.ndarray
     edges: np.ndarray
     edge_scores: np.ndarray
     original_node_indices: np.ndarray
@@ -126,10 +127,15 @@ def filter_prediction(
 ) -> FilteredPrediction:
     nodes = np.asarray(record.get("nodes_dhw", []), dtype=np.float32).reshape(-1, 3)
     node_scores = np.asarray(record.get("node_scores", []), dtype=np.float32).reshape(-1)
+    query_ids = np.asarray(
+        record.get("query_ids", np.arange(len(nodes))), dtype=np.int64
+    ).reshape(-1)
     edges = validate_graph_endpoints(record.get("edges", []), len(nodes), label="prediction")
     edge_scores = np.asarray(record.get("edge_scores", []), dtype=np.float32).reshape(-1)
     if len(nodes) != len(node_scores):
         raise ValueError("Prediction must contain one node score per node")
+    if len(nodes) != len(query_ids):
+        raise ValueError("Prediction must contain one query ID per node")
     if len(edges) != len(edge_scores):
         raise ValueError("Prediction must contain one edge score per edge")
     if not 0.0 <= float(node_threshold) <= 1.0:
@@ -151,6 +157,7 @@ def filter_prediction(
     return FilteredPrediction(
         nodes_dhw=nodes[kept_nodes],
         node_scores=node_scores[kept_nodes],
+        query_ids=query_ids[kept_nodes],
         edges=filtered_edges,
         edge_scores=edge_scores[edge_mask],
         original_node_indices=kept_nodes,

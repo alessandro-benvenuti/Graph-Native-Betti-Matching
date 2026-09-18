@@ -490,10 +490,14 @@ class GraphCriterion(nn.Module):
                     num_vertices=count,
                     diagonal_factor=float(configuration["diagonal_factor"]),
                     normalize=bool(configuration["normalize"]),
+                    normalization=str(configuration["normalization"]),
                 )
                 if name == "betti_h0":
                     keywords["unmatched_weight"] = float(
                         configuration["unmatched_weight"]
+                    )
+                    keywords["unmatched_node_weight"] = float(
+                        configuration["unmatched_node_weight"]
                     )
                     if node_aware:
                         keywords["node_probabilities"] = node_probabilities

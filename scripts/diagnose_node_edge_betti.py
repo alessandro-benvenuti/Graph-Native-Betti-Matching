@@ -64,6 +64,12 @@ def _parser():
     parser.add_argument("--alpha", type=float, default=0.5)
     parser.add_argument("--unmatched-object-threshold", type=float, default=0.25)
     parser.add_argument("--max-active-unmatched", type=int, default=8)
+    parser.add_argument(
+        "--normalization",
+        choices=("feature_count", "matched_mean"),
+        default="matched_mean",
+    )
+    parser.add_argument("--unmatched-node-weight", type=float, default=1.0)
     return parser
 
 
@@ -232,11 +238,22 @@ def _evaluate_mode(
     truth = criterion._local_true_edges(target_edges, target, device)
 
     h0_config = criterion.topology["betti_h0"]
+    normalization = (
+        str(h0_config["normalization"])
+        if mode == "node_aware"
+        else "feature_count"
+    )
     h0_keywords = dict(
         num_vertices=count,
         unmatched_weight=float(h0_config["unmatched_weight"]),
+        unmatched_node_weight=(
+            float(h0_config["unmatched_node_weight"])
+            if mode == "node_aware"
+            else 0.0
+        ),
         diagonal_factor=float(h0_config["diagonal_factor"]),
         normalize=bool(h0_config["normalize"]),
+        normalization=normalization,
     )
     if mode == "node_aware":
         h0_keywords.update(
@@ -257,6 +274,11 @@ def _evaluate_mode(
         false_negative_weight=float(h1_config["false_negative_weight"]),
         diagonal_factor=float(h1_config["diagonal_factor"]),
         normalize=bool(h1_config["normalize"]),
+        normalization=(
+            str(h1_config["normalization"])
+            if mode == "node_aware"
+            else "feature_count"
+        ),
     )
     h0_node_gradient, h0_edge_gradient = _gradients(
         h0_loss, node_probabilities, raw, retain_graph=True
@@ -315,6 +337,7 @@ def _evaluate_mode(
         "mode": mode,
         "aggregation": aggregation if mode == "node_aware" else None,
         "alpha": alpha if mode == "node_aware" else None,
+        "normalization": normalization,
         "selected_query_ids": selected_cpu,
         "matched_vertex_count": len(source_cpu),
         "active_unmatched_count": len(selected_cpu) - len(source_cpu),
@@ -392,6 +415,8 @@ def main():
         raise ValueError("--alpha must lie in [0,1]")
     if not 0.0 <= args.unmatched_object_threshold <= 1.0:
         raise ValueError("--unmatched-object-threshold must lie in [0,1]")
+    if args.unmatched_node_weight < 0.0:
+        raise ValueError("--unmatched-node-weight must be non-negative")
     output = Path(args.output_dir)
     if output.exists() and (
         not output.is_dir() or any(output.iterdir())
@@ -411,6 +436,11 @@ def main():
         unmatched_object_threshold=args.unmatched_object_threshold,
         max_active_unmatched=args.max_active_unmatched,
     )
+    for name in ("betti_h0", "betti_h1"):
+        config["topology"][name]["normalization"] = args.normalization
+    config["topology"]["betti_h0"][
+        "unmatched_node_weight"
+    ] = args.unmatched_node_weight
     validate_config(config)
     dataset_name = _dataset_name(config, args.dataset)
     seed = int(config["experiment"]["seed"])
@@ -498,6 +528,8 @@ def main():
         "alpha": args.alpha,
         "unmatched_object_threshold": args.unmatched_object_threshold,
         "max_active_unmatched": args.max_active_unmatched,
+        "normalization": args.normalization,
+        "unmatched_node_weight": args.unmatched_node_weight,
     }
     (output / "metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
