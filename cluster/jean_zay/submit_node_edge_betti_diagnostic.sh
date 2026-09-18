@@ -5,7 +5,8 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 default_checkpoint="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-boundary-gamma-sweep-500-a100/finetune_boundary_mri500_node_edge_focal_g20_seed364505/models/best_metric_checkpoint.pt"
 checkpoint="${1:-$default_checkpoint}"
-output="${2:-${GNBM_OUTPUT_DIR:-${SCRATCH:-}/experiments/gnbm}/node-edge-betti-diagnostic-g20-seed364505}"
+config_output_root="${GNBM_OUTPUT_DIR:-${SCRATCH:-}/experiments/gnbm}"
+output="${2:-$config_output_root/node-edge-betti-diagnostic-g20-seed364505}"
 config="configs/experiments/boundary_gamma_sweep_500/finetune_node_edge_focal_g20.yaml"
 qos="${GNBM_DIAGNOSTIC_QOS:-qos_gpu_a100-dev}"
 walltime="${GNBM_DIAGNOSTIC_WALLTIME:-02:00:00}"
@@ -36,6 +37,7 @@ case "$qos" in
 esac
 
 export GNBM_REPO_DIR="$repo_dir"
+export GNBM_OUTPUT_DIR="$config_output_root"
 export GNBM_NODE_EDGE_BETTI_CHECKPOINT="$checkpoint"
 export GNBM_NODE_EDGE_BETTI_CONFIG="$config"
 export GNBM_NODE_EDGE_BETTI_OUTPUT="$output"
