@@ -725,6 +725,21 @@ non-negative `false_positive_weight` and `false_negative_weight`. These losses
 operate on the matched graph candidate space implemented by the criterion;
 enable them only as explicit topology experiments.
 
+For the paired 4,000-patch A100 pilot, submit both 100-epoch arms from the same
+pretrained checkpoint with:
+
+```bash
+bash cluster/jean_zay/submit_node_edge_betti_pilot_4000.sh
+```
+
+The launcher defaults to two recoverable 20-hour segments per arm. Override
+this with `GNBM_PILOT_SEGMENTS=1`, `2`, or `3`. Once both runs reach epoch 100,
+compare their final validation records with:
+
+```bash
+python scripts/summarize_node_edge_betti_pilot_4000.py
+```
+
 ### Evaluation and model selection
 
 | Key | Supported values and meaning |

@@ -62,6 +62,12 @@ matched_mean`, genuine correspondences are averaged but false, missed, and
 absent-vertex penalties are summed. Adding another error therefore cannot
 dilute the existing loss through a larger feature-count denominator.
 
+When `detach_unmatched_edge_probabilities` is enabled, edges incident to an
+unmatched topology vertex still participate in the forward filtration, but
+their relation probabilities are detached. Gradients continue through the
+unmatched node probability; the shared relation head is supervised only by
+edges whose two endpoints correspond to target vertices.
+
 ## Focal loss and hard-negative mining
 
 Node and edge classification can independently select `focal`. Hard-negative

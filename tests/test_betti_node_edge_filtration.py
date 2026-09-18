@@ -116,6 +116,45 @@ class NodeEdgeFiltrationTests(unittest.TestCase):
         self.assertGreater(float(node_logits.grad[3]), 0.0)
         self.assertGreater(float(raw_edges.grad[3]), 0.0)
 
+    def test_detached_unmatched_edges_update_node_but_not_relation_score(self):
+        nodes = torch.tensor(
+            [1.0, 1.0, 1.0, 0.6], dtype=torch.float64, requires_grad=True
+        )
+        raw_edges = torch.tensor(
+            [0.95, 0.90, 0.80, 0.75],
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        pairs = torch.tensor(
+            [[0, 1], [1, 2], [2, 3], [0, 3]], dtype=torch.long
+        )
+        presence = torch.tensor([1.0, 1.0, 1.0, 0.0], dtype=torch.float64)
+        incident_to_absent = (
+            presence[pairs[:, 0]] < 0.5
+        ) | (presence[pairs[:, 1]] < 0.5)
+        filtration_edges = torch.where(
+            incident_to_absent, raw_edges.detach(), raw_edges
+        )
+        effective = node_edge_confidences(
+            nodes,
+            filtration_edges,
+            pairs,
+            aggregation="hybrid",
+            alpha=0.5,
+        )
+        loss, _ = cycle_space_matching_loss(
+            effective,
+            pairs,
+            torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+            num_vertices=4,
+            normalize=False,
+        )
+        loss.backward()
+
+        self.assertGreater(float(nodes.grad[3]), 0.0)
+        self.assertEqual(float(raw_edges.grad[2]), 0.0)
+        self.assertEqual(float(raw_edges.grad[3]), 0.0)
+
     def test_h1_node_gradient_matches_finite_difference(self):
         pairs = torch.tensor(
             [[0, 1], [1, 2], [2, 3], [0, 3]], dtype=torch.long

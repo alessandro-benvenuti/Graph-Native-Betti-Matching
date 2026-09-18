@@ -464,9 +464,21 @@ class GraphCriterion(nn.Module):
             )
             probabilities = raw_probabilities
             if node_aware:
+                filtration_edge_probabilities = raw_probabilities
+                if complex_configuration[
+                    "detach_unmatched_edge_probabilities"
+                ]:
+                    incident_to_absent = (
+                        target_presence[pairs[:, 0]] < 0.5
+                    ) | (target_presence[pairs[:, 1]] < 0.5)
+                    filtration_edge_probabilities = torch.where(
+                        incident_to_absent,
+                        raw_probabilities.detach(),
+                        raw_probabilities,
+                    )
                 probabilities = node_edge_confidences(
                     node_probabilities,
-                    raw_probabilities,
+                    filtration_edge_probabilities,
                     pairs,
                     aggregation=complex_configuration["aggregation"],
                     alpha=float(complex_configuration["alpha"]),

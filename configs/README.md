@@ -21,6 +21,9 @@ configuration before a dataset is constructed.
   finetuning matrix. See `docs/EXPERIMENTS.md` before launching it.
 - `experiments/focal_matrix_600/`: paired mixed-pretraining and 600-epoch MRI
   specialization configurations for the seven unweighted-focal recipes.
+- `experiments/node_edge_betti_pilot_4000/`: paired 100-epoch continuation of
+  one pretrained node+edge-focal model, comparing no topology against
+  node-aware Betti supervision on identical 4,000/500 train/validation subsets.
 - `losses/`: reusable focal and Betti overlays containing only loss changes;
   they never modify datasets, model architecture, or optimization settings.
   `losses/betti_node_edge.yaml` enables the node-aware filtered complex while

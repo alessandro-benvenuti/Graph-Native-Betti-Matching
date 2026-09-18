@@ -1,0 +1,17 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: node_edge_betti_pilot4000_control_e100_seed364505
+
+topology:
+  complex:
+    mode: matched_only
+  betti_h0:
+    enabled: false
+    log_only: true
+    weight: 0.0
+  betti_h1:
+    enabled: false
+    log_only: true
+    weight: 0.0

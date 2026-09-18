@@ -172,6 +172,7 @@ topology:
     alpha: 0.5
     unmatched_object_threshold: 0.25
     max_active_unmatched: 8
+    detach_unmatched_edge_probabilities: false
   betti_h0:
     enabled: false
     log_only: true

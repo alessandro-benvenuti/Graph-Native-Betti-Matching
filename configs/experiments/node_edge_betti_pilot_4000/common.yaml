@@ -1,0 +1,41 @@
+defaults:
+  - ../boundary_gamma_sweep_500/finetune_node_edge_focal_g20.yaml
+
+experiment:
+  name: node_edge_betti_pilot_4000_placeholder
+  seed: 364505
+
+data:
+  batch_size: 32
+  validation_batch_size: 32
+  datasets:
+    synthetic_mri:
+      train_samples: 4000
+      validation_samples: 500
+      sample_cap_selection: seeded_random
+      sample_cap_seed: 364505
+
+training:
+  epochs: 100
+  stop_after_epoch: null
+  early_stopping:
+    enabled: false
+  checkpoint:
+    policy: interval_and_best
+    interval_epochs: 10
+    latest_interval_epochs: 1
+
+evaluation:
+  interval_epochs: 5
+  training_metrics:
+    enabled: true
+    save_f1_checkpoints: true
+    dataset: synthetic_mri
+    max_samples: null
+    selection_metric: edge_mAP
+    selection_mode: max
+    save_best_checkpoint: true
+
+tracking:
+  group: node-edge-betti-pilot-4000
+  tags: [gnbm, node-edge-betti, pilot4000, paired-control, a100]

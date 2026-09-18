@@ -577,6 +577,12 @@ def validate_config(config: Mapping[str, Any]) -> None:
         topology_complex.get("max_active_unmatched"),
         "topology.complex.max_active_unmatched",
     )
+    if not isinstance(
+        topology_complex.get("detach_unmatched_edge_probabilities"), bool
+    ):
+        raise ConfigError(
+            "topology.complex.detach_unmatched_edge_probabilities must be a boolean"
+        )
     for name in ("betti_h0", "betti_h1"):
         topology_loss = topology.get(name)
         location = f"topology.{name}"

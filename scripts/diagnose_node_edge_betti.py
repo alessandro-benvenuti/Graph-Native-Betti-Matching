@@ -70,6 +70,11 @@ def _parser():
         default="matched_mean",
     )
     parser.add_argument("--unmatched-node-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--detach-unmatched-edge-probabilities",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     return parser
 
 
@@ -228,9 +233,19 @@ def _evaluate_mode(
     ).detach().requires_grad_(True)
     effective = raw
     if mode == "node_aware":
+        filtration_raw = raw
+        if criterion.topology["complex"][
+            "detach_unmatched_edge_probabilities"
+        ]:
+            incident_to_absent = (
+                target_presence[pairs[:, 0]] < 0.5
+            ) | (target_presence[pairs[:, 1]] < 0.5)
+            filtration_raw = torch.where(
+                incident_to_absent, raw.detach(), raw
+            )
         effective = node_edge_confidences(
             node_probabilities,
-            raw,
+            filtration_raw,
             pairs,
             aggregation=aggregation,
             alpha=alpha,
@@ -435,6 +450,9 @@ def main():
         alpha=args.alpha,
         unmatched_object_threshold=args.unmatched_object_threshold,
         max_active_unmatched=args.max_active_unmatched,
+        detach_unmatched_edge_probabilities=(
+            args.detach_unmatched_edge_probabilities
+        ),
     )
     for name in ("betti_h0", "betti_h1"):
         config["topology"][name]["normalization"] = args.normalization
@@ -530,6 +548,9 @@ def main():
         "max_active_unmatched": args.max_active_unmatched,
         "normalization": args.normalization,
         "unmatched_node_weight": args.unmatched_node_weight,
+        "detach_unmatched_edge_probabilities": (
+            args.detach_unmatched_edge_probabilities
+        ),
     }
     (output / "metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"
