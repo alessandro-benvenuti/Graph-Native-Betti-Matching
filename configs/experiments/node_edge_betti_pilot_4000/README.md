@@ -11,3 +11,8 @@ incident to unmatched topology vertices participate in the forward filtration,
 but their relation probabilities are detached; topology corrects those
 structures through node existence instead of assigning relation labels to
 nonexistent target vertices.
+
+The launcher defaults to `WANDB_MODE=offline` so unavailable external network
+connectivity cannot abort an A100 allocation before training starts. Set
+`GNBM_PILOT_WANDB_MODE=online` only when online initialization has been verified;
+offline runs can be synchronized after training.

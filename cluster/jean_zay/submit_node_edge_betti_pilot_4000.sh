@@ -66,6 +66,9 @@ export GNBM_BATCH_SIZE="${GNBM_BATCH_SIZE:-$((32 / GNBM_GPUS))}"
 export GNBM_QOS="${GNBM_QOS:-qos_gpu_a100-t3}"
 export GNBM_WALLTIME="${GNBM_WALLTIME:-20:00:00}"
 export WANDB_RUN_GROUP="${WANDB_RUN_GROUP:-node-edge-betti-pilot-4000}"
+# Compute nodes can spend tens of minutes retrying a blocked W&B connection.
+# Keep training independent of external connectivity; runs can be synced later.
+export WANDB_MODE="${GNBM_PILOT_WANDB_MODE:-offline}"
 
 submit_chain() {
   local config="$1"
