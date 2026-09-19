@@ -55,6 +55,9 @@ echo "Validating the paired configurations and deterministic dataset subset..."
 )
 
 export GNBM_SKIP_PREFLIGHT=1
+# This campaign always starts both arms from the same model-only checkpoint;
+# never inherit full-state resume settings from a previous shell session.
+unset GNBM_RESUME_CHECKPOINT GNBM_ALLOW_PENDING_RESUME
 export GNBM_INITIAL_WEIGHTS="$initial_weights"
 export GNBM_AUTO_RESUME=1
 export GNBM_GPUS="${GNBM_GPUS:-1}"
