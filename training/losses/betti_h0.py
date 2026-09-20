@@ -372,7 +372,6 @@ def h0_betti_matching_loss(
     num_vertices: int,
     terminal_value: float = 1.0,
     unmatched_weight: float = 1.0,
-    unmatched_node_weight: float = 0.0,
     diagonal_factor: float = 0.5,
     normalize: bool = True,
     normalization: str = "feature_count",
@@ -461,23 +460,7 @@ def h0_betti_matching_loss(
         )
         for index in matching.unmatched_target_indices
     ]
-    node_terms = []
-    if (
-        node_probabilities is not None
-        and target_node_presence is not None
-        and unmatched_node_weight > 0.0
-    ):
-        target_presence = target_node_presence.to(edge_probabilities.device)
-        target_filtration = terminal_value * (1.0 - target_presence)
-        for vertex in torch.nonzero(
-            target_presence.detach() < 0.5, as_tuple=False
-        ).flatten().tolist():
-            node_terms.append(
-                unmatched_node_weight
-                * (node_filtration[vertex] - target_filtration[vertex]).pow(2)
-            )
-
-    groups = (matched_terms, false_terms, missed_terms, node_terms)
+    groups = (matched_terms, false_terms, missed_terms)
     if not normalize:
         loss = sum((sum(terms, zero) for terms in groups), zero)
     elif normalization == "feature_count":
@@ -485,7 +468,7 @@ def h0_betti_matching_loss(
         loss = sum((sum(terms, zero) for terms in groups), zero) / max(1, count)
     else:
         # Average only correspondence terms, whose count scales with target
-        # graph size.  False, missed, and absent-node penalties remain sums:
+        # graph size. False and missed feature penalties remain sums:
         # adding an error can therefore never dilute existing supervision.
         matched_loss = (
             sum(matched_terms, zero) / len(matched_terms)

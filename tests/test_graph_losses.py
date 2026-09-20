@@ -224,7 +224,6 @@ class GraphCriterionTests(unittest.TestCase):
                 weight=0.2,
                 normalization="matched_mean",
             )
-        config["topology"]["betti_h0"]["unmatched_node_weight"] = 1.0
         criterion, relation = self._criterion(config)
         tokens, predictions, targets = _batch()
         assignments = [
@@ -273,6 +272,22 @@ class GraphCriterionTests(unittest.TestCase):
         self.assertEqual(
             float(train_losses["betti_h0_weighted"].detach()), 0.0
         )
+        self.assertEqual(train_criterion.relation_embed.calls, 1)
+
+        train_criterion.set_training_progress(11, 0.0)
+        active_tokens, active_predictions, active_targets = _batch()
+        active_losses = train_criterion(
+            active_tokens, active_predictions, active_targets
+        )
+        self.assertGreater(train_criterion.relation_embed.calls, 1)
+        self.assertTrue(
+            torch.allclose(
+                active_losses["betti_h0_weighted"],
+                active_losses["betti_h0"] * 0.01,
+            )
+        )
+
+        self.assertGreater(validation_relation.calls, 1)
         self.assertTrue(
             torch.allclose(
                 validation_losses["betti_h0_weighted"],

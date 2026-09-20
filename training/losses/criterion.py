@@ -430,13 +430,29 @@ class GraphCriterion(nn.Module):
         )
         return selected, node_probabilities, target_presence
 
+    def _topology_weight(self, name):
+        configuration = self.topology[name]
+        weight = float(configuration["weight"])
+        if self.validation:
+            return weight
+        return scheduled_candidate_weight(
+            self.epoch,
+            weight,
+            configuration["warmup_epochs"],
+            configuration["ramp_epochs"],
+        )
+
     def loss_topology(self, tokens, node_logits, target_edges, assignments):
         zero = tokens.sum() * 0.0
         metrics = {"betti_h0": zero, "betti_h1": zero}
-        enabled = {
-            name: bool(self.topology[name]["enabled"])
-            for name in ("betti_h0", "betti_h1")
-        }
+        enabled = {}
+        for name in ("betti_h0", "betti_h1"):
+            configuration = self.topology[name]
+            enabled[name] = bool(configuration["enabled"]) and (
+                self.validation
+                or bool(configuration["log_only"])
+                or self._topology_weight(name) > 0.0
+            )
         if not any(enabled.values()):
             return metrics
         sample_losses = {"betti_h0": [], "betti_h1": []}
@@ -508,9 +524,6 @@ class GraphCriterion(nn.Module):
                     keywords["unmatched_weight"] = float(
                         configuration["unmatched_weight"]
                     )
-                    keywords["unmatched_node_weight"] = float(
-                        configuration["unmatched_node_weight"]
-                    )
                     if node_aware:
                         keywords["node_probabilities"] = node_probabilities
                         keywords["target_node_presence"] = target_presence
@@ -565,14 +578,7 @@ class GraphCriterion(nn.Module):
         )
         for name, value in topology_losses.items():
             configuration = self.topology[name]
-            weight = float(configuration["weight"])
-            if not self.validation:
-                weight = scheduled_candidate_weight(
-                    self.epoch,
-                    weight,
-                    configuration["warmup_epochs"],
-                    configuration["ramp_epochs"],
-                )
+            weight = self._topology_weight(name)
             losses[name] = value
             losses[name + "_weighted"] = value * weight
 

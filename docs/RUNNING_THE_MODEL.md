@@ -716,14 +716,16 @@ Both `topology.betti_h0` and `topology.betti_h1` support:
 | `warmup_epochs`, `ramp_epochs` | Non-negative zero-weight and linear-ramp durations. |
 | `diagonal_factor` | Non-negative matching parameter. |
 | `normalize` | Boolean normalization control. |
-| `normalization` | `feature_count` averages every feature together; `matched_mean` averages matches but sums false, missed, and absent-node penalties. |
+| `normalization` | `feature_count` averages every feature together; `matched_mean` averages matches but sums false and missed topological-feature penalties. |
 
-H0 additionally has non-negative `unmatched_weight` and
-`unmatched_node_weight`; the latter penalizes the squared probability of a
-selected unmatched vertex. H1 additionally has
+H0 additionally has non-negative `unmatched_weight`. H1 additionally has
 non-negative `false_positive_weight` and `false_negative_weight`. These losses
 operate on the matched graph candidate space implemented by the criterion;
 enable them only as explicit topology experiments.
+
+In training, a term is skipped while its scheduled weight is zero. Validation
+still evaluates enabled terms at their full configured weights, and `log_only`
+terms remain available throughout training.
 
 For the paired 4,000-patch A100 pilot, submit both 100-epoch arms from the same
 pretrained checkpoint with:

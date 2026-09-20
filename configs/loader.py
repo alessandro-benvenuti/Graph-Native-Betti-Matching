@@ -604,7 +604,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
             )
         value_names = ["weight", "diagonal_factor"]
         if name == "betti_h0":
-            value_names.extend(("unmatched_weight", "unmatched_node_weight"))
+            value_names.append("unmatched_weight")
         else:
             value_names.extend(
                 ("false_positive_weight", "false_negative_weight")

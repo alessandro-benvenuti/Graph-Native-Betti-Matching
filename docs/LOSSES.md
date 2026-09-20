@@ -55,12 +55,18 @@ component as the omitted reduced-H0 class, so node-aware H0 is skipped for an
 empty target. Coordinates and the discrete query selection receive no topology
 gradient.
 
-Selected unmatched vertices also receive an explicit filtration mismatch:
-their predicted vertex filtration is `1-q_i`, while target absence is placed
-at filtration `1`, producing the penalty `q_i^2`. With `normalization:
-matched_mean`, genuine correspondences are averaged but false, missed, and
-absent-vertex penalties are summed. Adding another error therefore cannot
-dilute the existing loss through a larger feature-count denominator.
+Selected unmatched vertices are not assigned a separate existence penalty;
+node focal/CE already provides that supervision. They remain in the topology
+filtration, so their probabilities receive gradients when they create a false
+H0 component, a false H1 cycle, or otherwise affect an induced match. With
+`normalization: matched_mean`, genuine correspondences are averaged while
+false and missed topological-feature penalties are summed. Adding another
+topological error therefore cannot dilute existing supervision through a
+larger feature-count denominator.
+
+During training, a Betti term whose scheduled weight is zero is not computed.
+This makes the warmup computation-free and prevents its extra relation-head
+calls from changing the random-number stream before topology supervision starts.
 
 When `detach_unmatched_edge_probabilities` is enabled, edges incident to an
 unmatched topology vertex still participate in the forward filtration, but

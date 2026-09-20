@@ -69,7 +69,6 @@ def _parser():
         choices=("feature_count", "matched_mean"),
         default="matched_mean",
     )
-    parser.add_argument("--unmatched-node-weight", type=float, default=1.0)
     parser.add_argument(
         "--detach-unmatched-edge-probabilities",
         action=argparse.BooleanOptionalAction,
@@ -261,11 +260,6 @@ def _evaluate_mode(
     h0_keywords = dict(
         num_vertices=count,
         unmatched_weight=float(h0_config["unmatched_weight"]),
-        unmatched_node_weight=(
-            float(h0_config["unmatched_node_weight"])
-            if mode == "node_aware"
-            else 0.0
-        ),
         diagonal_factor=float(h0_config["diagonal_factor"]),
         normalize=bool(h0_config["normalize"]),
         normalization=normalization,
@@ -430,8 +424,6 @@ def main():
         raise ValueError("--alpha must lie in [0,1]")
     if not 0.0 <= args.unmatched_object_threshold <= 1.0:
         raise ValueError("--unmatched-object-threshold must lie in [0,1]")
-    if args.unmatched_node_weight < 0.0:
-        raise ValueError("--unmatched-node-weight must be non-negative")
     output = Path(args.output_dir)
     if output.exists() and (
         not output.is_dir() or any(output.iterdir())
@@ -456,9 +448,6 @@ def main():
     )
     for name in ("betti_h0", "betti_h1"):
         config["topology"][name]["normalization"] = args.normalization
-    config["topology"]["betti_h0"][
-        "unmatched_node_weight"
-    ] = args.unmatched_node_weight
     validate_config(config)
     dataset_name = _dataset_name(config, args.dataset)
     seed = int(config["experiment"]["seed"])
@@ -547,7 +536,6 @@ def main():
         "unmatched_object_threshold": args.unmatched_object_threshold,
         "max_active_unmatched": args.max_active_unmatched,
         "normalization": args.normalization,
-        "unmatched_node_weight": args.unmatched_node_weight,
         "detach_unmatched_edge_probabilities": (
             args.detach_unmatched_edge_probabilities
         ),

@@ -30,9 +30,6 @@ class NodeEdgeBettiConfigTests(unittest.TestCase):
             config["topology"]["betti_h0"]["normalization"], "matched_mean"
         )
         self.assertEqual(
-            config["topology"]["betti_h0"]["unmatched_node_weight"], 1.0
-        )
-        self.assertEqual(
             config["topology"]["betti_h1"]["normalization"], "matched_mean"
         )
 

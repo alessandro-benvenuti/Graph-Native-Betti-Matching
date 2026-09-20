@@ -228,43 +228,6 @@ class NodeEdgeFiltrationTests(unittest.TestCase):
         # node focal/cardinality supervision must oppose an unwanted duplicate.
         self.assertLess(float(duplicate.grad), 0.0)
 
-    def test_absent_vertex_term_overrides_duplicate_bridge_reinforcement(self):
-        duplicate = torch.tensor(0.7, dtype=torch.float64, requires_grad=True)
-        nodes = torch.stack(
-            (
-                duplicate.new_tensor(1.0),
-                duplicate.new_tensor(1.0),
-                duplicate,
-                duplicate.new_tensor(1.0),
-            )
-        )
-        raw_edges = torch.tensor(
-            [0.95, 0.85, 0.90, 0.05],
-            dtype=torch.float64,
-            requires_grad=True,
-        )
-        pairs = torch.tensor(
-            [[0, 1], [1, 2], [2, 3], [1, 3]], dtype=torch.long
-        )
-        effective = node_edge_confidences(
-            nodes, raw_edges, pairs, aggregation="hybrid", alpha=0.5
-        )
-        truth = torch.tensor([[0, 1], [1, 3]], dtype=torch.long)
-        presence = torch.tensor([1.0, 1.0, 0.0, 1.0], dtype=torch.float64)
-        loss, _ = h0_betti_matching_loss(
-            effective,
-            pairs,
-            truth,
-            num_vertices=4,
-            node_probabilities=nodes,
-            target_node_presence=presence,
-            unmatched_node_weight=1.0,
-            normalization="matched_mean",
-        )
-        loss.backward()
-
-        self.assertGreater(float(duplicate.grad), 0.0)
-
     def test_matched_mean_accumulates_false_cycle_mass(self):
         one_cycle_edges = torch.tensor(
             [[0, 1], [1, 2], [0, 2]], dtype=torch.long
