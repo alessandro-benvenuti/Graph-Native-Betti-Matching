@@ -742,6 +742,24 @@ compare their final validation records with:
 python scripts/summarize_node_edge_betti_pilot_4000.py
 ```
 
+To compare the saved best-edge-mAP checkpoints on every validation patch whose
+ground-truth graph has non-zero cycle rank, submit:
+
+```bash
+bash cluster/jean_zay/submit_loop_patch_evaluation.sh
+```
+
+The job first scans only GT VTP graphs to create a fixed loop-patch manifest,
+then evaluates both checkpoints on that same subset. Predicted nodes are aligned
+to GT nodes with a distance-gated one-to-one assignment before the hard graph
+cycle spaces are compared over $\mathbb F_2$. The report distinguishes shared,
+false, and missed cycle rank; equal Betti numbers alone are not counted as a
+spatially correct loop. Detailed outputs are written under
+`loop-patch-validation-best/comparison`, including `per-patch.csv`,
+`summary.json`, and sample-ID lists for Betti fixes, regressions, jointly exact
+predictions, and jointly inexact predictions. Override the normalized-coordinate
+matching gate with `GNBM_LOOP_MAX_NODE_DISTANCE` (default `0.1`).
+
 ### Evaluation and model selection
 
 | Key | Supported values and meaning |
