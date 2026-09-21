@@ -2,6 +2,8 @@
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -15,6 +17,22 @@ from scripts.summarize_node_edge_betti_pilot_4000_best import (
 
 
 class NodeEdgeBettiPilotBestSummaryTests(unittest.TestCase):
+    def test_script_can_be_executed_directly(self):
+        root = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(root / "scripts" / "summarize_node_edge_betti_pilot_4000_best.py"),
+                "--help",
+            ],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("--output-root", completed.stdout)
+
     def _write_run(
         self, root: Path, run_name: str, *, best_epoch: int, offset: float
     ) -> None:
