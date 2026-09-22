@@ -48,6 +48,14 @@ def _parser():
     parser.add_argument("--bn-calibration-batches", type=int)
     parser.add_argument("--visualizations", type=int, default=0)
     parser.add_argument("--no-export-predictions", action="store_true")
+    parser.add_argument(
+        "--export-all-edge-scores",
+        action="store_true",
+        help=(
+            "Also export every pairwise edge probability among retained nodes; "
+            "useful for confidence and topology diagnostics but produces larger files"
+        ),
+    )
     return parser
 
 
@@ -152,6 +160,7 @@ def main():
         output_dir=output_dir,
         max_visualizations=args.visualizations,
         export_predictions=not args.no_export_predictions,
+        export_all_edge_scores=args.export_all_edge_scores,
     )
     checkpoint_path = Path(args.checkpoint).resolve()
     metadata = {
@@ -166,6 +175,7 @@ def main():
         "requested_sample_ids": selected_sample_ids,
         "evaluated_samples": summary["samples"],
         "bn_calibration_batches": calibration_batches,
+        "export_all_edge_scores": bool(args.export_all_edge_scores),
     }
     with (output_dir / "metadata.json").open("w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=2, sort_keys=True)

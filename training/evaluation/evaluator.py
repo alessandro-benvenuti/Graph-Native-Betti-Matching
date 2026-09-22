@@ -50,7 +50,7 @@ def _tensor_values(values):
 
 
 def _prediction_record(sample_id, source_sample_id, prediction, metrics):
-    return {
+    record = {
         "sample_id": sample_id,
         "source_sample_id": source_sample_id,
         "nodes_dhw": _tensor_values(prediction["nodes"]),
@@ -61,6 +61,14 @@ def _prediction_record(sample_id, source_sample_id, prediction, metrics):
         "edge_scores": _tensor_values(prediction["edge_scores"]),
         "metrics": metrics,
     }
+    if "all_candidate_edges" in prediction:
+        record["all_candidate_edges"] = _tensor_values(
+            prediction["all_candidate_edges"]
+        )
+        record["all_candidate_edge_scores"] = _tensor_values(
+            prediction["all_candidate_edge_scores"]
+        )
+    return record
 
 
 def _json_safe(value):
@@ -108,6 +116,7 @@ def evaluate_model(
     output_dir: Optional[Path] = None,
     max_visualizations: int = 0,
     export_predictions: bool = True,
+    export_all_edge_scores: bool = False,
 ):
     """Evaluate one model and return ``(summary, per_sample_rows)``."""
 
@@ -139,6 +148,7 @@ def evaluate_model(
             relation_tokens=int(decoder["relation_tokens"]),
             node_threshold=evaluation.get("node_threshold"),
             edge_threshold=evaluation.get("edge_threshold"),
+            export_all_edge_scores=export_all_edge_scores,
         )
         for local_index, graph in enumerate(graphs):
             sample_id = "sample_{:06d}".format(sample_index)

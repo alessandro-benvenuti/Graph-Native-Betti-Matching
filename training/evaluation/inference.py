@@ -15,6 +15,7 @@ def infer_graphs(
     relation_tokens,
     node_threshold=None,
     edge_threshold=None,
+    export_all_edge_scores=False,
 ):
     object_features = tokens[..., :object_queries, :]
     shared_relations = tokens[
@@ -33,7 +34,9 @@ def infer_graphs(
         nodes = boxes[:, :3]
         scores = node_probabilities[batch, query_ids]
         if query_ids.numel() < 2:
-            pairs = torch.empty((0, 2), dtype=torch.long, device=tokens.device)
+            all_pairs = torch.empty((0, 2), dtype=torch.long, device=tokens.device)
+            all_relation_scores = scores.new_empty((0,))
+            pairs = all_pairs
             relation_scores = scores.new_empty((0,))
         else:
             local_pairs = torch.combinations(
@@ -55,22 +58,26 @@ def infer_graphs(
                 relation_embed(forward) + relation_embed(reverse)
             )
             probabilities = relation_logits.softmax(-1)[:, 1]
+            all_pairs = local_pairs
+            all_relation_scores = probabilities
             if edge_threshold is None:
                 keep = relation_logits.argmax(-1) == 1
             else:
                 keep = probabilities > float(edge_threshold)
             pairs = local_pairs[keep]
             relation_scores = probabilities[keep]
-        graphs.append(
-            {
-                "nodes": nodes.detach().cpu(),
-                "boxes": boxes.detach().cpu(),
-                "node_scores": scores.detach().cpu(),
-                "edges": pairs.detach().cpu(),
-                "edge_scores": relation_scores.detach().cpu(),
-                "query_ids": query_ids.detach().cpu(),
-            }
-        )
+        graph = {
+            "nodes": nodes.detach().cpu(),
+            "boxes": boxes.detach().cpu(),
+            "node_scores": scores.detach().cpu(),
+            "edges": pairs.detach().cpu(),
+            "edge_scores": relation_scores.detach().cpu(),
+            "query_ids": query_ids.detach().cpu(),
+        }
+        if export_all_edge_scores:
+            graph["all_candidate_edges"] = all_pairs.detach().cpu()
+            graph["all_candidate_edge_scores"] = all_relation_scores.detach().cpu()
+        graphs.append(graph)
     return graphs
 
 

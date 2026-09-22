@@ -47,6 +47,14 @@ def build_parser():
     parser.add_argument("--output-dir", type=Path, default=Path("visualizations"))
     parser.add_argument("--node-threshold", type=float, default=0.0)
     parser.add_argument("--edge-threshold", type=float, default=0.0)
+    parser.add_argument(
+        "--use-all-edge-scores",
+        action="store_true",
+        help=(
+            "Threshold and display all exported node-pair probabilities, including "
+            "edges rejected by the model's hard decision"
+        ),
+    )
     _visibility_option(parser, "mri", True, "Show three orthogonal MRI slices")
     _visibility_option(parser, "segmentation", True, "Show the segmentation surface")
     _visibility_option(parser, "ground-truth", True, "Show the ground-truth graph")
@@ -224,6 +232,10 @@ def _metadata_html(record, provenance, gt_nodes, gt_edges, prediction, args):
         ("GT nodes / edges", f"{len(gt_nodes)} / {len(gt_edges)}"),
         ("Predicted nodes / edges (after thresholds)", f"{len(prediction.nodes_dhw)} / {len(prediction.edges)}"),
         ("Node / edge thresholds", f"{args.node_threshold:g} / {args.edge_threshold:g}"),
+        (
+            "Edge source",
+            "all pairwise scores" if args.use_all_edge_scores else "hard exported graph",
+        ),
     ]
     rows = "".join(f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(value))}</td></tr>" for key, value in fields)
     metric_rows = "".join(f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(json.dumps(value))}</td></tr>" for key, value in sorted(metrics.items()))
@@ -263,7 +275,12 @@ def main(argv=None):
     gt_nodes_tensor, gt_edges_tensor = read_vtp_graph(paths.graph)
     gt_nodes = np.asarray(gt_nodes_tensor, dtype=np.float32).reshape(-1, 3)
     gt_edges = validate_graph_endpoints(gt_edges_tensor, len(gt_nodes), label="ground truth")
-    prediction = filter_prediction(record, node_threshold=args.node_threshold, edge_threshold=args.edge_threshold)
+    prediction = filter_prediction(
+        record,
+        node_threshold=args.node_threshold,
+        edge_threshold=args.edge_threshold,
+        use_all_edge_scores=args.use_all_edge_scores,
+    )
     gt_xyz = normalized_dhw_to_plot_xyz(gt_nodes, raw.shape)
     predicted_xyz = normalized_dhw_to_plot_xyz(prediction.nodes_dhw, raw.shape)
 

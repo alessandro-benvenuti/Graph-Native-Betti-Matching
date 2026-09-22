@@ -90,6 +90,7 @@ for method in control betti; do
     --batch-size "$batch_size" \
     --workers "$workers" \
     --device cuda \
+    --export-all-edge-scores \
     --visualizations 0
 done
 

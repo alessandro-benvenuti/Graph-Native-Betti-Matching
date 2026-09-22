@@ -750,15 +750,41 @@ bash cluster/jean_zay/submit_loop_patch_evaluation.sh
 ```
 
 The job first scans only GT VTP graphs to create a fixed loop-patch manifest,
-then evaluates both checkpoints on that same subset. Predicted nodes are aligned
+then evaluates both checkpoints on that same subset. It also exports every
+pairwise edge probability among the nodes retained by inference, including
+relations rejected by the hard edge decision. Predicted nodes are aligned
 to GT nodes with a distance-gated one-to-one assignment before the hard graph
 cycle spaces are compared over $\mathbb F_2$. The report distinguishes shared,
 false, and missed cycle rank; equal Betti numbers alone are not counted as a
-spatially correct loop. Detailed outputs are written under
+spatially correct loop. For a deterministic GT cycle basis, the report also
+separates cycles blocked by a missing node from cycles broken by a hard-rejected
+edge and records each representable cycle's weakest edge score. These per-cycle
+categories are diagnostic and basis-dependent; the shared/false/missed ranks
+remain the basis-invariant results. Detailed outputs are written under
 `loop-patch-validation-best/comparison`, including `per-patch.csv`,
 `summary.json`, and sample-ID lists for Betti fixes, regressions, jointly exact
 predictions, and jointly inexact predictions. Override the normalized-coordinate
 matching gate with `GNBM_LOOP_MAX_NODE_DISTANCE` (default `0.1`).
+
+Render a small, deliberately qualitative 3D gallery after inference with:
+
+```bash
+result="$SCRATCH/checkpoints/gnbm-node-edge-betti-pretrained-pilot4000-a100/loop-patch-validation-best"
+python scripts/visualize_loop_patch_examples.py \
+  --comparison "$result/comparison/per-patch.json" \
+  --control-predictions "$result/control/predictions.json" \
+  --betti-predictions "$result/betti/predictions.json" \
+  --dataset-root "$SYNTHETIC_MRI_DATASET" \
+  --split val \
+  --output-dir "$result/visualizations" \
+  --max-examples 8 \
+  --soft-edge-threshold 0.25
+```
+
+For every selected patch and method, the gallery contains the hard exported
+graph and a second view showing all candidate edges above the softer threshold.
+Use `--sample-id` repeatedly to render specific patches instead of the automatic
+fixed/regressed/strong-suppression shortlist.
 
 ### Evaluation and model selection
 

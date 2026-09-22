@@ -22,12 +22,16 @@ TRIANGLE = [[0, 1], [1, 2], [0, 2]]
 PATH = [[0, 1], [1, 2]]
 
 
-def _prediction(edges):
-    return {
+def _prediction(edges, *, all_scores=None):
+    prediction = {
         "source_sample_id": "loop_patch",
         "nodes_dhw": NODES.tolist(),
         "edges": edges,
     }
+    if all_scores is not None:
+        prediction["all_candidate_edges"] = TRIANGLE
+        prediction["all_candidate_edge_scores"] = all_scores
+    return prediction
 
 
 class CompareLoopPatchPredictionsTests(unittest.TestCase):
@@ -60,6 +64,34 @@ class CompareLoopPatchPredictionsTests(unittest.TestCase):
         self.assertEqual(result["false_cycle_rank"], 1)
         self.assertEqual(result["missed_cycle_rank"], 1)
         self.assertFalse(result["spatial_cycle_exact"])
+
+    def test_reports_low_confidence_bottleneck_for_hard_missing_cycle(self):
+        result = spatial_cycle_result(
+            _prediction(PATH, all_scores=[0.9, 0.8, 0.49]),
+            NODES,
+            TRIANGLE,
+            max_node_distance=0.01,
+        )
+        cycle = result["target_cycle_diagnostics"][0]
+        self.assertEqual(cycle["failure_mode"], "edge_below_decision")
+        self.assertAlmostEqual(cycle["weakest_edge_score"], 0.49)
+        self.assertTrue(cycle["closed_above_0.25"])
+        self.assertFalse(cycle["closed_above_0.5"])
+
+    def test_reports_target_cycle_blocked_by_missing_node(self):
+        prediction = {
+            "source_sample_id": "loop_patch",
+            "nodes_dhw": NODES[:2].tolist(),
+            "edges": [[0, 1]],
+            "all_candidate_edges": [[0, 1]],
+            "all_candidate_edge_scores": [0.9],
+        }
+        result = spatial_cycle_result(
+            prediction, NODES, TRIANGLE, max_node_distance=0.01
+        )
+        cycle = result["target_cycle_diagnostics"][0]
+        self.assertEqual(cycle["failure_mode"], "missing_node")
+        self.assertEqual(cycle["missing_gt_nodes"], [2])
 
     def test_comparison_labels_betti_fix_and_writes_lists(self):
         dataset = [

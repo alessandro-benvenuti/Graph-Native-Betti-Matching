@@ -73,6 +73,35 @@ class InteractiveVisualizationTests(unittest.TestCase):
         np.testing.assert_array_equal(result.edges, [[0, 1]])
         np.testing.assert_allclose(result.edge_scores, [0.75])
 
+    def test_all_pair_mode_can_show_an_edge_rejected_from_hard_graph(self):
+        record = {
+            "nodes_dhw": [[0, 0, 0], [0.5, 0.5, 0.5]],
+            "node_scores": [0.9, 0.8],
+            "query_ids": [3, 4],
+            "edges": [],
+            "edge_scores": [],
+            "all_candidate_edges": [[0, 1]],
+            "all_candidate_edge_scores": [0.49],
+        }
+        result = filter_prediction(
+            record,
+            edge_threshold=0.25,
+            use_all_edge_scores=True,
+        )
+        np.testing.assert_array_equal(result.edges, [[0, 1]])
+        np.testing.assert_allclose(result.edge_scores, [0.49])
+
+    def test_all_pair_mode_requires_diagnostic_export(self):
+        record = {
+            "nodes_dhw": [],
+            "node_scores": [],
+            "query_ids": [],
+            "edges": [],
+            "edge_scores": [],
+        }
+        with self.assertRaisesRegex(ValueError, "export-all-edge-scores"):
+            filter_prediction(record, use_all_edge_scores=True)
+
     def test_graph_endpoint_validation_rejects_invalid_indices_and_self_loops(self):
         with self.assertRaisesRegex(ValueError, "outside"):
             validate_graph_endpoints([[0, 2]], 2)

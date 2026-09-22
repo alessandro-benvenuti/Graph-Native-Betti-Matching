@@ -65,6 +65,24 @@ class InferenceTests(unittest.TestCase):
         self.assertEqual(graph["edges"].shape, (0, 2))
         self.assertEqual(graph["edge_scores"].shape, (0,))
 
+    def test_optionally_exports_rejected_pair_probabilities(self):
+        tokens, predictions = self._inputs()
+        graph = infer_graphs(
+            tokens,
+            predictions,
+            AsymmetricRelationHead(),
+            object_queries=3,
+            relation_tokens=0,
+            edge_threshold=0.6,
+            export_all_edge_scores=True,
+        )[0]
+
+        self.assertEqual(graph["edges"].shape, (0, 2))
+        self.assertEqual(graph["all_candidate_edges"].tolist(), [[0, 1]])
+        self.assertAlmostEqual(
+            float(graph["all_candidate_edge_scores"][0]), 0.5, places=6
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

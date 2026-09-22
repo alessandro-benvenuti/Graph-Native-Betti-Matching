@@ -8,6 +8,7 @@ import csv
 import json
 import math
 from pathlib import Path
+import statistics
 import sys
 
 import numpy as np
@@ -27,6 +28,7 @@ from training.losses.betti_h1 import compute_cycle_space_matching
 
 
 METHODS = ("control", "betti")
+CONFIDENCE_THRESHOLDS = (0.1, 0.25, 0.5)
 
 
 def _prediction_index(records, *, label: str):
@@ -39,6 +41,131 @@ def _prediction_index(records, *, label: str):
             raise ValueError(f"Duplicate {label} prediction for {sample_id}")
         result[sample_id] = record
     return result
+
+
+def _canonical_pair(left, right):
+    return tuple(sorted((int(left), int(right))))
+
+
+def _target_cycle_confidence_diagnostics(
+    prediction,
+    classification,
+    gt_edges,
+):
+    """Explain GT basis-cycle failures using all exported pair probabilities.
+
+    The individual cycle representatives come from a deterministic spanning-
+    forest basis. Counts of representatives in each failure category are a
+    diagnostic; the cycle-space ranks remain the basis-invariant headline
+    metrics.
+    """
+
+    gt_edges = tuple(_canonical_pair(*edge) for edge in gt_edges)
+    target_matching = compute_cycle_space_matching(
+        [1.0] * len(gt_edges),
+        gt_edges,
+        gt_edges,
+        num_vertices=(max((max(edge) for edge in gt_edges), default=-1) + 1),
+    )
+    predicted_to_gt = dict(classification.predicted_to_gt)
+    gt_to_predicted = {gt: predicted for predicted, gt in predicted_to_gt.items()}
+    hard_edges = {
+        _canonical_pair(*edge) for edge in prediction.get("edges", [])
+    }
+
+    score_map = None
+    if "all_candidate_edges" in prediction:
+        candidate_edges = prediction.get("all_candidate_edges", [])
+        candidate_scores = prediction.get("all_candidate_edge_scores", [])
+        if len(candidate_edges) != len(candidate_scores):
+            raise ValueError(
+                "all_candidate_edges and all_candidate_edge_scores must agree"
+            )
+        score_map = {
+            _canonical_pair(*edge): float(score)
+            for edge, score in zip(candidate_edges, candidate_scores)
+        }
+
+    diagnostics = []
+    for index, cycle in enumerate(target_matching.target_classes):
+        cycle_edges = tuple(_canonical_pair(*edge) for edge in cycle.cycle_edges)
+        cycle_vertices = sorted({vertex for edge in cycle_edges for vertex in edge})
+        missing_nodes = [
+            vertex for vertex in cycle_vertices if vertex not in gt_to_predicted
+        ]
+        item = {
+            "basis_index": index,
+            "gt_cycle_edges": [list(edge) for edge in cycle_edges],
+            "missing_gt_nodes": missing_nodes,
+            "scores_available": score_map is not None,
+        }
+        if missing_nodes:
+            item.update(
+                {
+                    "failure_mode": "missing_node",
+                    "hard_closed": False,
+                    "missing_hard_gt_edges": [],
+                    "weakest_edge_score": None,
+                    "bottleneck_gt_edge": None,
+                }
+            )
+            diagnostics.append(item)
+            continue
+
+        mapped_edges = {
+            edge: _canonical_pair(
+                gt_to_predicted[edge[0]], gt_to_predicted[edge[1]]
+            )
+            for edge in cycle_edges
+        }
+        missing_hard = [
+            edge for edge, mapped in mapped_edges.items() if mapped not in hard_edges
+        ]
+        hard_closed = not missing_hard
+        item.update(
+            {
+                "failure_mode": "hard_closed" if hard_closed else "edge_below_decision",
+                "hard_closed": hard_closed,
+                "missing_hard_gt_edges": [list(edge) for edge in missing_hard],
+            }
+        )
+        if score_map is None:
+            item.update(
+                {"weakest_edge_score": None, "bottleneck_gt_edge": None}
+            )
+        else:
+            missing_pairs = [
+                mapped for mapped in mapped_edges.values() if mapped not in score_map
+            ]
+            if missing_pairs:
+                raise ValueError(
+                    "All-pair prediction export is incomplete for retained nodes: "
+                    f"{missing_pairs[:3]}"
+                )
+            edge_scores = {
+                edge: score_map[mapped] for edge, mapped in mapped_edges.items()
+            }
+            bottleneck = min(edge_scores, key=edge_scores.get)
+            item.update(
+                {
+                    "weakest_edge_score": edge_scores[bottleneck],
+                    "bottleneck_gt_edge": list(bottleneck),
+                    "gt_cycle_edge_scores": [
+                        {
+                            "gt_edge": list(edge),
+                            "score": edge_scores[edge],
+                            "hard_retained": mapped_edges[edge] in hard_edges,
+                        }
+                        for edge in cycle_edges
+                    ],
+                }
+            )
+            for threshold in CONFIDENCE_THRESHOLDS:
+                item[f"closed_above_{threshold:g}"] = all(
+                    score > threshold for score in edge_scores.values()
+                )
+        diagnostics.append(item)
+    return diagnostics
 
 
 def spatial_cycle_result(
@@ -60,6 +187,9 @@ def spatial_cycle_result(
         gt_nodes,
         gt_edges,
         max_distance=max_node_distance,
+    )
+    target_cycle_diagnostics = _target_cycle_confidence_diagnostics(
+        prediction, classification, gt_edges
     )
 
     mapping = dict(classification.predicted_to_gt)
@@ -115,6 +245,7 @@ def spatial_cycle_result(
         "beta1_count_exact": bool(predicted_beta1 == target_beta1),
         "spatial_cycle_complete": bool(missed == 0),
         "spatial_cycle_exact": bool(false == 0 and missed == 0),
+        "target_cycle_diagnostics": target_cycle_diagnostics,
     }
 
 
@@ -190,7 +321,17 @@ def _method_summary(rows, method: str):
     missed = sum(int(row[f"{method}_missed_cycle_rank"]) for row in rows)
     predicted = shared + false
     target = shared + missed
-    return {
+    cycle_diagnostics = [
+        item
+        for row in rows
+        for item in row[f"{method}_target_cycle_diagnostics"]
+    ]
+    weakest_scores = [
+        float(item["weakest_edge_score"])
+        for item in cycle_diagnostics
+        if item["weakest_edge_score"] is not None
+    ]
+    summary = {
         "patches": len(rows),
         "target_cycle_rank": target,
         "predicted_cycle_rank": predicted,
@@ -216,7 +357,37 @@ def _method_summary(rows, method: str):
             float(row[f"{method}_beta1_absolute_error"]) for row in rows
         )
         / len(rows),
+        "target_basis_cycles": len(cycle_diagnostics),
+        "basis_cycles_missing_node": sum(
+            item["failure_mode"] == "missing_node" for item in cycle_diagnostics
+        ),
+        "basis_cycles_broken_by_hard_edge": sum(
+            item["failure_mode"] == "edge_below_decision"
+            for item in cycle_diagnostics
+        ),
+        "basis_cycles_hard_closed": sum(
+            item["failure_mode"] == "hard_closed" for item in cycle_diagnostics
+        ),
+        "all_edge_scores_available_patches": sum(
+            all(
+                item["scores_available"]
+                for item in row[f"{method}_target_cycle_diagnostics"]
+            )
+            for row in rows
+        ),
+        "representable_cycle_weakest_score_mean": (
+            sum(weakest_scores) / len(weakest_scores) if weakest_scores else None
+        ),
+        "representable_cycle_weakest_score_median": (
+            statistics.median(weakest_scores) if weakest_scores else None
+        ),
     }
+    for threshold in CONFIDENCE_THRESHOLDS:
+        summary[f"basis_cycles_closed_above_{threshold:g}"] = sum(
+            bool(item.get(f"closed_above_{threshold:g}", False))
+            for item in cycle_diagnostics
+        )
+    return summary
 
 
 def summarize(rows, *, max_node_distance: float):
@@ -243,11 +414,13 @@ def _csv_value(value):
 def write_report(output_dir: Path, rows, summary):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    fields = list(rows[0])
+    fields = [
+        field for field in rows[0] if not field.endswith("target_cycle_diagnostics")
+    ]
     with (output_dir / "per-patch.csv").open(
         "w", encoding="utf-8", newline=""
     ) as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
             writer.writerow({key: _csv_value(value) for key, value in row.items()})
@@ -283,17 +456,33 @@ def render_summary(summary):
         "spatial_complete_patches",
         "beta1_count_exact_patches",
         "mean_beta1_absolute_error",
+        "basis_cycles_missing_node",
+        "basis_cycles_broken_by_hard_edge",
+        "basis_cycles_hard_closed",
+        "basis_cycles_closed_above_0.1",
+        "basis_cycles_closed_above_0.25",
+        "basis_cycles_closed_above_0.5",
+        "representable_cycle_weakest_score_mean",
+        "representable_cycle_weakest_score_median",
     )
     lines = [
         "GT-loop validation-patch comparison",
         f"patches={summary['loop_patches']} target_cycle_rank={control['target_cycle_rank']} "
         f"max_node_distance={summary['max_node_distance']:.4f}",
         "",
-        f"{'metric':<31} {'control':>12} {'Betti':>12} {'delta':>12}",
+        f"{'metric':<41} {'control':>12} {'Betti':>12} {'delta':>12}",
     ]
     for name in metrics:
-        left, right = float(control[name]), float(betti[name])
-        lines.append(f"{name:<31} {left:>12.6f} {right:>12.6f} {right-left:>+12.6f}")
+        left_value, right_value = control[name], betti[name]
+        if left_value is None or right_value is None:
+            lines.append(
+                f"{name:<41} {str(left_value):>12} {str(right_value):>12} {'n/a':>12}"
+            )
+            continue
+        left, right = float(left_value), float(right_value)
+        lines.append(
+            f"{name:<41} {left:>12.6f} {right:>12.6f} {right-left:>+12.6f}"
+        )
     lines.extend(("", "Outcome counts:", json.dumps(summary["outcomes"], sort_keys=True)))
     return "\n".join(lines)
 

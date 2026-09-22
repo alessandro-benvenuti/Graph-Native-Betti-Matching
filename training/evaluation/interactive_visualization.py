@@ -123,15 +123,38 @@ def validate_graph_endpoints(edges, node_count: int, *, label: str = "graph") ->
 
 
 def filter_prediction(
-    record: Mapping, *, node_threshold: float = 0.0, edge_threshold: float = 0.0
+    record: Mapping,
+    *,
+    node_threshold: float = 0.0,
+    edge_threshold: float = 0.0,
+    use_all_edge_scores: bool = False,
 ) -> FilteredPrediction:
     nodes = np.asarray(record.get("nodes_dhw", []), dtype=np.float32).reshape(-1, 3)
     node_scores = np.asarray(record.get("node_scores", []), dtype=np.float32).reshape(-1)
     query_ids = np.asarray(
         record.get("query_ids", np.arange(len(nodes))), dtype=np.int64
     ).reshape(-1)
-    edges = validate_graph_endpoints(record.get("edges", []), len(nodes), label="prediction")
-    edge_scores = np.asarray(record.get("edge_scores", []), dtype=np.float32).reshape(-1)
+    if use_all_edge_scores:
+        if "all_candidate_edges" not in record:
+            raise ValueError(
+                "Prediction has no all-pair edge scores; rerun evaluation with "
+                "--export-all-edge-scores"
+            )
+        edges = validate_graph_endpoints(
+            record.get("all_candidate_edges", []),
+            len(nodes),
+            label="all-pair prediction",
+        )
+        edge_scores = np.asarray(
+            record.get("all_candidate_edge_scores", []), dtype=np.float32
+        ).reshape(-1)
+    else:
+        edges = validate_graph_endpoints(
+            record.get("edges", []), len(nodes), label="prediction"
+        )
+        edge_scores = np.asarray(
+            record.get("edge_scores", []), dtype=np.float32
+        ).reshape(-1)
     if len(nodes) != len(node_scores):
         raise ValueError("Prediction must contain one node score per node")
     if len(nodes) != len(query_ids):

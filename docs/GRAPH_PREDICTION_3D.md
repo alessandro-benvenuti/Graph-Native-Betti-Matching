@@ -12,6 +12,12 @@ The script reads existing prediction exports only. A checkpoint or training
 directory is not enough; run `evaluate.py` first if `predictions.json` has not
 been exported.
 
+To inspect relation probabilities rejected by the hard graph, run evaluation
+with `--export-all-edge-scores`. Then add `--use-all-edge-scores` to the
+visualizer and choose an explicit `--edge-threshold`. This all-pair export is
+limited to nodes retained by inference; it cannot reconstruct relations incident
+to a node rejected by the node classifier.
+
 ## Coordinates and identifiers
 
 Both VTP ground-truth points and exported `nodes_dhw` are interpreted in the
@@ -77,6 +83,21 @@ python scripts/visualize_graph_prediction_3d.py \
   --output-dir "$SCRATCH/experiments/gnbm/visualizations" \
   --node-threshold 0.5 \
   --edge-threshold 0.5 \
+  --error-analysis
+```
+
+Show candidate edges with probability at least `0.25`, including those absent
+from the hard graph:
+
+```bash
+python scripts/visualize_graph_prediction_3d.py \
+  --dataset-root "$SYNTHETIC_MRI_DATASET" \
+  --split val \
+  --predictions "$EVALUATION_DIR/predictions.json" \
+  --sample-id sample_000109_0021 \
+  --output-dir "$SCRATCH/experiments/gnbm/visualizations/soft-edges" \
+  --use-all-edge-scores \
+  --edge-threshold 0.25 \
   --error-analysis
 ```
 
