@@ -145,7 +145,7 @@ def _dataset_for_split(
         plants_augmentation = augmentation["plants"]
         flip = plants_augmentation["flip"]
         probability = float(flip["probability_per_axis"])
-        return build_plants_dataset(
+        dataset = build_plants_dataset(
             size=int(image_size[0]),
             padding=padding,
             projection_depth=int(plants_augmentation["projection_depth"]),
@@ -155,11 +155,11 @@ def _dataset_for_split(
             else (0.0, 0.0, 0.0),
             **common,
         )
-    if name == "synthetic_mri":
+    elif name == "synthetic_mri":
         mri_augmentation = augmentation["synthetic_mri"]
         zoom = mri_augmentation["zoom"]
         noise = mri_augmentation["gaussian_noise"]
-        return build_synthetic_mri_dataset(
+        dataset = build_synthetic_mri_dataset(
             image_size=data["image_size"],
             foreground_mean=float(settings["foreground_mean"]),
             coordinate_space=str(settings["coordinate_space_on_disk"]),
@@ -180,7 +180,33 @@ def _dataset_for_split(
             sample_cap_seed=int(settings.get("sample_cap_seed", 0)),
             **common,
         )
-    raise ValueError(f"Unsupported dataset: {name}")
+    else:
+        raise ValueError(f"Unsupported dataset: {name}")
+
+    sample_file = settings.get("train_sample_ids_file") if split == "train" else None
+    if sample_file:
+        path = Path(sample_file)
+        if not path.is_file():
+            raise FileNotFoundError(f"Training sample-ID file does not exist: {path}")
+        requested = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        if not requested:
+            raise ValueError(f"Training sample-ID file is empty: {path}")
+        if len(set(requested)) != len(requested):
+            raise ValueError(f"Training sample-ID file contains duplicates: {path}")
+        records_by_id = {record.sample_id: record for record in dataset.records}
+        missing = [sample_id for sample_id in requested if sample_id not in records_by_id]
+        if missing:
+            raise ValueError(
+                "Training sample IDs are absent from the dataset: {}".format(
+                    ", ".join(missing[:5])
+                )
+            )
+        dataset.records = [records_by_id[sample_id] for sample_id in requested]
+    return dataset
 
 
 def dataset_sample_manifest(dataset: Dataset):

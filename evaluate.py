@@ -26,7 +26,7 @@ def _parser():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--dataset")
-    parser.add_argument("--split", choices=("val", "test"), default="val")
+    parser.add_argument("--split", choices=("train", "val", "test"), default="val")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--max-samples", type=int)
     selection.add_argument(

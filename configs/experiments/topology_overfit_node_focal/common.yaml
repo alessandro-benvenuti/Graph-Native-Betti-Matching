@@ -1,0 +1,42 @@
+defaults:
+  - ../full_dataset_node_focal/finetune.yaml
+
+experiment:
+  name: topology_overfit_node_focal_placeholder
+  seed: 364505
+
+data:
+  batch_size: 5
+  validation_batch_size: 8
+  train_augmentation: false
+  datasets:
+    synthetic_mri:
+      train_samples: null
+      train_sample_ids_file: "${GNBM_OVERFIT_SAMPLE_LIST}"
+      validation_samples: 8
+      sample_cap_selection: seeded_random
+      sample_cap_seed: 364505
+
+training:
+  epochs: 100
+  stop_after_epoch: null
+  early_stopping:
+    enabled: false
+  optimizer:
+    base_lr: 1.0e-5
+  checkpoint:
+    policy: interval
+    interval_epochs: 100
+    latest_interval_epochs: 100
+
+evaluation:
+  interval_epochs: 20
+  training_metrics:
+    enabled: false
+    save_best_checkpoint: false
+    save_f1_checkpoints: false
+
+tracking:
+  enabled: false
+  group: topology-overfit-node-focal
+  tags: [gnbm, topology-overfit, node-focal, mechanistic]

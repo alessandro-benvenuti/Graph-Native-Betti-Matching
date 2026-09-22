@@ -1,0 +1,16 @@
+defaults:
+  - common.yaml
+  - ../../losses/betti_node_edge.yaml
+
+experiment:
+  name: topology_overfit_node_focal_betti_seed364505
+
+topology:
+  betti_h0:
+    weight: 0.01
+    warmup_epochs: 0
+    ramp_epochs: 5
+  betti_h1:
+    weight: 0.01
+    warmup_epochs: 0
+    ramp_epochs: 5

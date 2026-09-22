@@ -1,0 +1,17 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: topology_overfit_node_focal_control_seed364505
+
+topology:
+  complex:
+    mode: matched_only
+  betti_h0:
+    enabled: false
+    log_only: true
+    weight: 0.0
+  betti_h1:
+    enabled: false
+    log_only: true
+    weight: 0.0

@@ -786,6 +786,42 @@ graph and a second view showing all candidate edges above the softer threshold.
 Use `--sample-id` repeatedly to render specific patches instead of the automatic
 fixed/regressed/strong-suppression shortlist.
 
+### Mechanistic topology overfit on training patches
+
+The node-focal topology-overfit experiment is intentionally **not** a
+generalization benchmark. It starts from the mature full-data MRI node-focal
+checkpoint, screens a deterministic training pool, and selects a small mixture
+of genuine-loop edge breaks, false loops, excessive H0 fragmentation,
+false-positive nodes, and correct controls. Paired control and node-aware Betti
+arms then optimize exactly those training patches without augmentation.
+
+Submit the complete screening, paired overfit, re-evaluation, summary, and 3D
+rendering pipeline with:
+
+```bash
+bash cluster/jean_zay/submit_topology_overfit_node_focal.sh
+```
+
+The default output is:
+
+```text
+/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-node-focal-topology-overfit-a100
+```
+
+The main artifacts are:
+
+- `selection/selection.json`: chosen training patches and diagnostic category;
+- `comparison/summary.json`: before/control/Betti train-patch means;
+- `comparison/per-patch.csv`: paired per-patch changes;
+- `visualizations/`: interactive hard-graph and soft-edge 3D reports.
+
+The default screen contains 512 patches, the overfit set contains 25 patches,
+and both arms run for 100 very short epochs at learning rate `1e-5`. Override
+the screening or selected counts with `GNBM_MECH_POOL_TOTAL` and
+`GNBM_MECH_SELECTED_TOTAL`. Set `GNBM_MECH_RENDER=0` to skip HTML rendering.
+These results must be described as an optimization/mechanism test on the
+training examples themselves, never as validation or test performance.
+
 ### Evaluation and model selection
 
 | Key | Supported values and meaning |

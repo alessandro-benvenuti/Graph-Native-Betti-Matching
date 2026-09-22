@@ -316,6 +316,17 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ConfigError(f"{location}.train_samples is required")
         if dataset["train_samples"] is not None:
             _positive_int(dataset["train_samples"], f"{location}.train_samples")
+        train_sample_ids_file = dataset.get("train_sample_ids_file")
+        if train_sample_ids_file is not None:
+            if not isinstance(train_sample_ids_file, str) or not train_sample_ids_file.strip():
+                raise ConfigError(
+                    f"{location}.train_sample_ids_file must be a non-empty path"
+                )
+            if dataset["train_samples"] is not None:
+                raise ConfigError(
+                    f"{location}.train_samples must be null when "
+                    "train_sample_ids_file is configured"
+                )
         if (
             "validation_samples" in dataset
             and dataset["validation_samples"] is not None
