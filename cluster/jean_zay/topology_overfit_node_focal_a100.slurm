@@ -55,38 +55,51 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 
 mkdir -p "$output"
 cd "$repo_dir"
+export GNBM_OUTPUT_DIR="$output/source-config-placeholder"
 
 "$python_bin" -m unittest \
   tests.test_topology_overfit_experiment \
   tests.test_inference \
   tests.test_interactive_visualization
 
-"$python_bin" scripts/build_topology_overfit_pool.py \
-  --dataset-root "$SYNTHETIC_MRI_DATASET" \
-  --output-dir "$pool" \
-  --total "$pool_total" \
-  --loop-fraction 0.5 \
-  --seed 364505
+if [[ -f "$pool/source_sample_ids.txt" && -f "$pool/summary.json" ]]; then
+  echo "Reusing completed screening pool: $pool"
+else
+  "$python_bin" scripts/build_topology_overfit_pool.py \
+    --dataset-root "$SYNTHETIC_MRI_DATASET" \
+    --output-dir "$pool" \
+    --total "$pool_total" \
+    --loop-fraction 0.5 \
+    --seed 364505
+fi
 
-"$python_bin" evaluate.py \
-  --config "$GNBM_MECH_SOURCE_CONFIG" \
-  --checkpoint "$GNBM_MECH_CHECKPOINT" \
-  --output-dir "$screening" \
-  --dataset synthetic_mri \
-  --split train \
-  --sample-list "$pool/source_sample_ids.txt" \
-  --batch-size 32 \
-  --workers 8 \
-  --device cuda \
-  --export-all-edge-scores \
-  --visualizations 0
+if [[ -f "$screening/predictions.json" ]]; then
+  echo "Reusing completed screening inference: $screening"
+else
+  "$python_bin" evaluate.py \
+    --config "$GNBM_MECH_SOURCE_CONFIG" \
+    --checkpoint "$GNBM_MECH_CHECKPOINT" \
+    --output-dir "$screening" \
+    --dataset synthetic_mri \
+    --split train \
+    --sample-list "$pool/source_sample_ids.txt" \
+    --batch-size 32 \
+    --workers 8 \
+    --device cuda \
+    --export-all-edge-scores \
+    --visualizations 0
+fi
 
-"$python_bin" scripts/select_topology_overfit_patches.py \
-  --predictions "$screening/predictions.json" \
-  --dataset-root "$SYNTHETIC_MRI_DATASET" \
-  --output-dir "$selection" \
-  --total "$selected_total" \
-  --max-node-distance "$match_distance"
+if [[ -f "$selection/source_sample_ids.txt" && -f "$selection/selection.json" ]]; then
+  echo "Reusing completed mechanistic selection: $selection"
+else
+  "$python_bin" scripts/select_topology_overfit_patches.py \
+    --predictions "$screening/predictions.json" \
+    --dataset-root "$SYNTHETIC_MRI_DATASET" \
+    --output-dir "$selection" \
+    --total "$selected_total" \
+    --max-node-distance "$match_distance"
+fi
 
 export GNBM_OUTPUT_DIR="$runs"
 export GNBM_OVERFIT_SAMPLE_LIST="$selection/source_sample_ids.txt"
@@ -94,38 +107,56 @@ export GNBM_OVERFIT_SAMPLE_LIST="$selection/source_sample_ids.txt"
 for method in control betti; do
   config="configs/experiments/topology_overfit_node_focal/${method}.yaml"
   run="topology_overfit_node_focal_${method}_seed364505"
+  completion="$runs/$run/training-complete"
+  latest="$runs/$run/models/latest_checkpoint.pt"
+  if [[ -f "$completion" ]]; then
+    echo "Reusing completed mechanistic $method arm: $run"
+    continue
+  fi
   echo "Training mechanistic $method arm on selected train patches..."
-  "$python_bin" -u train.py \
-    --config "$config" \
-    --initial-weights "$GNBM_MECH_CHECKPOINT" \
-    --output-dir "$runs" \
-    --run-name "$run" \
-    --device cuda \
+  train_args=(
+    --config "$config"
+    --output-dir "$runs"
+    --run-name "$run"
+    --device cuda
     --workers 8
+  )
+  if [[ -f "$latest" ]]; then
+    echo "Resuming partial $method arm from $latest"
+    train_args+=(--resume "$latest")
+  else
+    train_args+=(--initial-weights "$GNBM_MECH_CHECKPOINT")
+  fi
+  "$python_bin" -u train.py "${train_args[@]}"
+  touch "$completion"
 done
 
-"$python_bin" evaluate.py \
-  --config "$GNBM_MECH_SOURCE_CONFIG" \
-  --checkpoint "$GNBM_MECH_CHECKPOINT" \
-  --output-dir "$evaluation/before" \
-  --dataset synthetic_mri \
-  --split train \
-  --sample-list "$selection/source_sample_ids.txt" \
-  --batch-size 25 --workers 8 --device cuda \
-  --export-all-edge-scores --visualizations 0
-
-for method in control betti; do
-  run="topology_overfit_node_focal_${method}_seed364505"
-  checkpoint="$runs/$run/models/checkpoint_epoch=100.pt"
+if [[ ! -f "$evaluation/before/predictions.json" ]]; then
   "$python_bin" evaluate.py \
-    --config "$runs/$run/resolved-config.yaml" \
-    --checkpoint "$checkpoint" \
-    --output-dir "$evaluation/$method" \
+    --config "$GNBM_MECH_SOURCE_CONFIG" \
+    --checkpoint "$GNBM_MECH_CHECKPOINT" \
+    --output-dir "$evaluation/before" \
     --dataset synthetic_mri \
     --split train \
     --sample-list "$selection/source_sample_ids.txt" \
     --batch-size 25 --workers 8 --device cuda \
     --export-all-edge-scores --visualizations 0
+fi
+
+for method in control betti; do
+  run="topology_overfit_node_focal_${method}_seed364505"
+  checkpoint="$runs/$run/models/checkpoint_epoch=100.pt"
+  if [[ ! -f "$evaluation/$method/predictions.json" ]]; then
+    "$python_bin" evaluate.py \
+      --config "$runs/$run/resolved-config.yaml" \
+      --checkpoint "$checkpoint" \
+      --output-dir "$evaluation/$method" \
+      --dataset synthetic_mri \
+      --split train \
+      --sample-list "$selection/source_sample_ids.txt" \
+      --batch-size 25 --workers 8 --device cuda \
+      --export-all-edge-scores --visualizations 0
+  fi
 done
 
 "$python_bin" scripts/summarize_topology_overfit.py \

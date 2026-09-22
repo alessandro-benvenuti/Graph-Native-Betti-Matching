@@ -41,6 +41,16 @@ def _row(sample_id, **updates):
 
 
 class TopologyOverfitExperimentTests(unittest.TestCase):
+    def test_launcher_uses_current_recipe_not_historical_resolved_config(self):
+        launcher = (
+            ROOT / "cluster/jean_zay/submit_topology_overfit_node_focal.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "configs/experiments/full_dataset_node_focal/finetune.yaml",
+            launcher,
+        )
+        self.assertNotIn("$source_run/resolved-config.yaml", launcher)
+
     def test_paired_configs_only_change_name_and_topology(self):
         root = ROOT / "configs/experiments/topology_overfit_node_focal"
         control = load_config(root / "control.yaml", environment=ENVIRONMENT)

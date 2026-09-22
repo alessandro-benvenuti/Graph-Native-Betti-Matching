@@ -6,7 +6,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 checkpoint_root="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-boundary-gamma-sweep-500-a100"
 source_run="${GNBM_MECH_SOURCE_RUN:-$checkpoint_root/finetune_boundary_mri500_node_focal_seed364505}"
 checkpoint="${GNBM_MECH_CHECKPOINT:-$source_run/models/best_metric_checkpoint.pt}"
-source_config="${GNBM_MECH_SOURCE_CONFIG:-$source_run/resolved-config.yaml}"
+source_config="${GNBM_MECH_SOURCE_CONFIG:-$repo_dir/configs/experiments/full_dataset_node_focal/finetune.yaml}"
 default_output="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-node-focal-topology-overfit-a100"
 output="${1:-${GNBM_MECH_OUTPUT:-$default_output}}"
 qos="${GNBM_MECH_QOS:-qos_gpu_a100-dev}"
@@ -28,8 +28,8 @@ for path in "$checkpoint" "$source_config"; do
     exit 2
   fi
 done
-if [[ -e "$output" ]]; then
-  echo "Output already exists; refusing to overwrite it: $output" >&2
+if [[ -f "$output/experiment-complete" ]]; then
+  echo "Experiment is already complete: $output" >&2
   exit 2
 fi
 case "$qos" in

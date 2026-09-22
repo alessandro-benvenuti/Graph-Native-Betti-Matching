@@ -821,6 +821,9 @@ the screening or selected counts with `GNBM_MECH_POOL_TOTAL` and
 `GNBM_MECH_SELECTED_TOTAL`. Set `GNBM_MECH_RENDER=0` to skip HTML rendering.
 These results must be described as an optimization/mechanism test on the
 training examples themselves, never as validation or test performance.
+If a batch job fails, rerun the same launcher: completed pool, screening,
+selection, training, and evaluation stages are detected and reused. A completed
+experiment is never overwritten.
 
 ### Evaluation and model selection
 
