@@ -29,6 +29,13 @@ METRICS = (
     "edge_f1",
 )
 
+LOWER_IS_BETTER = {
+    "node_count_absolute_error",
+    "edge_count_absolute_error",
+    "beta0_absolute_error",
+    "beta1_absolute_error",
+}
+
 
 def _index(path):
     records = load_prediction_records(path)
@@ -77,27 +84,59 @@ def build_rows(selection, predictions):
     return rows
 
 
-def summarize(rows):
-    categories = sorted({row["selection_category"] for row in rows})
+def paired_outcomes(rows, *, tolerance=1e-12):
+    """Count paired Betti wins, ties, and losses with metric-aware direction."""
 
-    def group_summary(group):
-        result = {"patches": len(group)}
-        for method in METHODS:
-            for metric in METRICS:
-                values = [float(row[f"{method}_{metric}"]) for row in group]
-                finite = [value for value in values if np.isfinite(value)]
-                result[f"{method}_{metric}"] = (
-                    sum(finite) / len(finite) if finite else None
-                )
+    outcomes = {}
+    for metric in METRICS:
+        deltas = np.asarray(
+            [float(row[f"betti_minus_control_{metric}"]) for row in rows],
+            dtype=np.float64,
+        )
+        deltas = deltas[np.isfinite(deltas)]
+        signed_improvements = -deltas if metric in LOWER_IS_BETTER else deltas
+        better = int(np.sum(signed_improvements > tolerance))
+        worse = int(np.sum(signed_improvements < -tolerance))
+        ties = int(len(signed_improvements) - better - worse)
+        outcomes[metric] = {
+            "evaluated": int(len(deltas)),
+            "betti_better": better,
+            "tie": ties,
+            "betti_worse": worse,
+            "betti_better_fraction_excluding_ties": (
+                better / (better + worse) if better + worse else None
+            ),
+            "mean_betti_minus_control": (
+                float(np.mean(deltas)) if len(deltas) else None
+            ),
+            "median_betti_minus_control": (
+                float(np.median(deltas)) if len(deltas) else None
+            ),
+        }
+    return outcomes
+
+
+def group_summary(group):
+    result = {"patches": len(group)}
+    for method in METHODS:
         for metric in METRICS:
-            values = [
-                float(row[f"betti_minus_control_{metric}"]) for row in group
-            ]
+            values = [float(row[f"{method}_{metric}"]) for row in group]
             finite = [value for value in values if np.isfinite(value)]
-            result[f"betti_minus_control_{metric}"] = (
+            result[f"{method}_{metric}"] = (
                 sum(finite) / len(finite) if finite else None
             )
-        return result
+    for metric in METRICS:
+        values = [float(row[f"betti_minus_control_{metric}"]) for row in group]
+        finite = [value for value in values if np.isfinite(value)]
+        result[f"betti_minus_control_{metric}"] = (
+            sum(finite) / len(finite) if finite else None
+        )
+    result["paired_outcomes"] = paired_outcomes(group)
+    return result
+
+
+def summarize(rows):
+    categories = sorted({row["selection_category"] for row in rows})
 
     return {
         "interpretation": "mechanistic train-set overfit; not a generalization estimate",

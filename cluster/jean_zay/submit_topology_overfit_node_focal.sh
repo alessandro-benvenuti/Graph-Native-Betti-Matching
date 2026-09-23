@@ -28,9 +28,12 @@ for path in "$checkpoint" "$source_config"; do
     exit 2
   fi
 done
-if [[ -f "$output/experiment-complete" ]]; then
+if [[ -f "$output/experiment-complete" && -f "$output/pool-comparison/summary.json" ]]; then
   echo "Experiment is already complete: $output" >&2
   exit 2
+fi
+if [[ -f "$output/experiment-complete" ]]; then
+  echo "Extending the completed run with paired and full-pool analysis: $output"
 fi
 case "$qos" in
   qos_gpu_a100-dev|qos_gpu_a100-t3) ;;

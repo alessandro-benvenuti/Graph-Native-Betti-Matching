@@ -43,6 +43,8 @@ selection="$output/selection"
 runs="$output/runs"
 evaluation="$output/evaluation"
 comparison="$output/comparison"
+pool_evaluation="$output/pool-evaluation"
+pool_comparison="$output/pool-comparison"
 pool_total="${GNBM_MECH_POOL_TOTAL:-512}"
 selected_total="${GNBM_MECH_SELECTED_TOTAL:-25}"
 match_distance="${GNBM_MECH_MATCH_DISTANCE:-0.1}"
@@ -165,6 +167,33 @@ done
   --control "$evaluation/control/predictions.json" \
   --betti "$evaluation/betti/predictions.json" \
   --output-dir "$comparison"
+
+# Measure whether the 25-patch optimization transfers to the other patches in
+# the deterministic screening pool. The original screening export is the
+# shared "before" prediction, so only the two trained arms need new inference.
+for method in control betti; do
+  run="topology_overfit_node_focal_${method}_seed364505"
+  checkpoint="$runs/$run/models/checkpoint_epoch=100.pt"
+  if [[ ! -f "$pool_evaluation/$method/predictions.json" ]]; then
+    "$python_bin" evaluate.py \
+      --config "$runs/$run/resolved-config.yaml" \
+      --checkpoint "$checkpoint" \
+      --output-dir "$pool_evaluation/$method" \
+      --dataset synthetic_mri \
+      --split train \
+      --sample-list "$pool/source_sample_ids.txt" \
+      --batch-size 32 --workers 8 --device cuda \
+      --export-all-edge-scores --visualizations 0
+  fi
+done
+
+"$python_bin" scripts/summarize_topology_overfit_pool.py \
+  --pool "$pool/pool.json" \
+  --selection "$selection/selection.json" \
+  --before "$screening/predictions.json" \
+  --control "$pool_evaluation/control/predictions.json" \
+  --betti "$pool_evaluation/betti/predictions.json" \
+  --output-dir "$pool_comparison"
 
 if [[ "${GNBM_MECH_RENDER:-1}" == "1" ]]; then
   "$python_bin" scripts/visualize_topology_overfit.py \

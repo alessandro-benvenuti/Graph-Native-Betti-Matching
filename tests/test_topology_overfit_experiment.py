@@ -6,6 +6,8 @@ import unittest
 
 from configs import ConfigError, load_config, validate_config
 from scripts.select_topology_overfit_patches import select_rows
+from scripts.summarize_topology_overfit import paired_outcomes
+from scripts.summarize_topology_overfit_pool import summarize_pool_rows
 from scripts.visualize_topology_overfit import choose_examples
 
 
@@ -41,6 +43,67 @@ def _row(sample_id, **updates):
 
 
 class TopologyOverfitExperimentTests(unittest.TestCase):
+    def test_paired_outcomes_respect_metric_direction_and_ties(self):
+        rows = []
+        for beta_delta, edge_f1_delta in [(-1.0, 0.1), (0.0, 0.0), (2.0, -0.2)]:
+            row = {}
+            for metric in (
+                "node_count_absolute_error",
+                "edge_count_absolute_error",
+                "beta0_absolute_error",
+                "beta1_absolute_error",
+                "node_f1",
+                "edge_f1",
+            ):
+                row[f"betti_minus_control_{metric}"] = 0.0
+            row["betti_minus_control_beta1_absolute_error"] = beta_delta
+            row["betti_minus_control_edge_f1"] = edge_f1_delta
+            rows.append(row)
+        outcomes = paired_outcomes(rows)
+        self.assertEqual(
+            (
+                outcomes["beta1_absolute_error"]["betti_better"],
+                outcomes["beta1_absolute_error"]["tie"],
+                outcomes["beta1_absolute_error"]["betti_worse"],
+            ),
+            (1, 1, 1),
+        )
+        self.assertEqual(outcomes["edge_f1"]["betti_better"], 1)
+
+    def test_pool_summary_separates_optimized_and_unselected_patches(self):
+        rows = []
+        for selected, beta1 in [(True, 1), (False, 1), (False, 0)]:
+            row = {
+                "selected_for_optimization": selected,
+                "target_beta1": beta1,
+            }
+            for method in ("before", "control", "betti"):
+                for metric in (
+                    "node_count_absolute_error",
+                    "edge_count_absolute_error",
+                    "beta0_absolute_error",
+                    "beta1_absolute_error",
+                    "node_f1",
+                    "edge_f1",
+                ):
+                    row[f"{method}_{metric}"] = 0.0
+            for metric in (
+                "node_count_absolute_error",
+                "edge_count_absolute_error",
+                "beta0_absolute_error",
+                "beta1_absolute_error",
+                "node_f1",
+                "edge_f1",
+            ):
+                row[f"betti_minus_control_{metric}"] = 0.0
+            rows.append(row)
+        cohorts = summarize_pool_rows(rows)["cohorts"]
+        self.assertEqual(cohorts["all_pool"]["patches"], 3)
+        self.assertEqual(cohorts["selected_for_optimization"]["patches"], 1)
+        self.assertEqual(cohorts["unselected_pool"]["patches"], 2)
+        self.assertEqual(cohorts["unselected_target_loop"]["patches"], 1)
+        self.assertEqual(cohorts["unselected_target_nonloop"]["patches"], 1)
+
     def test_launcher_uses_current_recipe_not_historical_resolved_config(self):
         launcher = (
             ROOT / "cluster/jean_zay/submit_topology_overfit_node_focal.sh"
