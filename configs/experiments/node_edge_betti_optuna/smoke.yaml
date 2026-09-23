@@ -1,0 +1,33 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: node_edge_betti_optuna_smoke_seed364505
+
+data:
+  datasets:
+    synthetic_mri:
+      train_samples: 256
+      validation_samples: 128
+
+training:
+  epochs: 5
+  checkpoint:
+    interval_epochs: 5
+
+evaluation:
+  interval_epochs: 1
+
+tracking:
+  mode: offline
+  group: node-edge-betti-optuna-smoke
+  tags: [gnbm, node-edge-betti, optuna, smoke, no-scientific-meaning]
+
+optuna:
+  study_name: node-edge-betti-optuna-smoke
+  n_trials: 2
+  search_space:
+    betti_warmup_epochs: [1, 2]
+    betti_ramp_epochs: [1, 2]
+  pruner:
+    name: none

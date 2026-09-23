@@ -1,0 +1,15 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: node_edge_betti_optuna_control_seed364505
+
+topology:
+  betti_h0:
+    enabled: false
+    log_only: true
+    weight: 0.0
+  betti_h1:
+    enabled: false
+    log_only: true
+    weight: 0.0

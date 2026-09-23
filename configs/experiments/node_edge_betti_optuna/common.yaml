@@ -1,0 +1,85 @@
+defaults:
+  - ../boundary_gamma_sweep_500/finetune_node_focal.yaml
+  - ../../losses/betti_node_edge.yaml
+
+experiment:
+  name: node_edge_betti_optuna_placeholder
+  seed: 364505
+
+data:
+  batch_size: 32
+  validation_batch_size: 32
+  datasets:
+    synthetic_mri:
+      train_samples: 4000
+      validation_samples: 500
+      sample_cap_selection: seeded_random
+      sample_cap_seed: 364505
+
+training:
+  epochs: 100
+  stop_after_epoch: null
+  early_stopping:
+    enabled: false
+  checkpoint:
+    policy: best_only
+    interval_epochs: 100
+    latest_interval_epochs: 1
+
+evaluation:
+  interval_epochs: 5
+  training_metrics:
+    enabled: true
+    dataset: synthetic_mri
+    max_samples: null
+    selection_metric: edge_mAP
+    selection_mode: max
+    save_best_checkpoint: true
+    save_f1_checkpoints: true
+
+topology:
+  complex:
+    mode: node_aware
+    aggregation: hybrid
+    alpha: 0.5
+    detach_unmatched_edge_probabilities: true
+  betti_h0:
+    enabled: true
+    log_only: false
+    normalization: matched_mean
+  betti_h1:
+    enabled: true
+    log_only: false
+    normalization: matched_mean
+    false_negative_weight: 1.0
+
+tracking:
+  group: node-edge-betti-optuna
+  tags: [gnbm, node-edge-betti, optuna, paired-validation-only]
+
+optuna:
+  study_name: node-edge-betti-optuna
+  direction: minimize
+  seed: 364505
+  n_trials: 20
+  objective:
+    penalty_scale: 10.0
+    epsilon: 1.0e-8
+    tolerances:
+      node_f1: 0.003
+      edge_f1: 0.003
+      node_mAP: 0.005
+      edge_mAP: 0.005
+  search_space:
+    topology.betti_h0.weight: [0.0, 0.001, 0.003, 0.01]
+    topology.betti_h1.weight: [0.001, 0.003, 0.01, 0.03]
+    topology.betti_h1.false_positive_weight: [0.1, 0.25, 0.5, 1.0]
+    betti_warmup_epochs: [10, 20, 30]
+    betti_ramp_epochs: [10, 20, 30]
+  sampler:
+    name: tpe
+  pruner:
+    name: median
+    n_startup_trials: 5
+    n_warmup_steps: 3
+    interval_steps: 1
