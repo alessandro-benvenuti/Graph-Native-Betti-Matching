@@ -61,6 +61,7 @@ export GNBM_OUTPUT_DIR="$output/source-config-placeholder"
 
 "$python_bin" -m unittest \
   tests.test_topology_overfit_experiment \
+  tests.test_data_loaders.CompositionTests.test_evaluation_loader_uses_requested_split_cap_and_no_augmentation \
   tests.test_inference \
   tests.test_interactive_visualization
 

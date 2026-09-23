@@ -541,6 +541,22 @@ class CompositionTests(unittest.TestCase):
             self.assertEqual(len(training.dataset), 2)
             self.assertFalse(training.dataset.augment)
 
+            training_manifest = root / "overfit-samples.txt"
+            training_manifest.write_text("sample_000000\n", encoding="utf-8")
+            config["data"]["datasets"]["synthetic_mri"][
+                "train_sample_ids_file"
+            ] = str(training_manifest)
+            selected_training = build_evaluation_loader(
+                config,
+                dataset_name="synthetic_mri",
+                split="train",
+                sample_ids=["sample_000002", "sample_000000"],
+            )
+            self.assertEqual(
+                [record.sample_id for record in selected_training.dataset.records],
+                ["sample_000002", "sample_000000"],
+            )
+
             selected = build_evaluation_loader(
                 config,
                 dataset_name="synthetic_mri",

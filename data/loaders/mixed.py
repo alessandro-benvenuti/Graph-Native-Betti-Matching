@@ -353,6 +353,9 @@ def build_evaluation_loader(
     # training, which must not make a metric smoke-test subset nondeterministic.
     if split == "train":
         settings["train_samples"] = None
+        # An explicit evaluation selection must be resolved against the complete
+        # split, not against a sample manifest that constrained model training.
+        settings["train_sample_ids_file"] = None
     else:
         settings["validation_samples"] = None
     dataset = _dataset_for_split(
