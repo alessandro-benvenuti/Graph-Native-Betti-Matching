@@ -15,7 +15,9 @@ from training.losses import GraphCriterion
 
 class NodeEdgeBettiDiagnosticTests(unittest.TestCase):
     def test_original_target_cycle_reports_missing_matched_node(self):
-        edges = torch.tensor([[0, 1], [1, 2], [0, 2]], dtype=torch.long)
+        edges = torch.tensor(
+            [[0, 1], [1, 2], [0, 2], [1, 0]], dtype=torch.long
+        )
         represented = _original_target_cycle_diagnostics(
             edges,
             target_node_count=3,

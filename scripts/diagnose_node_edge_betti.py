@@ -214,8 +214,15 @@ def _original_target_cycle_diagnostics(
     """Describe which deterministic GT basis cycles lose a matched vertex."""
 
     edge_tuples = tuple(
-        tuple(sorted((int(left), int(right))))
-        for left, right in torch.as_tensor(target_edges).reshape(-1, 2).tolist()
+        sorted(
+            {
+                tuple(sorted((int(left), int(right))))
+                for left, right in torch.as_tensor(target_edges)
+                .reshape(-1, 2)
+                .tolist()
+                if int(left) != int(right)
+            }
+        )
     )
     matching = compute_cycle_space_matching(
         [1.0] * len(edge_tuples),
