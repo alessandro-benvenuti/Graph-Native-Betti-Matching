@@ -5,7 +5,7 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 default_experiment="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-node-focal-topology-overfit-a100"
 experiment="${1:-${GNBM_MECH_OUTPUT:-$default_experiment}}"
-output="$experiment/h1-gradient-diagnostic"
+output="${GNBM_H1_DIAGNOSTIC_OUTPUT:-$experiment/h1-false-birth-diagnostic}"
 qos="${GNBM_H1_DIAGNOSTIC_QOS:-qos_gpu_a100-dev}"
 walltime="${GNBM_H1_DIAGNOSTIC_WALLTIME:-02:00:00}"
 
@@ -34,6 +34,7 @@ esac
 
 export GNBM_REPO_DIR="$repo_dir"
 export GNBM_MECH_OUTPUT="$experiment"
+export GNBM_H1_DIAGNOSTIC_OUTPUT="$output"
 
 log_dir="$WORK/logs/graph-native-betti-matching/a100"
 mkdir -p "$log_dir"

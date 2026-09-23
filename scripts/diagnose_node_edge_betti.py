@@ -319,6 +319,98 @@ def _h1_match_details(
     return details
 
 
+def _h1_false_class_details(
+    matching,
+    *,
+    selected_queries,
+    edge_records,
+    true_edges,
+):
+    """Describe which edge receives each unmatched-cycle penalty."""
+
+    records_by_edge = {
+        tuple(record["local_edge"]): record for record in edge_records
+    }
+    truth = {tuple(sorted(map(int, edge))) for edge in true_edges}
+    details = []
+    for class_index in matching.unmatched_prediction_indices:
+        item = matching.prediction_classes[class_index]
+        birth_edge = tuple(item.birth_edge)
+        birth_record = records_by_edge[birth_edge]
+        cycle_edges = tuple(tuple(edge) for edge in item.cycle_edges)
+        non_gt_records = [
+            records_by_edge[edge] for edge in cycle_edges if edge not in truth
+        ]
+        weakest_non_gt = (
+            max(
+                non_gt_records,
+                key=lambda record: (
+                    record["filtration"],
+                    tuple(record["local_edge"]),
+                ),
+            )
+            if non_gt_records
+            else None
+        )
+        strongest_non_gt = (
+            max(
+                non_gt_records,
+                key=lambda record: (
+                    record["effective_confidence"],
+                    tuple(record["local_edge"]),
+                ),
+            )
+            if non_gt_records
+            else None
+        )
+        details.append(
+            {
+                "prediction_class_index": int(class_index),
+                "birth_local_edge": list(birth_edge),
+                "birth_query_edge": [
+                    int(selected_queries[vertex]) for vertex in birth_edge
+                ],
+                "birth_raw_relation_probability": birth_record[
+                    "raw_relation_probability"
+                ],
+                "birth_effective_confidence": birth_record[
+                    "effective_confidence"
+                ],
+                "birth_dloss_dp": birth_record["h1_dloss_dp"],
+                "birth_gradient_descent": birth_record["h1_gradient_descent"],
+                "birth_is_local_true_edge": birth_edge in truth,
+                "cycle_local_edges": [list(edge) for edge in cycle_edges],
+                "cycle_true_edge_count": sum(edge in truth for edge in cycle_edges),
+                "cycle_non_gt_edge_count": len(non_gt_records),
+                "weakest_non_gt_local_edge": (
+                    weakest_non_gt["local_edge"] if weakest_non_gt else None
+                ),
+                "weakest_non_gt_effective_confidence": (
+                    weakest_non_gt["effective_confidence"]
+                    if weakest_non_gt
+                    else None
+                ),
+                "strongest_non_gt_local_edge": (
+                    strongest_non_gt["local_edge"] if strongest_non_gt else None
+                ),
+                "strongest_non_gt_effective_confidence": (
+                    strongest_non_gt["effective_confidence"]
+                    if strongest_non_gt
+                    else None
+                ),
+                "birth_is_weakest_non_gt_edge": bool(
+                    weakest_non_gt
+                    and birth_edge == tuple(weakest_non_gt["local_edge"])
+                ),
+                "birth_is_strongest_non_gt_edge": bool(
+                    strongest_non_gt
+                    and birth_edge == tuple(strongest_non_gt["local_edge"])
+                ),
+            }
+        )
+    return details
+
+
 def _evaluate_mode(
     criterion,
     tokens,
@@ -483,6 +575,12 @@ def _evaluate_mode(
         edge_records=edges,
         true_edges=truth.detach().cpu().tolist(),
     )
+    h1_false_classes = _h1_false_class_details(
+        h1_matching,
+        selected_queries=selected_cpu,
+        edge_records=edges,
+        true_edges=truth.detach().cpu().tolist(),
+    )
 
     return {
         "mode": mode,
@@ -510,6 +608,7 @@ def _evaluate_mode(
         ),
         "original_target_cycle_diagnostics": target_cycle_diagnostics,
         "h1_matches": h1_matches,
+        "h1_false_classes": h1_false_classes,
     }
 
 
@@ -565,6 +664,16 @@ def _summary(records, modes):
                 match["selected_birth_is_shared_generator_bottleneck"]
                 for entry in valid
                 for match in entry["h1_matches"]
+            ),
+            "false_birth_is_true_edge": sum(
+                item["birth_is_local_true_edge"]
+                for entry in valid
+                for item in entry["h1_false_classes"]
+            ),
+            "false_birth_is_non_gt_edge": sum(
+                not item["birth_is_local_true_edge"]
+                for entry in valid
+                for item in entry["h1_false_classes"]
             ),
         }
     return result

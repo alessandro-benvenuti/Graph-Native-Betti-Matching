@@ -18,6 +18,9 @@ def aggregate(records, sample_ids):
     entries = [records[sample_id]["modes"]["node_aware"] for sample_id in sample_ids]
     valid = [entry for entry in entries if "skipped" not in entry]
     matches = [match for entry in valid for match in entry["h1_matches"]]
+    false_classes = [
+        item for entry in valid for item in entry["h1_false_classes"]
+    ]
     probabilities = [
         float(match["selected_birth_effective_confidence"]) for match in matches
     ]
@@ -78,6 +81,32 @@ def aggregate(records, sample_ids):
         ),
         "mean_absolute_selected_birth_gradient": (
             statistics.fmean(gradients) if gradients else None
+        ),
+        "false_birth_edges": len(false_classes),
+        "false_birth_is_true_edge": sum(
+            item["birth_is_local_true_edge"] for item in false_classes
+        ),
+        "false_birth_is_non_gt_edge": sum(
+            not item["birth_is_local_true_edge"] for item in false_classes
+        ),
+        "false_cycle_has_no_non_gt_edge": sum(
+            item["cycle_non_gt_edge_count"] == 0 for item in false_classes
+        ),
+        "false_birth_is_weakest_non_gt_edge": sum(
+            item["birth_is_weakest_non_gt_edge"] for item in false_classes
+        ),
+        "false_birth_is_strongest_non_gt_edge": sum(
+            item["birth_is_strongest_non_gt_edge"] for item in false_classes
+        ),
+        "suppressive_raw_gradient_mass_on_true_edges": sum(
+            max(0.0, float(item["birth_dloss_dp"]))
+            for item in false_classes
+            if item["birth_is_local_true_edge"]
+        ),
+        "suppressive_raw_gradient_mass_on_non_gt_edges": sum(
+            max(0.0, float(item["birth_dloss_dp"]))
+            for item in false_classes
+            if not item["birth_is_local_true_edge"]
         ),
     }
 
@@ -144,6 +173,11 @@ def main():
             "selected_birth_is_local_true_edge",
             "selected_birth_is_in_shared_generator",
             "selected_birth_is_shared_generator_bottleneck",
+            "class_kind",
+            "birth_is_local_true_edge",
+            "cycle_non_gt_edge_count",
+            "birth_is_weakest_non_gt_edge",
+            "birth_is_strongest_non_gt_edge",
         )
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
@@ -163,7 +197,55 @@ def main():
                                 if field == "cohort"
                                 else sample_id
                                 if field == "source_sample_id"
+                                else "matched"
+                                if field == "class_kind"
+                                else match["selected_birth_is_local_true_edge"]
+                                if field == "birth_is_local_true_edge"
+                                else ""
+                                if field
+                                in {
+                                    "cycle_non_gt_edge_count",
+                                    "birth_is_weakest_non_gt_edge",
+                                    "birth_is_strongest_non_gt_edge",
+                                }
                                 else match[field]
+                            )
+                            for field in fields
+                        }
+                    )
+                for item in entry.get("h1_false_classes", []):
+                    writer.writerow(
+                        {
+                            field: (
+                                method
+                                if field == "method"
+                                else cohort_by_id[sample_id]
+                                if field == "cohort"
+                                else sample_id
+                                if field == "source_sample_id"
+                                else "false"
+                                if field == "class_kind"
+                                else item["prediction_class_index"]
+                                if field == "match_index"
+                                else item["birth_query_edge"]
+                                if field == "selected_birth_query_edge"
+                                else item["birth_raw_relation_probability"]
+                                if field == "selected_birth_raw_relation_probability"
+                                else item["birth_effective_confidence"]
+                                if field == "selected_birth_effective_confidence"
+                                else item["birth_dloss_dp"]
+                                if field == "selected_birth_dloss_dp"
+                                else item["birth_gradient_descent"]
+                                if field == "selected_birth_gradient_descent"
+                                else item[field]
+                                if field
+                                in {
+                                    "birth_is_local_true_edge",
+                                    "cycle_non_gt_edge_count",
+                                    "birth_is_weakest_non_gt_edge",
+                                    "birth_is_strongest_non_gt_edge",
+                                }
+                                else ""
                             )
                             for field in fields
                         }

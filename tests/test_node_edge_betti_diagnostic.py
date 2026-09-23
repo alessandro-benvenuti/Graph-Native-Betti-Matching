@@ -85,6 +85,16 @@ class NodeEdgeBettiDiagnosticTests(unittest.TestCase):
         self.assertEqual(len(augmented["nodes"]), 4)
         self.assertTrue(torch.isfinite(torch.tensor(augmented["h0_loss"])))
         self.assertTrue(torch.isfinite(torch.tensor(augmented["h1_loss"])))
+        self.assertEqual(
+            len(augmented["h1_false_classes"]),
+            augmented["h1"]["false_prediction_rank"],
+        )
+        self.assertTrue(
+            all(
+                item["cycle_non_gt_edge_count"] > 0
+                for item in augmented["h1_false_classes"]
+            )
+        )
         unmatched = [node for node in augmented["nodes"] if not node["matched"]]
         self.assertEqual(len(unmatched), 1)
         self.assertTrue(unmatched[0]["topology_can_update_node"])

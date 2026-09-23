@@ -34,7 +34,7 @@ experiment="$GNBM_MECH_OUTPUT"
 pool="$experiment/pool/pool.json"
 selection="$experiment/selection/selection.json"
 runs="$experiment/runs"
-output="$experiment/h1-gradient-diagnostic"
+output="${GNBM_H1_DIAGNOSTIC_OUTPUT:-$experiment/h1-false-birth-diagnostic}"
 sample_selection="$output/selection"
 unselected_limit="${GNBM_H1_DIAGNOSTIC_UNSELECTED:-32}"
 
