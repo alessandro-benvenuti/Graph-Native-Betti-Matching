@@ -27,7 +27,10 @@ from models.checkpoint import load_legacy_model_checkpoint
 from models.matcher import build_matcher
 from training.losses.betti_filtration import node_edge_confidences
 from training.losses.betti_h0 import h0_betti_matching_loss
-from training.losses.betti_h1 import cycle_space_matching_loss
+from training.losses.betti_h1 import (
+    compute_cycle_space_matching,
+    cycle_space_matching_loss,
+)
 from training.losses.criterion import GraphCriterion
 
 
@@ -73,6 +76,13 @@ def _parser():
         "--detach-unmatched-edge-probabilities",
         action=argparse.BooleanOptionalAction,
         default=True,
+    )
+    parser.add_argument(
+        "--mode",
+        action="append",
+        choices=("matched_only", "node_aware"),
+        dest="modes",
+        help="Topology complex to diagnose; repeat for both (default: both).",
     )
     return parser
 
@@ -181,6 +191,8 @@ def _matching_summary(h0_matching, h1_matching, selected_queries):
             ],
         },
         "h1": {
+            "prediction_rank": len(h1_matching.prediction_classes),
+            "target_rank": len(h1_matching.target_classes),
             "matched_rank": h1_matching.shared_rank,
             "false_prediction_rank": h1_matching.false_prediction_rank,
             "missed_target_rank": h1_matching.missed_target_rank,
@@ -191,6 +203,113 @@ def _matching_summary(h0_matching, h1_matching, selected_queries):
             ],
         },
     }
+
+
+def _original_target_cycle_diagnostics(
+    target_edges,
+    *,
+    target_node_count,
+    matched_target_nodes,
+):
+    """Describe which deterministic GT basis cycles lose a matched vertex."""
+
+    edge_tuples = tuple(
+        tuple(sorted((int(left), int(right))))
+        for left, right in torch.as_tensor(target_edges).reshape(-1, 2).tolist()
+    )
+    matching = compute_cycle_space_matching(
+        [1.0] * len(edge_tuples),
+        edge_tuples,
+        edge_tuples,
+        num_vertices=int(target_node_count),
+    )
+    matched = {int(index) for index in matched_target_nodes}
+    cycles = []
+    for index, item in enumerate(matching.target_classes):
+        vertices = sorted({vertex for edge in item.cycle_edges for vertex in edge})
+        missing = [vertex for vertex in vertices if vertex not in matched]
+        cycles.append(
+            {
+                "basis_index": index,
+                "target_edges": [list(edge) for edge in item.cycle_edges],
+                "target_vertices": vertices,
+                "missing_matched_target_nodes": missing,
+                "represented_in_local_target": not missing,
+            }
+        )
+    return cycles
+
+
+def _h1_match_details(
+    matching,
+    *,
+    selected_queries,
+    matched_targets,
+    edge_records,
+    true_edges,
+):
+    """Attach the selected differentiable birth edge to every H1 match."""
+
+    records_by_edge = {
+        tuple(record["local_edge"]): record for record in edge_records
+    }
+    truth = {tuple(sorted(map(int, edge))) for edge in true_edges}
+    details = []
+    for index, match in enumerate(matching.matches):
+        prediction = matching.prediction_classes[match.prediction_index]
+        target = matching.target_classes[match.target_index]
+        birth_edge = tuple(prediction.birth_edge)
+        birth_record = records_by_edge[birth_edge]
+        shared_edges = tuple(tuple(edge) for edge in match.shared_cycle_edges)
+        shared_records = [records_by_edge[edge] for edge in shared_edges]
+        bottleneck = max(
+            shared_records,
+            key=lambda record: (
+                record["filtration"],
+                tuple(record["local_edge"]),
+            ),
+        )
+        target_cycle_gt_edges = []
+        for left, right in target.cycle_edges:
+            if left >= len(matched_targets) or right >= len(matched_targets):
+                raise RuntimeError("A target H1 class used an unmatched local vertex")
+            target_cycle_gt_edges.append(
+                sorted((int(matched_targets[left]), int(matched_targets[right])))
+            )
+        details.append(
+            {
+                "match_index": index,
+                "prediction_class_index": int(match.prediction_index),
+                "target_class_index": int(match.target_index),
+                "selected_birth_local_edge": list(birth_edge),
+                "selected_birth_query_edge": [
+                    int(selected_queries[vertex]) for vertex in birth_edge
+                ],
+                "selected_birth_raw_relation_probability": birth_record[
+                    "raw_relation_probability"
+                ],
+                "selected_birth_effective_confidence": birth_record[
+                    "effective_confidence"
+                ],
+                "selected_birth_filtration": birth_record["filtration"],
+                "selected_birth_dloss_dp": birth_record["h1_dloss_dp"],
+                "selected_birth_gradient_descent": birth_record[
+                    "h1_gradient_descent"
+                ],
+                "selected_birth_is_local_true_edge": birth_edge in truth,
+                "selected_birth_is_in_shared_generator": birth_edge in shared_edges,
+                "shared_generator_local_edges": [list(edge) for edge in shared_edges],
+                "shared_generator_bottleneck_local_edge": bottleneck["local_edge"],
+                "shared_generator_bottleneck_effective_confidence": bottleneck[
+                    "effective_confidence"
+                ],
+                "selected_birth_is_shared_generator_bottleneck": (
+                    birth_edge == tuple(bottleneck["local_edge"])
+                ),
+                "target_cycle_gt_edges": target_cycle_gt_edges,
+            }
+        )
+    return details
 
 
 def _evaluate_mode(
@@ -205,6 +324,7 @@ def _evaluate_mode(
     mode,
     aggregation,
     alpha,
+    target_node_count=None,
 ):
     started = time.perf_counter()
     criterion.topology["complex"]["mode"] = mode
@@ -342,6 +462,21 @@ def _evaluate_mode(
             }
         )
 
+    if target_node_count is None:
+        target_node_count = max(target_cpu, default=-1) + 1
+    target_cycle_diagnostics = _original_target_cycle_diagnostics(
+        target_edges,
+        target_node_count=target_node_count,
+        matched_target_nodes=target_cpu,
+    )
+    h1_matches = _h1_match_details(
+        h1_matching,
+        selected_queries=selected_cpu,
+        matched_targets=target_cpu,
+        edge_records=edges,
+        true_edges=truth.detach().cpu().tolist(),
+    )
+
     return {
         "mode": mode,
         "aggregation": aggregation if mode == "node_aware" else None,
@@ -349,6 +484,11 @@ def _evaluate_mode(
         "normalization": normalization,
         "selected_query_ids": selected_cpu,
         "matched_vertex_count": len(source_cpu),
+        "target_vertex_count": int(target_node_count),
+        "missing_target_node_count": int(target_node_count) - len(target_cpu),
+        "missing_target_node_indices": sorted(
+            set(range(int(target_node_count))) - set(target_cpu)
+        ),
         "active_unmatched_count": len(selected_cpu) - len(source_cpu),
         "elapsed_seconds": time.perf_counter() - started,
         "h0_loss": float(h0_loss.detach()),
@@ -356,12 +496,19 @@ def _evaluate_mode(
         "nodes": nodes,
         "edges": edges,
         **_matching_summary(h0_matching, h1_matching, selected_cpu),
+        "original_target_cycle_rank": len(target_cycle_diagnostics),
+        "original_target_cycles_blocked_by_missing_node": sum(
+            not item["represented_in_local_target"]
+            for item in target_cycle_diagnostics
+        ),
+        "original_target_cycle_diagnostics": target_cycle_diagnostics,
+        "h1_matches": h1_matches,
     }
 
 
-def _summary(records):
+def _summary(records, modes):
     result = {"samples": len(records), "modes": {}}
-    for mode in ("matched_only", "node_aware"):
+    for mode in modes:
         entries = [record["modes"][mode] for record in records]
         valid = [entry for entry in entries if "skipped" not in entry]
         divisor = max(1, len(valid))
@@ -377,6 +524,40 @@ def _summary(records):
             ),
             "total_active_unmatched": sum(
                 entry["active_unmatched_count"] for entry in valid
+            ),
+            "total_original_target_cycle_rank": sum(
+                entry["original_target_cycle_rank"] for entry in valid
+            ),
+            "total_original_cycles_blocked_by_missing_node": sum(
+                entry["original_target_cycles_blocked_by_missing_node"]
+                for entry in valid
+            ),
+            "total_local_target_cycle_rank": sum(
+                entry["h1"]["target_rank"]
+                for entry in valid
+            ),
+            "total_matched_h1_rank": sum(
+                entry["h1"]["matched_rank"] for entry in valid
+            ),
+            "matched_birth_gradient_increase": sum(
+                match["selected_birth_gradient_descent"] == "increase"
+                for entry in valid
+                for match in entry["h1_matches"]
+            ),
+            "matched_birth_gradient_none": sum(
+                match["selected_birth_gradient_descent"] == "none"
+                for entry in valid
+                for match in entry["h1_matches"]
+            ),
+            "matched_birth_gradient_decrease": sum(
+                match["selected_birth_gradient_descent"] == "decrease"
+                for entry in valid
+                for match in entry["h1_matches"]
+            ),
+            "selected_birth_is_shared_bottleneck": sum(
+                match["selected_birth_is_shared_generator_bottleneck"]
+                for entry in valid
+                for match in entry["h1_matches"]
             ),
         }
     return result
@@ -424,6 +605,9 @@ def main():
         raise ValueError("--alpha must lie in [0,1]")
     if not 0.0 <= args.unmatched_object_threshold <= 1.0:
         raise ValueError("--unmatched-object-threshold must lie in [0,1]")
+    requested_modes = tuple(
+        dict.fromkeys(args.modes or ("matched_only", "node_aware"))
+    )
     output = Path(args.output_dir)
     if output.exists() and (
         not output.is_dir() or any(output.iterdir())
@@ -490,9 +674,9 @@ def main():
 
         for local_index, (source, target) in enumerate(assignments):
             source_sample_id = str(dataset_records[sample_index].sample_id)
-            modes = {}
-            for mode in ("matched_only", "node_aware"):
-                modes[mode] = _evaluate_mode(
+            mode_results = {}
+            for mode in requested_modes:
+                mode_results[mode] = _evaluate_mode(
                     criterion,
                     tokens[local_index],
                     predictions["pred_logits"][local_index],
@@ -503,19 +687,20 @@ def main():
                     mode=mode,
                     aggregation=args.aggregation,
                     alpha=args.alpha,
+                    target_node_count=int(targets["nodes"][local_index].shape[0]),
                 )
             records.append(
                 {
                     "source_sample_id": source_sample_id,
                     "target_node_count": int(targets["nodes"][local_index].shape[0]),
                     "target_edge_count": int(targets["edges"][local_index].shape[0]),
-                    "modes": modes,
+                    "modes": mode_results,
                 }
             )
             sample_index += 1
 
     output.mkdir(parents=True, exist_ok=True)
-    summary = _summary(records)
+    summary = _summary(records, requested_modes)
     (output / "per-sample.json").write_text(
         json.dumps(records, indent=2) + "\n", encoding="utf-8"
     )
@@ -539,6 +724,7 @@ def main():
         "detach_unmatched_edge_probabilities": (
             args.detach_unmatched_edge_probabilities
         ),
+        "modes": list(requested_modes),
     }
     (output / "metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"

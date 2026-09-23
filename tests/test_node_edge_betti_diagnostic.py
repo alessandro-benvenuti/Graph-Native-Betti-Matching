@@ -5,12 +5,32 @@ import unittest
 import torch
 
 from models.matcher import HungarianMatcher
-from scripts.diagnose_node_edge_betti import _evaluate_mode
+from scripts.diagnose_node_edge_betti import (
+    _evaluate_mode,
+    _original_target_cycle_diagnostics,
+)
 from tests.test_graph_losses import CountingRelationHead, _batch, _config
 from training.losses import GraphCriterion
 
 
 class NodeEdgeBettiDiagnosticTests(unittest.TestCase):
+    def test_original_target_cycle_reports_missing_matched_node(self):
+        edges = torch.tensor([[0, 1], [1, 2], [0, 2]], dtype=torch.long)
+        represented = _original_target_cycle_diagnostics(
+            edges,
+            target_node_count=3,
+            matched_target_nodes=[0, 1, 2],
+        )
+        blocked = _original_target_cycle_diagnostics(
+            edges,
+            target_node_count=3,
+            matched_target_nodes=[0, 1],
+        )
+        self.assertEqual(len(represented), 1)
+        self.assertTrue(represented[0]["represented_in_local_target"])
+        self.assertEqual(blocked[0]["missing_matched_target_nodes"], [2])
+        self.assertFalse(blocked[0]["represented_in_local_target"])
+
     def test_both_complexes_produce_serializable_gradient_records(self):
         config = _config()
         config["topology"]["complex"].update(

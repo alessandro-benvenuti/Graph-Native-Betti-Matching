@@ -6,6 +6,9 @@ import unittest
 
 from configs import ConfigError, load_config, validate_config
 from scripts.select_topology_overfit_patches import select_rows
+from scripts.select_h1_gradient_diagnostic_patches import (
+    select_rows as select_h1_diagnostic_rows,
+)
 from scripts.summarize_topology_overfit import paired_outcomes
 from scripts.summarize_topology_overfit_pool import summarize_pool_rows
 from scripts.visualize_topology_overfit import choose_examples
@@ -43,6 +46,29 @@ def _row(sample_id, **updates):
 
 
 class TopologyOverfitExperimentTests(unittest.TestCase):
+    def test_h1_diagnostic_selection_excludes_optimized_from_transfer_cohort(self):
+        pool = [
+            {"source_sample_id": "selected", "target_beta1": 1},
+            {"source_sample_id": "loop_a", "target_beta1": 1},
+            {"source_sample_id": "loop_b", "target_beta1": 2},
+            {"source_sample_id": "tree", "target_beta1": 0},
+        ]
+        selection = [
+            {
+                "source_sample_id": "selected",
+                "selection_category": "genuine_loop_edge_break",
+                "target_beta1": 1,
+            }
+        ]
+        rows = select_h1_diagnostic_rows(
+            pool, selection, unselected_limit=1, seed=364505
+        )
+        self.assertEqual(rows[0]["source_sample_id"], "selected")
+        self.assertEqual(rows[0]["cohort"], "selected_genuine_loop_edge_break")
+        self.assertEqual(len(rows), 2)
+        self.assertNotEqual(rows[1]["source_sample_id"], "selected")
+        self.assertEqual(rows[1]["cohort"], "unselected_target_loop")
+
     def test_paired_outcomes_respect_metric_direction_and_ties(self):
         rows = []
         for beta_delta, edge_f1_delta in [(-1.0, 0.1), (0.0, 0.0), (2.0, -0.2)]:
