@@ -44,7 +44,8 @@ EXPECTED_TRANSACTIONS = {
     "pretrain_boundary_mixed_node_edge_focal_g05_seed364505": 1,
     "pretrain_boundary_mixed_node_edge_focal_g10_seed364505": 1,
     "pretrain_boundary_mixed_node_edge_focal_g20_seed364505": 1,
-    "finetune_boundary_mri500_baseline_seed364505": 10,
+    # Ten original segments plus the final epoch-493..500 recovery segment.
+    "finetune_boundary_mri500_baseline_seed364505": 11,
     "finetune_boundary_mri500_node_focal_seed364505": 9,
     "finetune_boundary_mri500_node_edge_focal_g05_seed364505": 10,
     "finetune_boundary_mri500_node_edge_focal_g10_seed364505": 10,
@@ -342,6 +343,11 @@ def main() -> int:
             reporter.error("completion marker exists but training-status.json is missing")
         if not completion:
             reporter.warning("training-complete marker is missing")
+            if latest and latest[0] < configured_epochs:
+                reporter.error(
+                    f"training is incomplete: latest checkpoint epoch {latest[0]} "
+                    f"< configured maximum {configured_epochs}"
+                )
         if status:
             reporter.ok(
                 f"training status reason={status.get('reason')} epoch={final_epoch} "
@@ -378,7 +384,10 @@ def main() -> int:
         metric_epochs = read_jsonl_epochs(run_dir / "validation-metrics.jsonl", reporter)
         expected_performance = set(range(1, final_epoch + 1))
         expected_metrics = set(range(5, final_epoch + 1, 5))
-        if final_epoch and final_epoch not in expected_metrics:
+        # A clean terminal epoch is evaluated even when it is not aligned with
+        # the interval.  An interrupted latest checkpoint is not: for example,
+        # epoch 492 in a 500-epoch run should only expect metrics through 490.
+        if status and final_epoch and final_epoch not in expected_metrics:
             expected_metrics.add(final_epoch)
         report_epoch_series("local performance history", performance, expected_performance, reporter)
         report_epoch_series("local validation metrics", metric_epochs, expected_metrics, reporter)
