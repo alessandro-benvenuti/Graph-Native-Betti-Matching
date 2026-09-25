@@ -17,6 +17,7 @@ import math
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Mapping
 
 import yaml
@@ -349,6 +350,31 @@ def verify_cloud_run(run, manifest: Mapping) -> None:
         require_exact(f"cloud {key} for {manifest['run_name']}", cloud_key_set(run, key), expected)
 
 
+def wait_for_cloud_run(path: str, manifest: Mapping, *, attempts: int = 18, delay: int = 10):
+    """Wait for W&B's eventually consistent history index, then verify it."""
+    import wandb
+
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            run = wandb.Api(timeout=120).run(path)
+            verify_cloud_run(run, manifest)
+            if run.state != "finished":
+                raise RuntimeError(f"state={run.state}, expected finished")
+            return run
+        except Exception as error:
+            last_error = error
+            if attempt < attempts:
+                print(
+                    f"  cloud indexing not complete ({attempt}/{attempts}): {error}; "
+                    f"retrying in {delay}s"
+                )
+                time.sleep(delay)
+    raise RuntimeError(
+        f"cloud verification did not converge for {path}: {last_error}"
+    )
+
+
 def upload_run(run_dir: Path, manifest: Mapping, entity: str, project: str, group: str):
     import wandb
 
@@ -362,6 +388,20 @@ def upload_run(run_dir: Path, manifest: Mapping, entity: str, project: str, grou
         existing = api.run(path)
     except Exception:
         pass
+    # A just-finished W&B run can be visible before its history index is fully
+    # populated.  Verify/wait before interpreting a short prefix as missing;
+    # otherwise a retry could append duplicate epochs to a complete run.
+    if existing is not None and existing.state == "finished":
+        try:
+            verified = wait_for_cloud_run(path, manifest, attempts=6, delay=10)
+        except Exception as error:
+            raise RuntimeError(
+                f"existing canonical run is finished but could not be proven complete; "
+                f"refusing to append: {path}: {error}"
+            ) from error
+        print(f"  already complete: {verified.url}")
+        return verified.url
+
     uploaded = cloud_key_set(existing, "epoch") if existing is not None else set()
     if uploaded:
         maximum = max(uploaded)
@@ -419,10 +459,7 @@ def upload_run(run_dir: Path, manifest: Mapping, entity: str, project: str, grou
     url = run.url
     run.finish(exit_code=0)
 
-    verified = wandb.Api(timeout=120).run(path)
-    verify_cloud_run(verified, manifest)
-    if verified.state != "finished":
-        raise RuntimeError(f"canonical run did not finish: {path}: state={verified.state}")
+    verified = wait_for_cloud_run(path, manifest)
     print(f"  verified gap-free epochs 1..{manifest['final_epoch']}: {url}")
     return url
 
