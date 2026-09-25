@@ -58,18 +58,21 @@ tracking:
   tags: [gnbm, node-edge-betti, optuna, paired-validation-only]
 
 optuna:
-  study_name: node-edge-betti-optuna
-  direction: minimize
+  study_name: node-edge-betti-pareto-placeholder
   seed: 364505
-  n_trials: 20
-  objective:
-    penalty_scale: 10.0
-    epsilon: 1.0e-8
-    tolerances:
-      node_f1: 0.003
-      edge_f1: 0.003
-      node_mAP: 0.005
-      edge_mAP: 0.005
+  n_trials: 48
+  objectives:
+    - metric: node_mAP
+      direction: maximize
+    - metric: edge_mAP
+      direction: maximize
+    - metric: beta0_absolute_error
+      direction: minimize
+    - metric: beta1_absolute_error
+      direction: minimize
+  metric_aggregation:
+    name: tail_mean
+    observations: 3
   search_space:
     topology.betti_h0.weight: [0.0, 0.001, 0.003, 0.01]
     topology.betti_h1.weight: [0.001, 0.003, 0.01, 0.03]
@@ -77,9 +80,5 @@ optuna:
     betti_warmup_epochs: [10, 20, 30]
     betti_ramp_epochs: [10, 20, 30]
   sampler:
-    name: tpe
-  pruner:
-    name: median
-    n_startup_trials: 5
-    n_warmup_steps: 3
-    interval_steps: 1
+    name: nsga2
+    population_size: 12

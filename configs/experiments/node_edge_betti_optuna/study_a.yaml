@@ -1,0 +1,13 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: node_edge_betti_pareto_study_a_seed364505
+
+tracking:
+  group: node-edge-betti-pareto-study-a
+  tags: [gnbm, node-edge-betti, pareto, study-a, screening, validation-only]
+
+optuna:
+  study_name: node-edge-betti-pareto-study-a
+  n_trials: 48

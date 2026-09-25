@@ -24,10 +24,15 @@ tracking:
   tags: [gnbm, node-edge-betti, optuna, smoke, no-scientific-meaning]
 
 optuna:
-  study_name: node-edge-betti-optuna-smoke
-  n_trials: 2
+  study_name: node-edge-betti-pareto-smoke
+  n_trials: 4
+  metric_aggregation:
+    observations: 2
   search_space:
+    topology.betti_h0.weight: [0.0, 0.003]
+    topology.betti_h1.weight: [0.003, 0.01]
+    topology.betti_h1.false_positive_weight: [0.25, 0.5]
     betti_warmup_epochs: [1, 2]
     betti_ramp_epochs: [1, 2]
-  pruner:
-    name: none
+  sampler:
+    population_size: 4

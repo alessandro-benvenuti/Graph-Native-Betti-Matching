@@ -1,95 +1,113 @@
-# Node/edge Betti Optuna campaign
+# Node/edge Betti Pareto studies
 
-This directory defines a validation-only, paired hyperparameter study around the
-existing `train.py`. The controller writes a concrete YAML per trial and monitors
-the trainer's `validation-metrics.jsonl`; it does not duplicate the training loop
-or change the mathematical Betti implementation.
+This framework performs validation-only, four-objective selection around the
+existing `train.py`. It does not alter the Betti mathematics or duplicate the
+training loop. No test sample is loaded during search, Pareto construction,
+candidate selection, continuation, or paired validation.
 
-## Scientific contract
+## Why Pareto optimization
 
-Run one fixed control first. The control and every trial use the same model-only
-checkpoint, seed, deterministic train subset, validation set, model, optimizer,
-scheduler, and ordinary node/edge focal loss. The frozen control reference stores
-a compatibility fingerprint and the dataset-manifest hash. Optimization refuses
-an incompatible reference, and a completed trial is rejected if its manifest is
-not byte-identical to the control manifest.
+The earlier scalar score used arbitrary graph-metric degradation thresholds and
+penalties. Those have been removed: a sufficiently large topology improvement may
+justify some predictive degradation, and that scientific trade-off should remain
+visible. Every trial now has exactly four primary objectives, in fixed order:
 
-The test split is never loaded by this infrastructure. In particular, the ten
-manually inspected test patches must not be used here. Final test results must not
-be used to revise hyperparameters.
+1. maximize node mAP;
+2. maximize edge mAP;
+3. minimize beta0 absolute error;
+4. minimize beta1 absolute error.
 
-Beta errors alone are unsafe: deleting predicted edges can improve topology while
-damaging the graph. Each post-warm-up validation epoch therefore minimizes the
-normalized mean of beta0/beta1 absolute error plus a strong penalty for exceeding
-the configured node-F1, edge-F1, node-mAP, or edge-mAP degradation tolerance.
-The report independently enforces those four hard constraints. Among feasible
-trials it minimizes the unpenalized normalized topology score, then breaks ties by
-edge F1 and node F1. If none is feasible, it says so and reports the least total
-constraint violation rather than presenting an infeasible winner.
+F1, precision, recall, SMD, graph sizes, and predicted Betti numbers remain in the
+reports as diagnostics. Making all of them objectives would produce a weakly
+selective high-dimensional front. There is no unique mathematically best Pareto
+configuration. Reports contain the complete front, four single-objective anchors,
+and an explicitly conventional equal-weight ideal-distance representative. A
+supervisor may choose a different Pareto point.
 
-The control reference is the **last control validation epoch**. A denominator
-epsilon (`1e-8` by default) protects zero control beta errors. The selected trial
-epoch is the best composite validation value after its Betti warm-up; epochs where
-both Betti losses are inactive are not reported to Optuna. The report also records
-the best edge-mAP epoch and last epoch. This first implementation does not save a
-special best-composite checkpoint: selected hyperparameters are retrained later
-from the common initialization.
+Control and trials use the same fixed `tail_mean` aggregation. Study A averages
+the final three validation observations; the smoke averages the final two. No
+metric and no trial gets a separately selected best epoch. The control is a
+reference point for deltas and paired-integrity checks, not a pass/fail constraint.
+Negative control deltas favor trials for beta errors; positive deltas favor trials
+for mAP/F1.
 
-Alpha stays at 0.5 because hybrid filtration already reduces to ordinary edge
-confidence between matched nodes; tuning it would mostly add unmatched-node
-degrees of freedom. H1 false-negative weight remains 1.0. Warm-up, gradual ramping,
-small weights, and ordinary focal supervision remain fixed parts of the protocol.
-The known critical-edge attribution limitation remains unresolved.
+NSGA-II is deterministic with seed 364505 and population 12. Native scalar
+`trial.report` pruning was removed because a hidden scalar proxy would bias the
+Pareto trade-off. Only invalid configurations, non-finite/missing outputs, failed
+processes, and interruption end a trial early.
 
-## Local infrastructure use
+FGW is excluded. It changes assignment and would confound attribution between
+matching, edge loss, and topology supervision; previous three-seed evidence did
+not show a consistent advantage. `topology.complex.alpha` in Study B is the hybrid
+node-edge **filtration coefficient**, not FGW `structure_weight`. The matcher is
+asserted to remain Hungarian.
 
-Install the additional dependency in the active project environment:
+## Campaign stages
+
+- **Smoke:** four tiny trials on 256/128 patches for five epochs. Infrastructure
+  only; no scientific interpretation.
+- **Study A:** 48 Betti-only trials, 4,000/500 deterministic patches, 100 epochs,
+  validation every five epochs, `tail_mean_3`, edge cross-entropy, node focal
+  gamma 2, Hungarian matching.
+- **Study B:** a controlled refinement over edge CE/focal choice, focal gamma,
+  filtration alpha, and Betti values extracted from selected Study A Pareto
+  candidates. It is not “optimize everything,” and it must not include FGW.
+- **Multi-fidelity continuation:** at most eight diverse Pareto candidates,
+  suggested 20,000 training patches, full validation if affordable, 200 epochs,
+  fixed `tail_mean_3`; no test data.
+- **Paired confirmation:** predictive, balanced, and topology representatives,
+  paired with matching no-Betti controls for seeds 364505–364507. A focal
+  candidate must be compared with a no-Betti control using that same focal loss.
+- **Final full-data experiment:** one validation-selected protocol, complete
+  corrected train/validation splits, paired no-Betti/Betti arms, preferably three
+  seeds, 500 epochs, and the same fixed epoch-500 checkpoint rule. Only after the
+  protocol is frozen is the untouched test split evaluated once.
+
+## Storage and resumption
+
+SQLite is for one local/controller process and is protected by
+`.controller.lock`. Never run concurrent SQLite workers. JournalStorage uses
+Optuna's compatible file backend for at most four bounded Jean Zay workers. Trial
+allocation is serialized briefly so the global requested count is not exceeded;
+each globally allocated trial number owns `runs/trial_NNNN/` and is never
+overwritten. Journal file storage is appropriate for this bounded shared-filesystem
+mode, not unlimited concurrency.
+
+SIGTERM/SIGINT terminates the child and marks the trial failed, never complete.
+Hard-killed workers can leave RUNNING records. Only when **all workers are stopped**,
+run the explicit `recover` command; it marks stale records failed and retains all
+artifacts. Resubmitting workers continues the named study. Completed trials are
+immutable. Extending Study A to 60 or 72 means changing `n_trials` in the same
+config and reusing the same output/study name; inspect front expansion first and
+never extend automatically.
+
+## Dependency and local commands
 
 ```bash
 python -m pip install -r requirements/optuna.txt
+python -m unittest tests.test_node_edge_betti_optuna
+python -m unittest tests.test_betti_node_edge_config \
+  tests.test_betti_node_edge_filtration tests.test_graph_losses \
+  tests.test_experiment_configs
 ```
 
-The controller has two explicit modes. Both commands for one campaign must use the
-same config and initial checkpoint:
+The summary writes `summary.json`, `trials.csv`, `pareto-front.csv`,
+`pareto-front.json`, the frozen `control-reference.json`, and representative JSON
+and Markdown. CSV columns support mAP-versus-beta plots, predictive-versus-topology
+comparisons, and parallel coordinates.
+
+Generate a Study B proposal after reviewing Study A:
 
 ```bash
-python scripts/optimize_node_edge_betti.py control \
-  --config configs/experiments/node_edge_betti_optuna/search.yaml \
-  --output "$GNBM_OUTPUT_DIR" \
-  --initial-weights "$GNBM_INITIAL_WEIGHTS"
-
-python scripts/optimize_node_edge_betti.py optimize \
-  --config configs/experiments/node_edge_betti_optuna/search.yaml \
-  --output "$GNBM_OUTPUT_DIR" \
-  --initial-weights "$GNBM_INITIAL_WEIGHTS"
-
-python scripts/summarize_node_edge_betti_optuna.py \
-  --output "$GNBM_OUTPUT_DIR" \
-  --study-name node-edge-betti-optuna
+python scripts/propose_node_edge_betti_study_b.py \
+  --study-a-summary "$STUDY_A_OUTPUT/summary.json"
 ```
 
-Outputs include `control-reference.json`, `study.sqlite3`, exact trial configs,
-unique `runs/trial_NNNN/` directories, partial or complete Optuna histories,
-`summary.json`, `trials.csv`, and (only when one exists) `best-feasible.yaml`.
+By default it uses the unique representative trials. Pass `--trials ...` to use
+other inspected Pareto candidates. Inspect `study_b_proposed.yaml`; it is never
+launched automatically.
 
-SQLite is supported only with one controller. The exclusive `.controller.lock`
-prevents concurrent controllers for the same output directory. Do not start
-multiple SQLite-backed controllers; parallel trials require a concurrency-safe
-storage service and are outside this implementation. A normal SIGTERM/SIGINT
-terminates the child and releases the lock. After an uncatchable kill, first verify
-that no controller is running before manually removing a stale lock. On restart,
-the study loads by name with `load_if_exists=True`, retains complete/pruned trials
-and their artifacts, and conservatively marks stale RUNNING records failed.
-
-## Tiny Jean Zay smoke test
-
-The smoke test uses 256 deterministic training patches, 128 validation patches,
-five epochs, validation every epoch, two trials, one A100, offline W&B, and no
-pruning. Its metrics have **no scientific meaning**. It only checks imports,
-SQLite persistence, control loading, generated YAML, real `train.py`, incremental
-monitoring, completion, summary generation, and safe resumption.
-
-On a Jean Zay login node:
+## Jean Zay smoke and monitoring
 
 ```bash
 cd "$WORK/projects/Graph-Native-Betti-Matching"
@@ -99,41 +117,69 @@ source cluster/jean_zay/env_a100.sh
 python -m pip install -r requirements/optuna.txt
 
 export SYNTHETIC_MRI_DATASET="/lustre/fsn1/projects/rech/vnc/upz73jr/datasets/syntheticMRI/new_patches_boundary"
-export GNBM_OUTPUT_DIR="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-node-edge-betti-optuna-smoke-a100"
 export GNBM_INITIAL_WEIGHTS="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-boundary-gamma-sweep-500-a100/pretrain_boundary_mixed_node_focal_seed364505/models/best_metric_checkpoint.pt"
-bash cluster/jean_zay/submit_node_edge_betti_optuna.sh smoke
+export GNBM_OUTPUT_DIR="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-node-edge-betti-pareto-smoke-a100"
+
+bash cluster/jean_zay/submit_node_edge_betti_optuna.sh control smoke
+# After the control succeeds:
+bash cluster/jean_zay/submit_node_edge_betti_optuna.sh worker smoke
+bash cluster/jean_zay/submit_node_edge_betti_optuna.sh summarize smoke
 ```
 
-Monitor and inspect (replace `JOBID`):
+Resume the single worker with `resume smoke`; four existing
+trials are not repeated. Optional two-worker storage smoke uses a fresh output:
+
+```bash
+export GNBM_OUTPUT_DIR="${GNBM_OUTPUT_DIR%-a100}-journal-a100"
+bash cluster/jean_zay/submit_node_edge_betti_optuna.sh control smoke
+bash cluster/jean_zay/submit_node_edge_betti_optuna.sh array smoke 2
+bash cluster/jean_zay/submit_node_edge_betti_optuna.sh summarize smoke 2
+```
+
+Resume that JournalStorage study with `resume smoke 2`. Run `recover smoke 2`
+only after confirming no array worker remains active.
+
+Monitor jobs (replace `JOBID`):
 
 ```bash
 squeue -j JOBID
 sacct -j JOBID --format=JobID,State,Elapsed,ExitCode,MaxRSS
-tail -f "$WORK/logs/graph-native-betti-matching/a100/gnbm-betti-optuna-JOBID.out"
-tail -f "$WORK/logs/graph-native-betti-matching/a100/gnbm-betti-optuna-JOBID.err"
+tail -f "$WORK/logs/graph-native-betti-matching/a100/gnbm-betti-optuna-JOBID_0.out"
+tail -f "$WORK/logs/graph-native-betti-matching/a100/gnbm-betti-optuna-JOBID_0.err"
 find "$GNBM_OUTPUT_DIR" -maxdepth 3 -type f | sort
-python scripts/summarize_node_edge_betti_optuna.py \
-  --output "$GNBM_OUTPUT_DIR" --study-name node-edge-betti-optuna-smoke
 ```
 
-To resume after timeout, export the same three paths and submit the same command:
+## Study A launch gate
+
+Do not run these until local tests, single-worker smoke, resume, and Pareto-summary
+inspection pass. The optional two-worker storage smoke should precede parallel use.
 
 ```bash
-bash cluster/jean_zay/submit_node_edge_betti_optuna.sh smoke
+export GNBM_OUTPUT_DIR="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-node-edge-betti-pareto-study-a-a100"
+bash cluster/jean_zay/submit_node_edge_betti_optuna.sh control study-a
+# Only after the control succeeds and after explicit user confirmation:
+bash cluster/jean_zay/submit_node_edge_betti_optuna.sh array study-a 4
 ```
 
-The frozen control is reused and completed/pruned trials count toward the requested
-two; they are not repeated. A failed/interrupted trial gets a new trial number and
-its old directory is preserved.
+The preflight prints checkpoint, dataset, caps, epochs, objectives, sampler, trial
+and worker counts, estimated GPU jobs, test exclusion, Hungarian matcher, and edge
+CE. Forty-eight 100-epoch trials plus one control equal 4,900 training epochs over
+4,000 patches. Four workers reduce wall-clock latency but not total GPU-hours; jobs
+may require repeated 20-hour resumptions, and actual cost must be estimated from
+the smoke/pilot throughput rather than claimed in advance.
 
-## Future real search (do not launch yet)
+## Preparing the final pair
 
-Phase A runs the paired fixed control. Phase B starts with about 20 trials on a
-representative deterministic training subset and preferably the complete validation
-split, with enough epochs to finish warm-up/ramp and pruning only after several
-observations. Phase C retrains the best feasible configuration plus one or two
-nearby alternatives from the common initialization with a larger budget and at
-least two seeds if possible. Only after validation freezes the protocol does Phase
-D train on full data and evaluate the untouched test split once, reporting both
-ordinary detection and topology metrics. Optuna is a selection mechanism, not
-evidence by itself that the loss generalizes.
+After paired validation—not merely a Pareto front—materialize three-seed full-data
+configs without launching them:
+
+```bash
+python scripts/prepare_node_edge_betti_final_pair.py \
+  --selected-config /path/to/frozen-selected-resolved-config.yaml \
+  --output configs/experiments/node_edge_betti_final_pair
+```
+
+Inspect `experiment-plan.json`. Both arms use complete train/validation data and
+the real `models/checkpoint_epoch=500.pt`. Use segmented `submit_train_a100.sh`
+jobs with `GNBM_AUTO_RESUME=1` and offline W&B. Test evaluation remains prohibited
+until the full-data protocol and checkpoint rule are frozen.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Single-controller A100 entry point for the paired Optuna smoke/search campaign.
+# A100 entry point for one control or one bounded Pareto worker.
 #SBATCH --job-name=gnbm-betti-optuna
 #SBATCH --account=vnc@a100
 #SBATCH --partition=gpu_p5
@@ -20,16 +20,19 @@ common=(
   --config "$GNBM_OPTUNA_CONFIG"
   --output "$GNBM_OUTPUT_DIR"
   --initial-weights "$GNBM_INITIAL_WEIGHTS"
+  --storage "$GNBM_OPTUNA_STORAGE"
 )
 
 echo "job=$SLURM_JOB_ID host=$(hostname) config=$GNBM_OPTUNA_CONFIG"
 "$python_bin" -c 'import optuna; print("optuna=" + optuna.__version__)'
 
-if [[ ! -f "$GNBM_OUTPUT_DIR/control-reference.json" ]]; then
-  "$python_bin" -u scripts/optimize_node_edge_betti.py control "${common[@]}"
-else
-  echo "Reusing frozen control reference: $GNBM_OUTPUT_DIR/control-reference.json"
-fi
-"$python_bin" -u scripts/optimize_node_edge_betti.py optimize "${common[@]}"
-"$python_bin" -u scripts/summarize_node_edge_betti_optuna.py \
-  --output "$GNBM_OUTPUT_DIR" --study-name "$GNBM_OPTUNA_STUDY_NAME"
+case "$GNBM_OPTUNA_ACTION" in
+  control)
+    "$python_bin" -u scripts/optimize_node_edge_betti.py control "${common[@]}"
+    ;;
+  worker)
+    "$python_bin" -u scripts/optimize_node_edge_betti.py worker "${common[@]}" \
+      --max-trials "$GNBM_OPTUNA_MAX_TRIALS"
+    ;;
+  *) echo "Unknown GNBM_OPTUNA_ACTION=$GNBM_OPTUNA_ACTION" >&2; exit 2 ;;
+esac

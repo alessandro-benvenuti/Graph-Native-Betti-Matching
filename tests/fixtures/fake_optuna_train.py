@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import yaml
@@ -32,9 +33,16 @@ with (run / "validation-metrics.jsonl").open("w") as handle:
         record = {
             "epoch": epoch, "iteration": epoch,
             "node_mAP": .80, "edge_mAP": .70,
-            "node_f1": .75, "edge_f1": .65,
+            "node_mAR": .79, "edge_mAR": .69,
+            "node_precision": .76, "node_recall": .74, "node_f1": .75,
+            "edge_precision": .66, "edge_recall": .64, "edge_f1": .65,
             "beta0_absolute_error": 2.0, "beta1_absolute_error": 4.0,
-            "smd": 1.25,
+            "smd": 1.25, "target_beta0": 3.0, "predicted_beta0": 4.0,
+            "target_beta1": 2.0, "predicted_beta1": 5.0,
+            "target_nodes": 20.0, "predicted_nodes": 19.0,
+            "target_edges": 22.0, "predicted_edges": 20.0,
         }
         handle.write(json.dumps(record) + "\n")
         handle.flush()
+if os.environ.get("FAKE_TRAIN_FAIL") == "1" and "trial_" in args.run_name:
+    raise SystemExit(3)

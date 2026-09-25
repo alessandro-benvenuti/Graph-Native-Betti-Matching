@@ -1,8 +1,8 @@
 defaults:
-  - common.yaml
+  - study_a.yaml
 
 experiment:
-  name: node_edge_betti_optuna_control_seed364505
+  name: node_edge_betti_pareto_study_a_control_seed364505
 
 topology:
   betti_h0:

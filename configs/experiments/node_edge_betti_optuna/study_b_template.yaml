@@ -1,0 +1,23 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: node_edge_betti_pareto_study_b_seed364505
+
+tracking:
+  group: node-edge-betti-pareto-study-b
+  tags: [gnbm, node-edge-betti, pareto, study-b, refinement, validation-only]
+
+optuna:
+  study_name: node-edge-betti-pareto-study-b
+  n_trials: 60
+  search_space:
+    # Placeholder Betti region. Generate and inspect a proposal from Study A;
+    # do not launch this template directly.
+    topology.betti_h0.weight: [0.001]
+    topology.betti_h1.weight: [0.003]
+    topology.betti_h1.false_positive_weight: [0.25]
+    betti_warmup_epochs: [20]
+    betti_ramp_epochs: [20]
+    edge_loss: [cross_entropy, focal_gamma_0.5, focal_gamma_1.0, focal_gamma_2.0]
+    topology.complex.alpha: [0.0, 0.25, 0.5, 0.75, 1.0]
