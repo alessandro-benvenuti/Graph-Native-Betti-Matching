@@ -45,6 +45,8 @@ export GNBM_REPO_DIR="$repo_dir" GNBM_VENV="$venv" GNBM_OPTUNA_CONFIG="$config"
 export GNBM_OPTUNA_STUDY_NAME="$study" GNBM_OPTUNA_STORAGE="$storage"
 if [[ "$action" == "array" || "$action" == "resume" ]]; then export GNBM_OPTUNA_ACTION="worker"
 else export GNBM_OPTUNA_ACTION="$action"; fi
+if [[ "$action" == "resume" ]]; then export GNBM_OPTUNA_RESUME_RUNNING=1
+else export GNBM_OPTUNA_RESUME_RUNNING=0; fi
 GNBM_OPTUNA_MAX_TRIALS="$($python_bin -c \
   'import sys; from pathlib import Path; from scripts.optimize_node_edge_betti import load_campaign; print(load_campaign(Path(sys.argv[1]))[1]["n_trials"])' "$config")"
 export GNBM_OPTUNA_MAX_TRIALS

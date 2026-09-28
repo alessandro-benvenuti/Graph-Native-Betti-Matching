@@ -73,13 +73,17 @@ each globally allocated trial number owns `runs/trial_NNNN/` and is never
 overwritten. Journal file storage is appropriate for this bounded shared-filesystem
 mode, not unlimited concurrency.
 
-SIGTERM/SIGINT terminates the child and marks the trial failed, never complete.
-Hard-killed workers can leave RUNNING records. Only when **all workers are stopped**,
-run the explicit `recover` command; it marks stale records failed and retains all
-artifacts. Resubmitting workers continues the named study. Completed trials are
-immutable. Extending Study A to 60 or 72 means changing `n_trials` in the same
-config and reusing the same output/study name; inspect front expansion first and
-never extend automatically.
+SIGTERM/SIGINT terminates the child but deliberately leaves the trial RUNNING,
+never COMPLETE. An explicit `resume`—only after all old workers have stopped—claims
+that same global trial number and invokes `train.py --resume` on its
+`models/latest_checkpoint.pt`. Array workers claim different stale trials under the
+allocation lock. The Slurm entry point uses `exec`, so timeout signals reach the
+Python controller. Hard kills can also leave a resumable RUNNING record. Use
+`recover` only to abandon a stale trial whose checkpoint is missing or invalid; it
+marks the record failed and retains all artifacts. Completed trials are immutable.
+Extending Study A to 60 or 72 means changing `n_trials` in the same config and
+reusing the same output/study name; inspect front expansion first and never extend
+automatically.
 
 ## Dependency and local commands
 
@@ -126,8 +130,9 @@ bash cluster/jean_zay/submit_node_edge_betti_optuna.sh worker smoke
 bash cluster/jean_zay/submit_node_edge_betti_optuna.sh summarize smoke
 ```
 
-Resume the single worker with `resume smoke`; four existing
-trials are not repeated. Optional two-worker storage smoke uses a fresh output:
+Resume the single worker with `resume smoke`; an interrupted RUNNING trial continues
+from its latest checkpoint and completed trials are not repeated. Optional
+two-worker storage smoke uses a fresh output:
 
 ```bash
 export GNBM_OUTPUT_DIR="${GNBM_OUTPUT_DIR%-a100}-journal-a100"

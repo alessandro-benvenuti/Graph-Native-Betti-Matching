@@ -28,11 +28,15 @@ echo "job=$SLURM_JOB_ID host=$(hostname) config=$GNBM_OPTUNA_CONFIG"
 
 case "$GNBM_OPTUNA_ACTION" in
   control)
-    "$python_bin" -u scripts/optimize_node_edge_betti.py control "${common[@]}"
+    exec "$python_bin" -u scripts/optimize_node_edge_betti.py control "${common[@]}"
     ;;
   worker)
-    "$python_bin" -u scripts/optimize_node_edge_betti.py worker "${common[@]}" \
-      --max-trials "$GNBM_OPTUNA_MAX_TRIALS"
+    resume_args=()
+    if [[ "${GNBM_OPTUNA_RESUME_RUNNING:-0}" == "1" ]]; then
+      resume_args+=(--resume-running)
+    fi
+    exec "$python_bin" -u scripts/optimize_node_edge_betti.py worker "${common[@]}" \
+      --max-trials "$GNBM_OPTUNA_MAX_TRIALS" "${resume_args[@]}"
     ;;
   *) echo "Unknown GNBM_OPTUNA_ACTION=$GNBM_OPTUNA_ACTION" >&2; exit 2 ;;
 esac

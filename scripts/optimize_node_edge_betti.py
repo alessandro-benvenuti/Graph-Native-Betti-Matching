@@ -291,13 +291,23 @@ def run_command(command: list[str], run_dir: Path, on_record=None, poll=0.2):
     return process.returncode
 
 
-def _training_command(args, config_path: Path, run_name: str) -> list[str]:
+def _training_command(args, config_path: Path, run_name: str,
+                      resume_checkpoint: Path | None = None) -> list[str]:
     if args.train_command:
-        return [part.format(config=config_path, output=args.output, run_name=run_name,
-                            initial_weights=args.initial_weights) for part in args.train_command]
-    return [sys.executable, "-u", "train.py", "--config", str(config_path),
-            "--output-dir", str(args.output), "--run-name", run_name,
-            "--initial-weights", args.initial_weights]
+        command = [part.format(config=config_path, output=args.output, run_name=run_name,
+                               initial_weights=args.initial_weights,
+                               resume_checkpoint=resume_checkpoint or "")
+                   for part in args.train_command]
+        if resume_checkpoint is not None:
+            command.extend(("--resume", str(resume_checkpoint)))
+        return command
+    command = [sys.executable, "-u", "train.py", "--config", str(config_path),
+               "--output-dir", str(args.output), "--run-name", run_name]
+    if resume_checkpoint is None:
+        command.extend(("--initial-weights", args.initial_weights))
+    else:
+        command.extend(("--resume", str(resume_checkpoint)))
+    return command
 
 
 def run_control(args, base, config) -> None:
@@ -368,17 +378,29 @@ def recover_stale_trials(optuna, study) -> int:
     return len(stale)
 
 
-def execute_trial(args, base, config, reference, trial):
+def execute_trial(args, base, config, reference, trial, *, resuming=False):
     started = time.monotonic(); trial.set_user_attr("started_at", utc_now())
-    parameters = {name: trial.suggest_categorical(name, values) for name, values in config["search_space"].items()}
     run_name, run_dir = f"runs/trial_{trial.number:04d}", args.output / f"runs/trial_{trial.number:04d}"
-    if run_dir.exists(): raise CampaignError(f"refusing to reuse existing trial directory: {run_dir}")
-    concrete = apply_parameters(base, parameters); concrete["experiment"]["name"] = run_name
-    config_path = args.output / f"trial-configs/trial_{trial.number:04d}.yaml"; _write_yaml(config_path, concrete)
-    trial.set_user_attr("run_dir", str(run_dir.resolve())); trial.set_user_attr("config_path", str(config_path.resolve()))
+    config_path = args.output / f"trial-configs/trial_{trial.number:04d}.yaml"
+    resume_checkpoint = None
+    if resuming:
+        if not run_dir.is_dir() or not config_path.is_file():
+            raise CampaignError(f"trial {trial.number} cannot resume: config/run directory is missing")
+        resume_checkpoint = run_dir / "models/latest_checkpoint.pt"
+        if not resume_checkpoint.is_file():
+            raise CampaignError(f"trial {trial.number} cannot resume: {resume_checkpoint} is missing")
+        trial.set_user_attr("resume_count", int(trial.user_attrs.get("resume_count", 0)) + 1)
+        trial.set_user_attr("resumed_from", str(resume_checkpoint.resolve()))
+    else:
+        parameters = {name: trial.suggest_categorical(name, values)
+                      for name, values in config["search_space"].items()}
+        if run_dir.exists(): raise CampaignError(f"refusing to reuse existing trial directory: {run_dir}")
+        concrete = apply_parameters(base, parameters); concrete["experiment"]["name"] = run_name
+        _write_yaml(config_path, concrete)
+        trial.set_user_attr("run_dir", str(run_dir.resolve())); trial.set_user_attr("config_path", str(config_path.resolve()))
     trial.set_user_attr("slurm_job_id", os.environ.get("SLURM_JOB_ID")); records = []
     try:
-        return_code = run_command(_training_command(args, config_path, run_name), run_dir,
+        return_code = run_command(_training_command(args, config_path, run_name, resume_checkpoint), run_dir,
                                   lambda record, _process: records.append(record), args.poll_interval)
     finally:
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -396,10 +418,27 @@ def execute_trial(args, base, config, reference, trial):
     return aggregation["objectives"]
 
 
-def _allocate_trial(study, maximum: int, lock_path: Path):
+def _worker_generation() -> str:
+    return (os.environ.get("SLURM_ARRAY_JOB_ID") or os.environ.get("SLURM_JOB_ID")
+            or f"local-{os.getpid()}")
+
+
+def _allocate_trial(optuna, study, maximum: int, lock_path: Path, *, resume_running=False):
     with AllocationLock(lock_path):
+        generation = _worker_generation()
+        if resume_running:
+            stale = [trial for trial in study.get_trials(deepcopy=False)
+                     if trial.state == optuna.trial.TrialState.RUNNING
+                     and trial.user_attrs.get("worker_generation") != generation]
+            if stale:
+                frozen = min(stale, key=lambda trial: trial.number)
+                trial = optuna.trial.Trial(study, frozen._trial_id)
+                trial.set_user_attr("worker_generation", generation)
+                return trial, True
         if len(study.get_trials(deepcopy=False)) >= maximum: return None
-        return study.ask()
+        trial = study.ask()
+        trial.set_user_attr("worker_generation", generation)
+        return trial, False
 
 
 def run_worker(args, base, config) -> None:
@@ -411,13 +450,21 @@ def run_worker(args, base, config) -> None:
     study = create_study(optuna, args.output, config, args.storage)
     maximum, attempts = args.max_trials or int(config["n_trials"]), 0
     while args.worker_trials <= 0 or attempts < args.worker_trials:
-        trial = _allocate_trial(study, maximum, args.output / ".trial-allocation.lock")
-        if trial is None: break
+        allocation = _allocate_trial(
+            optuna, study, maximum, args.output / ".trial-allocation.lock",
+            resume_running=args.resume_running,
+        )
+        if allocation is None: break
+        trial, resuming = allocation
         attempts += 1
-        try: values = execute_trial(args, base, config, reference, trial)
+        try: values = execute_trial(args, base, config, reference, trial, resuming=resuming)
         except KeyboardInterrupt:
             trial.set_user_attr("failure_reason", "interrupted by SIGTERM/SIGINT")
-            study.tell(trial, state=optuna.trial.TrialState.FAIL); raise
+            trial.set_user_attr("training_completed", False)
+            trial.set_user_attr("interrupted_at", utc_now())
+            # Deliberately retain RUNNING so an explicit resume, after all old
+            # workers have stopped, can continue this exact trial/checkpoint.
+            raise
         except Exception as error:
             trial.set_user_attr("failure_reason", f"{type(error).__name__}: {error}")
             trial.set_user_attr("training_completed", False)
@@ -448,6 +495,8 @@ def _parser():
     parser.add_argument("--config", type=Path, required=True); parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--initial-weights", required=True); parser.add_argument("--storage", choices=("sqlite", "journal"), default="sqlite")
     parser.add_argument("--max-trials", type=int); parser.add_argument("--worker-trials", type=int, default=0)
+    parser.add_argument("--resume-running", action="store_true",
+                        help="claim stale RUNNING trials before allocating new trials")
     parser.add_argument("--poll-interval", type=float, default=2.0); parser.add_argument("--train-command", nargs=argparse.REMAINDER)
     return parser
 
@@ -466,6 +515,9 @@ def main() -> int:
         elif args.mode == "control":
             with ControllerLock(args.output / ".control.lock"): run_control(args, base, config)
         else: run_worker(args, base, config)
+    except KeyboardInterrupt:
+        print("Optuna campaign interrupted; current trial remains RUNNING and resumable", file=sys.stderr)
+        return 130
     except (CampaignError, OSError, ValueError, json.JSONDecodeError) as error:
         raise SystemExit(f"Optuna campaign error: {error}") from error
     return 0

@@ -9,12 +9,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 from configs import validate_config
 from scripts.optimize_node_edge_betti import (
     CampaignError, ControllerLock, JsonlMonitor, OBJECTIVES, aggregate_tail,
-    apply_parameters, build_sampler, create_storage, load_campaign, run_command,
+    apply_parameters, build_sampler, create_storage, create_study, load_campaign, run_command,
     recover_stale_trials, validate_optuna_config,
 )
 from scripts.summarize_node_edge_betti_optuna import (
@@ -199,11 +200,13 @@ class OptunaIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.environment = dict(os.environ); self.environment.update(ENVIRONMENT)
 
-    def command(self, mode, output, checkpoint, storage="sqlite", worker_trials=None):
+    def command(self, mode, output, checkpoint, storage="sqlite", worker_trials=None,
+                resume_running=False):
         command = [sys.executable, str(ROOT / "scripts/optimize_node_edge_betti.py"), mode,
             "--config", str(SMOKE), "--output", str(output), "--initial-weights", str(checkpoint),
             "--storage", storage, "--poll-interval", ".01"]
         if worker_trials is not None: command += ["--worker-trials", str(worker_trials)]
+        if resume_running: command += ["--resume-running"]
         if mode in {"control", "worker"}:
             command += ["--train-command", sys.executable,
                 str(ROOT / "tests/fixtures/fake_optuna_train.py"), "--config", "{config}",
@@ -267,6 +270,72 @@ class OptunaIntegrationTests(unittest.TestCase):
                                       storage=create_storage(optuna, output, "sqlite"))
             self.assertEqual(study.trials[0].state.name, "FAIL")
             self.assertIn("status 3", study.trials[0].user_attrs["failure_reason"])
+
+    def test_stale_trial_resumes_same_number_from_latest_checkpoint(self):
+        import optuna
+        import yaml
+        with tempfile.TemporaryDirectory() as directory:
+            root, output = Path(directory), Path(directory) / "study"
+            checkpoint = root / "initial.pt"; checkpoint.write_bytes(b"fixed")
+            subprocess.run(self.command("control", output, checkpoint), cwd=ROOT,
+                           env=self.environment, check=True)
+            base, config = load_campaign(SMOKE, ENVIRONMENT)
+            study = create_study(optuna, output, config, "sqlite")
+            trial = study.ask()
+            parameters = {name: trial.suggest_categorical(name, values)
+                          for name, values in config["search_space"].items()}
+            concrete = apply_parameters(base, parameters)
+            run_name, run_dir = "runs/trial_0000", output / "runs/trial_0000"
+            concrete["experiment"]["name"] = run_name
+            config_path = output / "trial-configs/trial_0000.yaml"
+            config_path.parent.mkdir(parents=True); config_path.write_text(yaml.safe_dump(concrete))
+            run_dir.mkdir(parents=True); (run_dir / "models").mkdir()
+            (run_dir / "resolved-config.yaml").write_text(yaml.safe_dump(concrete))
+            (run_dir / "dataset-manifest.json").write_bytes(
+                (output / "control/dataset-manifest.json").read_bytes())
+            with (run_dir / "validation-metrics.jsonl").open("w") as handle:
+                for epoch in range(1, 4): handle.write(json.dumps(metric_record(epoch)) + "\n")
+            (run_dir / "models/latest_checkpoint.pt").write_bytes(b"epoch=3")
+            trial.set_user_attr("run_dir", str(run_dir)); trial.set_user_attr("config_path", str(config_path))
+            trial.set_user_attr("worker_generation", "expired-job")
+            subprocess.run(self.command("worker", output, checkpoint, worker_trials=1,
+                                        resume_running=True), cwd=ROOT,
+                           env=self.environment, check=True)
+            resumed = optuna.load_study(study_name=config["study_name"],
+                                        storage=create_storage(optuna, output, "sqlite"))
+            self.assertEqual(len(resumed.trials), 1)
+            self.assertEqual(resumed.trials[0].number, 0)
+            self.assertEqual(resumed.trials[0].state.name, "COMPLETE")
+            self.assertEqual(resumed.trials[0].user_attrs["resume_count"], 1)
+            self.assertEqual(resumed.trials[0].user_attrs["aggregation"]["contributing_epochs"], [4, 5])
+
+    def test_sigterm_leaves_running_then_same_trial_resumes(self):
+        import optuna
+        with tempfile.TemporaryDirectory() as directory:
+            root, output = Path(directory), Path(directory) / "study"
+            checkpoint = root / "initial.pt"; checkpoint.write_bytes(b"fixed")
+            subprocess.run(self.command("control", output, checkpoint), cwd=ROOT,
+                           env=self.environment, check=True)
+            slow_env = dict(self.environment); slow_env["FAKE_TRAIN_SLEEP_PER_EPOCH"] = "5"
+            process = subprocess.Popen(self.command("worker", output, checkpoint,
+                                                     worker_trials=1),
+                                       cwd=ROOT, env=slow_env)
+            latest = output / "runs/trial_0000/models/latest_checkpoint.pt"
+            deadline = time.monotonic() + 10
+            while not latest.is_file() and time.monotonic() < deadline: time.sleep(.05)
+            self.assertTrue(latest.is_file())
+            process.terminate(); self.assertNotEqual(process.wait(timeout=15), 0)
+            study = optuna.load_study(study_name="node-edge-betti-pareto-smoke",
+                                      storage=create_storage(optuna, output, "sqlite"))
+            self.assertEqual(study.trials[0].state.name, "RUNNING")
+            subprocess.run(self.command("worker", output, checkpoint, worker_trials=1,
+                                        resume_running=True), cwd=ROOT,
+                           env=self.environment, check=True)
+            study = optuna.load_study(study_name=study.study_name,
+                                      storage=create_storage(optuna, output, "sqlite"))
+            self.assertEqual(len(study.trials), 1)
+            self.assertEqual(study.trials[0].state.name, "COMPLETE")
+            self.assertEqual(study.trials[0].user_attrs["resume_count"], 1)
 
     def test_two_journal_workers_get_unique_trials_and_respect_cap(self):
         with tempfile.TemporaryDirectory() as directory:
