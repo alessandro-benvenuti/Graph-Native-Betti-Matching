@@ -341,8 +341,23 @@ def _import_optuna():
     return optuna
 
 
+def sampler_seed(config: Mapping[str, Any], environment: Mapping[str, str] | None = None) -> int:
+    """Give parallel array workers reproducible, non-identical sampler streams."""
+    environment = os.environ if environment is None else environment
+    worker_index = environment.get("SLURM_ARRAY_TASK_ID")
+    if worker_index is None:
+        return int(config["seed"])
+    try:
+        offset = int(worker_index)
+    except ValueError as error:
+        raise CampaignError("SLURM_ARRAY_TASK_ID must be an integer") from error
+    if offset < 0:
+        raise CampaignError("SLURM_ARRAY_TASK_ID must be non-negative")
+    return int(config["seed"]) + offset
+
+
 def build_sampler(optuna, config):
-    return optuna.samplers.NSGAIISampler(seed=int(config["seed"]),
+    return optuna.samplers.NSGAIISampler(seed=sampler_seed(config),
         population_size=int(config["sampler"]["population_size"]))
 
 
@@ -456,6 +471,7 @@ def run_worker(args, base, config) -> None:
         )
         if allocation is None: break
         trial, resuming = allocation
+        trial.set_user_attr("sampler_seed", sampler_seed(config))
         attempts += 1
         try: values = execute_trial(args, base, config, reference, trial, resuming=resuming)
         except KeyboardInterrupt:
@@ -484,6 +500,8 @@ def print_preflight(base, config, args) -> None:
     print(f"  epochs: {base['training']['epochs']} aggregation={config['metric_aggregation']}")
     print(f"  objectives: {list(OBJECTIVES)}")
     print(f"  sampler: NSGA-II population={config['sampler']['population_size']} seed={config['seed']}")
+    sampler_seeds = [int(config["seed"]) + index for index in range(workers)]
+    print(f"  worker sampler seeds: {sampler_seeds}")
     print(f"  trials={config['n_trials']} workers={workers} estimated_gpu_jobs={workers}")
     print(f"  test split: UNUSED\n  matcher: {base['model']['matcher']['type']}")
     print(f"  edge loss: {base['loss']['edge']['classification']['name']}")

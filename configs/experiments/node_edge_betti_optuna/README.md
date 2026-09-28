@@ -31,7 +31,9 @@ reference point for deltas and paired-integrity checks, not a pass/fail constrai
 Negative control deltas favor trials for beta errors; positive deltas favor trials
 for mAP/F1.
 
-NSGA-II is deterministic with seed 364505 and population 12. Native scalar
+NSGA-II uses base seed 364505 and population 12. A Slurm array worker adds its
+zero-based array index to the sampler seed, giving concurrent workers reproducible
+but non-identical proposal streams. Native scalar
 `trial.report` pruning was removed because a hidden scalar proxy would bias the
 Pareto trade-off. Only invalid configurations, non-finite/missing outputs, failed
 processes, and interruption end a trial early.
@@ -99,6 +101,16 @@ The summary writes `summary.json`, `trials.csv`, `pareto-front.csv`,
 `pareto-front.json`, the frozen `control-reference.json`, and representative JSON
 and Markdown. CSV columns support mAP-versus-beta plots, predictive-versus-topology
 comparisons, and parallel coordinates.
+
+All Optuna controls and trials are buffered in W&B offline mode under project
+`gnbm` and a campaign-specific group. The launcher exports these values explicitly,
+so an older `focal-loss` shell default cannot redirect the campaign. After training,
+sync from a login node with:
+
+```bash
+export GNBM_WANDB_SYNC_PROJECT=gnbm
+bash cluster/jean_zay/sync_wandb_offline.sh "$GNBM_OUTPUT_DIR"
+```
 
 Generate a Study B proposal after reviewing Study A:
 

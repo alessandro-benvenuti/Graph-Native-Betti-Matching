@@ -50,7 +50,11 @@ else export GNBM_OPTUNA_RESUME_RUNNING=0; fi
 GNBM_OPTUNA_MAX_TRIALS="$($python_bin -c \
   'import sys; from pathlib import Path; from scripts.optimize_node_edge_betti import load_campaign; print(load_campaign(Path(sys.argv[1]))[1]["n_trials"])' "$config")"
 export GNBM_OPTUNA_MAX_TRIALS
-export WANDB_MODE=offline
+export WANDB_PROJECT="${GNBM_OPTUNA_WANDB_PROJECT:-gnbm}"
+export WANDB_RUN_GROUP="${GNBM_OPTUNA_WANDB_GROUP:-$study}"
+# Jean Zay compute nodes cannot reliably contact wandb.ai. Buffer every control
+# and trial locally, then sync the completed offline runs from a login node.
+export WANDB_MODE="${GNBM_OPTUNA_WANDB_MODE:-offline}"
 
 if [[ "$campaign" == "smoke" ]]; then qos="${GNBM_QOS:-qos_gpu_a100-dev}"; walltime="${GNBM_WALLTIME:-02:00:00}"
 else qos="${GNBM_QOS:-qos_gpu_a100-t3}"; walltime="${GNBM_WALLTIME:-20:00:00}"; fi
@@ -64,3 +68,4 @@ job_id="${submission##* }"
 echo "Queue: squeue -j $job_id"
 echo "Accounting: sacct -j $job_id --format=JobID,State,Elapsed,ExitCode,MaxRSS"
 echo "Logs: $log_dir/gnbm-betti-optuna-${job_id}_*.{out,err}"
+echo "W&B: project=$WANDB_PROJECT group=$WANDB_RUN_GROUP mode=$WANDB_MODE"

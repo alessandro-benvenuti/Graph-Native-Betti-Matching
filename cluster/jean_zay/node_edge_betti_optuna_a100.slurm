@@ -24,6 +24,7 @@ common=(
 )
 
 echo "job=$SLURM_JOB_ID host=$(hostname) config=$GNBM_OPTUNA_CONFIG"
+echo "wandb_entity=${WANDB_ENTITY:-default} wandb_project=${WANDB_PROJECT:-gnbm} wandb_group=${WANDB_RUN_GROUP:-default} wandb_mode=$WANDB_MODE"
 "$python_bin" -c 'import optuna; print("optuna=" + optuna.__version__)'
 
 case "$GNBM_OPTUNA_ACTION" in

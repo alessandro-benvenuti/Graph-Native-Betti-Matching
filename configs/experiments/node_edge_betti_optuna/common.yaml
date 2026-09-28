@@ -54,6 +54,7 @@ topology:
     false_negative_weight: 1.0
 
 tracking:
+  project: gnbm
   group: node-edge-betti-optuna
   tags: [gnbm, node-edge-betti, optuna, paired-validation-only]
 

@@ -16,7 +16,7 @@ from configs import validate_config
 from scripts.optimize_node_edge_betti import (
     CampaignError, ControllerLock, JsonlMonitor, OBJECTIVES, aggregate_tail,
     apply_parameters, build_sampler, create_storage, create_study, load_campaign, run_command,
-    recover_stale_trials, validate_optuna_config,
+    recover_stale_trials, sampler_seed, validate_optuna_config,
 )
 from scripts.summarize_node_edge_betti_optuna import (
     balanced_representative, dominates, pareto_front, representatives, write_summary,
@@ -50,9 +50,18 @@ def row(number, node, edge, beta0, beta1, state="COMPLETE"):
 
 class ConfigurationTests(unittest.TestCase):
     def test_valid_objective_order_and_directions(self):
-        _, config = load_campaign(STUDY_A, ENVIRONMENT)
+        base, config = load_campaign(STUDY_A, ENVIRONMENT)
         self.assertEqual(tuple((x["metric"], x["direction"]) for x in config["objectives"]), OBJECTIVES)
         self.assertEqual(config["n_trials"], 48)
+        self.assertEqual(base["tracking"]["project"], "gnbm")
+
+    def test_parallel_sampler_seeds_are_distinct_and_reproducible(self):
+        _, config = load_campaign(STUDY_A, ENVIRONMENT)
+        self.assertEqual(sampler_seed(config, {}), 364505)
+        self.assertEqual(sampler_seed(config, {"SLURM_ARRAY_TASK_ID": "0"}), 364505)
+        self.assertEqual(sampler_seed(config, {"SLURM_ARRAY_TASK_ID": "3"}), 364508)
+        with self.assertRaisesRegex(CampaignError, "must be an integer"):
+            sampler_seed(config, {"SLURM_ARRAY_TASK_ID": "worker"})
 
     def test_legacy_scalar_fields_rejected(self):
         _, config = load_campaign(STUDY_A, ENVIRONMENT)
