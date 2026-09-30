@@ -20,6 +20,24 @@ EDGE_TENSOR = torch.tensor(EDGES, dtype=torch.long)
 
 
 class GraphBettiH0H1Tests(unittest.TestCase):
+    def test_h0_weight_scales_its_gradient(self):
+        base = torch.tensor(
+            [0.95, 0.0, 0.0, 0.10, 0.0, 0.90], dtype=torch.float64
+        )
+        truth = torch.tensor([[0, 1], [1, 2], [2, 3]], dtype=torch.long)
+
+        def gradient(weight):
+            probabilities = base.clone().requires_grad_(True)
+            topology, _ = h0_betti_matching_loss(
+                probabilities, EDGE_TENSOR, truth, num_vertices=4
+            )
+            (weight * topology).backward()
+            return probabilities.grad
+
+        half = gradient(0.5)
+        full = gradient(1.0)
+        self.assertTrue(torch.allclose(half, 0.5 * full))
+
     def test_h0_missing_bridge_is_strengthened(self):
         probabilities = torch.tensor(
             [0.95, 0.0, 0.0, 0.10, 0.0, 0.90],

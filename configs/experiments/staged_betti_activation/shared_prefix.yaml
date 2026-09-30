@@ -1,0 +1,23 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: shared-prefix
+
+training:
+  checkpoint:
+    milestone_epochs: [200, 300, 400, 500]
+
+topology:
+  betti_h0:
+    enabled: false
+    log_only: true
+    weight: 0.0
+  betti_h1:
+    enabled: false
+    log_only: true
+    weight: 0.0
+
+tracking:
+  tags: [gnbm, staged-betti-activation, shared-prefix, no-betti, validation-only]
+

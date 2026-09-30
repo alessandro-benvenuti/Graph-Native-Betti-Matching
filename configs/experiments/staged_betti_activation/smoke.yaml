@@ -1,0 +1,50 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: staged-betti-smoke
+
+data:
+  batch_size: 2
+  validation_batch_size: 2
+  datasets:
+    synthetic_mri:
+      train_samples: 8
+      validation_samples: 4
+      sample_cap_selection: seeded_random
+      sample_cap_seed: 364505
+
+training:
+  epochs: 8
+  checkpoint:
+    policy: interval_and_best
+    interval_epochs: 2
+    latest_interval_epochs: 1
+    milestone_epochs: [2, 4, 6, 8]
+
+evaluation:
+  interval_epochs: 1
+  training_metrics:
+    max_samples: 4
+
+tracking:
+  mode: offline
+  tags: [gnbm, staged-betti-activation, smoke, validation-only]
+
+staged_betti:
+  branch_epochs: [2, 4, 6]
+  screening_epochs: 2
+  trials_per_branch: 2
+  metric_aggregation:
+    name: tail_mean
+    observations: 2
+  search_space:
+    topology.betti_h0.weight: [0.001]
+    topology.betti_h1.weight: [0.003, 0.01]
+    topology.betti_h1.false_positive_weight: [0.1]
+    betti_ramp_epochs: [1, 2]
+  sampler:
+    name: nsga2
+    population_size: 2
+    seed: 364505
+

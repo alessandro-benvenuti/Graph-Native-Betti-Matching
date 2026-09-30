@@ -1,0 +1,15 @@
+defaults:
+  - common.yaml
+
+experiment:
+  name: staged-screening-placeholder
+
+training:
+  checkpoint:
+    policy: best_only
+    interval_epochs: 50
+    latest_interval_epochs: 1
+
+tracking:
+  tags: [gnbm, staged-betti-activation, screening, optuna, validation-only]
+

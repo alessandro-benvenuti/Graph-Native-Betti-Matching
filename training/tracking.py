@@ -161,7 +161,7 @@ def build_tracker(
     run = wandb.init(
         project=project,
         entity=entity,
-        name=config["experiment"]["name"],
+        name=settings.get("run_name") or config["experiment"]["name"],
         group=group,
         tags=tuple(settings["tags"]),
         config=tracked_config,

@@ -46,8 +46,10 @@ def save_training_checkpoint(
     epoch,
     iteration,
     *,
+    scaler=None,
     runtime_states=None,
     trainer_state=None,
+    training_config=None,
 ):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,10 +57,16 @@ def save_training_checkpoint(
         "net": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "scheduler": scheduler.state_dict(),
+        # AMP is not enabled by the current trainer.  Keeping the explicit
+        # nullable field makes that fact auditable and permits a future AMP
+        # trainer to resume without changing the checkpoint schema again.
+        "scaler": None if scaler is None else scaler.state_dict(),
         "epoch": int(epoch),
         "iteration": int(iteration),
+        "global_step": int(iteration),
         "runtime_states": runtime_states,
         "trainer_state": dict(trainer_state or {}),
+        "training_config": dict(training_config or {}),
     }
     temporary = path.with_name(path.name + ".tmp")
     torch.save(payload, str(temporary))
@@ -108,6 +116,7 @@ def load_training_checkpoint(
     optimizer=None,
     scheduler=None,
     *,
+    scaler=None,
     rank: int = 0,
     loader_generator=None,
     return_trainer_state: bool = False,
@@ -127,11 +136,18 @@ def load_training_checkpoint(
         if "scheduler" not in checkpoint:
             raise ValueError("checkpoint has no scheduler state")
         scheduler.load_state_dict(checkpoint["scheduler"])
+    if scaler is not None:
+        if checkpoint.get("scaler") is None:
+            raise ValueError("checkpoint has no AMP scaler state")
+        scaler.load_state_dict(checkpoint["scaler"])
     runtime_states = checkpoint.get("runtime_states")
     if runtime_states:
         selected = runtime_states[min(int(rank), len(runtime_states) - 1)]
         restore_runtime_state(selected, loader_generator)
-    result = (int(checkpoint.get("epoch", 0)), int(checkpoint.get("iteration", 0)))
+    result = (
+        int(checkpoint.get("epoch", 0)),
+        int(checkpoint.get("global_step", checkpoint.get("iteration", 0))),
+    )
     if return_trainer_state:
         return (*result, dict(checkpoint.get("trainer_state") or {}))
     return result

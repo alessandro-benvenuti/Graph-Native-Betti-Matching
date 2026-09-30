@@ -471,6 +471,21 @@ def validate_config(config: Mapping[str, Any]) -> None:
             checkpoint.get("latest_interval_epochs"),
             "training.checkpoint.latest_interval_epochs",
         )
+    milestone_epochs = checkpoint.get("milestone_epochs", [])
+    if not isinstance(milestone_epochs, list):
+        raise ConfigError("training.checkpoint.milestone_epochs must be a list")
+    normalized_milestones = []
+    for index, value in enumerate(milestone_epochs):
+        milestone = _positive_int(
+            value, f"training.checkpoint.milestone_epochs[{index}]"
+        )
+        if milestone > epochs:
+            raise ConfigError(
+                "training.checkpoint milestone cannot exceed training.epochs"
+            )
+        normalized_milestones.append(milestone)
+    if len(normalized_milestones) != len(set(normalized_milestones)):
+        raise ConfigError("training.checkpoint.milestone_epochs must be unique")
 
     loss = config.get("loss")
     if not isinstance(loss, Mapping):
@@ -612,6 +627,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
         for count_name in ("warmup_epochs", "ramp_epochs"):
             _non_negative_int(
                 topology_loss.get(count_name), f"{location}.{count_name}"
+            )
+        activation_epoch = topology_loss.get("activation_epoch")
+        if activation_epoch is not None:
+            _non_negative_int(
+                activation_epoch, f"{location}.activation_epoch"
             )
         value_names = ["weight", "diagonal_factor"]
         if name == "betti_h0":

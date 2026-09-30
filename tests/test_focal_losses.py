@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from training.losses.focal import (
+    branch_relative_weight,
     build_unmatched_relation_pairs,
     linear_progress_schedule,
     select_active_unmatched_queries,
@@ -15,6 +16,27 @@ from training.losses.focal import (
 
 
 class FocalLossTests(unittest.TestCase):
+    def test_branch_relative_betti_ramps(self):
+        for branch in (200, 300, 400):
+            with self.subTest(branch=branch):
+                self.assertEqual(
+                    branch_relative_weight(branch - 1, 0.03, branch, 20), 0.0
+                )
+                self.assertEqual(
+                    branch_relative_weight(branch, 0.03, branch, 20), 0.0
+                )
+                self.assertAlmostEqual(
+                    branch_relative_weight(branch + 10, 0.03, branch, 20),
+                    0.015,
+                )
+                self.assertAlmostEqual(
+                    branch_relative_weight(branch + 20, 0.03, branch, 20),
+                    0.03,
+                )
+                self.assertAlmostEqual(
+                    branch_relative_weight(branch + 30, 0.03, branch, 20),
+                    0.03,
+                )
     def test_gamma_zero_matches_weighted_cross_entropy(self):
         logits = torch.tensor([[1.0, -0.5], [-1.0, 2.0]], requires_grad=True)
         targets = torch.tensor([0, 1])

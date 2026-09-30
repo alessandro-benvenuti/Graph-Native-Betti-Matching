@@ -170,6 +170,23 @@ def scheduled_candidate_weight(epoch, target, warmup, ramp):
     return target * progress
 
 
+def branch_relative_weight(epoch, target, activation_epoch, ramp):
+    """Ramp from zero at a completed branch epoch to ``target`` after ``ramp``.
+
+    Unlike the legacy warmup schedule, epoch zero is meaningful here: a run
+    resumed from epoch 300 receives exactly zero Betti weight at epoch 300 and
+    reaches the target at epoch ``300 + ramp``.
+    """
+    target = max(0.0, float(target))
+    elapsed = int(epoch) - max(0, int(activation_epoch))
+    ramp = max(0, int(ramp))
+    if elapsed <= 0:
+        return 0.0
+    if ramp == 0:
+        return target
+    return target * min(1.0, elapsed / float(ramp))
+
+
 def linear_progress_schedule(
     progress_pct,
     target,

@@ -3,6 +3,24 @@
 For the complete training, evaluation, environment-variable, CLI, YAML, and
 checkpoint reference, see [`../../docs/RUNNING_THE_MODEL.md`](../../docs/RUNNING_THE_MODEL.md).
 
+## Staged Betti activation
+
+The staged epoch-200/300/400 activation campaign has its own output namespace
+and launcher. It must not point at the earlier Study A directory. See
+[`../../configs/experiments/staged_betti_activation/README.md`](../../configs/experiments/staged_betti_activation/README.md)
+for the scientific protocol and execution order.
+
+```bash
+export GNBM_OUTPUT_DIR="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-betti-staged-activation-a100"
+bash cluster/jean_zay/submit_staged_betti_activation.sh prefix
+bash cluster/jean_zay/submit_staged_betti_activation.sh status
+```
+
+`status` combines the active Slurm view with prefix/branch checkpoint state,
+Optuna COMPLETE/RUNNING/FAIL counts, latest trial epochs, and resume counts.
+Use `resume BRANCH 4` only after the old array job has stopped. Completion
+markers are emitted only after checkpoint and metric validation succeeds.
+
 This directory currently provides production launchers for Jean Zay's H100
 partition and separate environment setup for the A100 migration:
 

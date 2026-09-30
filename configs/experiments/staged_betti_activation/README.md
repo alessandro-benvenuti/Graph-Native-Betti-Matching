@@ -1,0 +1,88 @@
+# Staged Betti activation
+
+This campaign is independent of `node_edge_betti_optuna` Study A.  It trains
+one no-Betti MRI trajectory, snapshots its complete state at epochs 200, 300,
+400, and 500, then screens branch-relative Betti ramps for 50 epochs from each
+snapshot.  Cross-branch objectives are deltas from the matching no-Betti
+trajectory at epochs 250, 350, and 450.
+
+The fixed base recipe is node focal classification, edge cross-entropy,
+Hungarian matching, and node-edge filtration alpha 0.5.  The search varies only
+H0 weight, H1 weight, H1 false-positive weight, and ramp length.
+
+`matched_mean` in the existing H1 loss averages matched-cycle terms but sums
+unmatched false-cycle terms.  Therefore the H1 magnitude can increase with the
+number of false cycles.  This campaign deliberately preserves that behavior;
+normalizing it differently would define a separate loss variant.
+
+The pre-campaign gradient audit also found that the former missed-target-cycle
+term was constant and therefore could not create a missing cycle.  This branch
+fixes that mechanics bug by applying the missed-cycle penalty at the target
+class's deterministic critical predicted edge.  This is explicit and tested;
+the normalization policy above is unchanged.
+
+The trainer currently runs full precision and has no AMP scaler.  Checkpoints
+record `scaler: null`, plus model, optimizer, scheduler, completed epoch,
+global iteration, resolved training configuration, trainer state, and per-rank
+Python/NumPy/PyTorch/CUDA/data-loader RNG state.
+
+## Required real-model smoke and interruption check
+
+Use a fresh smoke directory and the tiny 2/4/6-epoch protocol:
+
+```bash
+export GNBM_STAGED_CONFIG_OVERRIDE="configs/experiments/staged_betti_activation/smoke.yaml"
+export GNBM_OUTPUT_DIR="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-betti-staged-activation-smoke-a100"
+
+bash cluster/jean_zay/submit_staged_betti_activation.sh prefix
+bash cluster/jean_zay/submit_staged_betti_activation.sh prepare
+bash cluster/jean_zay/submit_staged_betti_activation.sh screen 2 2
+bash cluster/jean_zay/submit_staged_betti_activation.sh screen 4 2
+bash cluster/jean_zay/submit_staged_betti_activation.sh screen 6 2
+bash cluster/jean_zay/submit_staged_betti_activation.sh final 2 0
+bash cluster/jean_zay/submit_staged_betti_activation.sh summarize
+```
+
+For the resume check, cancel one screening array only after `status` shows a
+trial checkpoint, confirm its Optuna state remains `RUNNING`, and run
+`resume BRANCH 2`. The same trial number and parameters must finish with a
+positive resume count. Unset `GNBM_STAGED_CONFIG_OVERRIDE` before any full
+campaign command. `summarize` writes a passing `smoke-validation.json` only
+after all six trials, at least one resumed trial, and one final continuation
+are complete.
+
+Use a fresh directory:
+
+```bash
+export GNBM_OUTPUT_DIR="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-betti-staged-activation-a100"
+export GNBM_STAGED_SMOKE_OUTPUT="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-betti-staged-activation-smoke-a100"
+export GNBM_INITIAL_WEIGHTS="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-boundary-gamma-sweep-500-a100/pretrain_boundary_mixed_node_focal_seed364505/models/best_metric_checkpoint.pt"
+
+bash cluster/jean_zay/submit_staged_betti_activation.sh prefix
+# After the prefix is complete:
+bash cluster/jean_zay/submit_staged_betti_activation.sh prepare
+bash cluster/jean_zay/submit_staged_betti_activation.sh screen 200 4
+bash cluster/jean_zay/submit_staged_betti_activation.sh screen 300 4
+bash cluster/jean_zay/submit_staged_betti_activation.sh screen 400 4
+bash cluster/jean_zay/submit_staged_betti_activation.sh summarize
+```
+
+If the shared prefix reaches the wall-time limit, submit `prefix` again. It
+resumes `shared-prefix/models/latest_checkpoint.pt`; it never starts a second
+trajectory in the marked output directory.
+
+Inspect `summaries/screening-pareto.csv`, duplicate-noise labels, and the
+descriptive candidate suggestions. Then submit zero, one, or at most two
+reviewed candidates per branch with `final BRANCH TRIAL`. Run `summarize`
+again after those continuations finish.
+
+Do not use the test split.  Inspect the three Pareto fronts before explicitly
+starting any final continuation.
+
+After selecting exactly one final model, the guarded command below performs
+the campaign's only test evaluation. It records the selection before loading
+test data and refuses to evaluate a different model afterward:
+
+```bash
+bash cluster/jean_zay/submit_staged_betti_activation.sh test 300 TRIAL_NUMBER
+```

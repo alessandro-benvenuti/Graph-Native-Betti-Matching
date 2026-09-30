@@ -235,8 +235,10 @@ class Trainer:
                 self.scheduler,
                 epoch,
                 iteration,
+                scaler=None,
                 runtime_states=gathered,
                 trainer_state=trainer_state,
+                training_config=self.config,
             )
             for path in paths[1:]:
                 alias_training_checkpoint(paths[0], path)
@@ -271,6 +273,12 @@ class Trainer:
                 "latest_interval_epochs", interval
             )
         )
+        milestone_epochs = {
+            int(value)
+            for value in self.config["training"]["checkpoint"].get(
+                "milestone_epochs", []
+            )
+        }
         validation_interval = int(self.config["evaluation"]["interval_epochs"])
         policy = self.config["training"]["checkpoint"]["policy"]
         metric_config = self.config["evaluation"]["training_metrics"]
@@ -473,6 +481,20 @@ class Trainer:
                         max_visualizations=0,
                         export_predictions=False,
                     )
+                    staged_metadata = self.config.get("staged_metadata", {})
+                    control_metrics = staged_metadata.get("control_metrics", {})
+                    delta_names = {
+                        "node_mAP": "delta_node_mAP",
+                        "edge_mAP": "delta_edge_mAP",
+                        "beta0_absolute_error": "delta_beta0_error",
+                        "beta1_absolute_error": "delta_beta1_error",
+                    }
+                    for metric_name, delta_name in delta_names.items():
+                        if metric_name in control_metrics and metric_name in task_metrics:
+                            task_metrics[delta_name] = (
+                                float(task_metrics[metric_name])
+                                - float(control_metrics[metric_name])
+                            )
                     selected_value = task_metrics.get(selection_metric)
                     monitored_metrics.update(task_metrics)
                     print(
@@ -609,6 +631,12 @@ class Trainer:
                 epoch % interval == 0 or epoch == final_epoch
             ):
                 paths.append(output / "checkpoint_epoch={}.pt".format(epoch))
+            if epoch in milestone_epochs:
+                paths.append(
+                    output.parent
+                    / "checkpoints"
+                    / "epoch_{:04d}.pt".format(epoch)
+                )
             if policy != "none" and (
                 epoch % latest_interval == 0 or epoch == final_epoch or stop_training
             ):

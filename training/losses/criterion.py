@@ -15,6 +15,7 @@ from .betti_filtration import node_edge_confidences
 from .betti_h0 import h0_betti_matching_loss
 from .betti_h1 import cycle_space_matching_loss
 from .focal import (
+    branch_relative_weight,
     build_unmatched_relation_pairs,
     linear_progress_schedule,
     scheduled_candidate_weight,
@@ -435,6 +436,14 @@ class GraphCriterion(nn.Module):
         weight = float(configuration["weight"])
         if self.validation:
             return weight
+        activation_epoch = configuration.get("activation_epoch")
+        if activation_epoch is not None:
+            return branch_relative_weight(
+                self.epoch,
+                weight,
+                activation_epoch,
+                configuration["ramp_epochs"],
+            )
         return scheduled_candidate_weight(
             self.epoch,
             weight,
@@ -581,6 +590,7 @@ class GraphCriterion(nn.Module):
             weight = self._topology_weight(name)
             losses[name] = value
             losses[name + "_weighted"] = value * weight
+            losses[name + "_effective_weight"] = value.new_tensor(weight)
 
         losses["total"] = sum(
             losses[name] * self.weights[name]

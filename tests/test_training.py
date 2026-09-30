@@ -141,7 +141,16 @@ class TrainingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "checkpoint.pt"
-            save_training_checkpoint(path, model, optimizer, scheduler, 4, 17)
+            save_training_checkpoint(
+                path,
+                model,
+                optimizer,
+                scheduler,
+                4,
+                17,
+                training_config=config,
+            )
+            payload = load_runtime_state(path)
             restored = TinyGraphModel()
             restored_optimizer = build_optimizer(config, restored)
             restored_scheduler = build_scheduler(
@@ -152,6 +161,8 @@ class TrainingTests(unittest.TestCase):
             )
 
         self.assertEqual((epoch, iteration), (4, 17))
+        self.assertIsNone(payload["scaler"])
+        self.assertEqual(payload["training_config"]["training"]["epochs"], 2)
         self.assertTrue(torch.equal(model.feature.weight, restored.feature.weight))
         self.assertEqual(scheduler.state_dict(), restored_scheduler.state_dict())
 
@@ -201,6 +212,47 @@ class TrainingTests(unittest.TestCase):
         self.assertEqual(tracker.validation[0][1]["epoch"], 1)
         self.assertEqual(len(tracker.metrics), 1)
         self.assertIn("edge_mAP", tracker.metrics[0][0])
+
+    def test_trainer_writes_exact_full_state_milestone(self):
+        config = _config()
+        config["training"]["epochs"] = 2
+        config["training"]["warmup_epochs"] = 0
+        config["training"]["checkpoint"]["policy"] = "best_only"
+        config["training"]["checkpoint"]["milestone_epochs"] = [2]
+        config["evaluation"]["interval_epochs"] = 2
+        model = TinyGraphModel()
+        criterion = GraphCriterion(config, build_matcher(config), model.relation_embed)
+        optimizer = build_optimizer(config, model)
+        scheduler = build_scheduler(config, optimizer, iterations_per_epoch=1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            config["experiment"]["output_dir"] = directory
+            config["experiment"]["name"] = "milestone-test"
+            Trainer(
+                model,
+                criterion,
+                criterion,
+                optimizer,
+                scheduler,
+                [_batch()],
+                [_batch()],
+                config,
+                torch.device("cpu"),
+            ).fit()
+            snapshot = load_runtime_state(
+                Path(directory)
+                / "milestone-test"
+                / "checkpoints"
+                / "epoch_0002.pt"
+            )
+
+        self.assertEqual(snapshot["epoch"], 2)
+        self.assertEqual(snapshot["iteration"], 2)
+        self.assertEqual(snapshot["global_step"], 2)
+        self.assertIn("optimizer", snapshot)
+        self.assertIn("scheduler", snapshot)
+        self.assertIn("runtime_states", snapshot)
+        self.assertIn("training_config", snapshot)
 
     def test_best_only_keeps_best_and_replaceable_latest_checkpoint(self):
         config = _config()

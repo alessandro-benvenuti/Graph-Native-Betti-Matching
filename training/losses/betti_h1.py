@@ -480,14 +480,19 @@ def cycle_space_matching_loss(
             * persistence.pow(2)
         )
 
-    missed_terms = [
-        edge_probabilities.new_tensor(
+    # A missed target class must remain connected to prediction tensors.  The
+    # former constant lifetime penalty reported the miss but supplied no
+    # gradient capable of creating the cycle.  The target class's deterministic
+    # critical edge is the edge whose confidence must rise to realize that
+    # generator in the predicted filtration.
+    missed_terms = []
+    for index in matching.unmatched_target_indices:
+        target = matching.target_classes[index]
+        missed_terms.append(
             diagonal_factor
             * false_negative_weight
-            * (terminal_value - matching.target_classes[index].birth) ** 2
+            * (edge_filtration[target.birth_edge_index] - target.birth).pow(2)
         )
-        for index in matching.unmatched_target_indices
-    ]
     groups = (matched_terms, false_terms, missed_terms)
     if not normalize:
         loss = sum((sum(terms, zero) for terms in groups), zero)

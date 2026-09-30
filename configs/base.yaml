@@ -122,6 +122,9 @@ training:
     interval_epochs: 5
     # A replace-in-place full-state checkpoint for interruption recovery.
     latest_interval_epochs: 1
+    # Optional exact full-state snapshots, stored as
+    # <run>/checkpoints/epoch_NNNN.pt from the same training trajectory.
+    milestone_epochs: []
 
 loss:
   enabled: [boxes, class, cardinality, nodes, edges]
@@ -179,6 +182,8 @@ topology:
     weight: 0.0
     warmup_epochs: 0
     ramp_epochs: 0
+    # When set, warmup/ramp are measured relative to this completed epoch.
+    activation_epoch: null
     unmatched_weight: 1.0
     diagonal_factor: 0.5
     normalize: true
@@ -189,6 +194,7 @@ topology:
     weight: 0.0
     warmup_epochs: 0
     ramp_epochs: 0
+    activation_epoch: null
     false_positive_weight: 1.0
     false_negative_weight: 1.0
     diagonal_factor: 0.5
