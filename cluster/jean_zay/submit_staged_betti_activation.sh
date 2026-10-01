@@ -88,8 +88,14 @@ array_args=()
 if [[ "$action" == "screen" || "$action" == "resume" ]]; then
   array_args=(--array="0-$((workers - 1))")
 fi
-submission="$(sbatch "${array_args[@]}" --qos="${GNBM_QOS:-qos_gpu_a100-t3}" \
-  --time="${GNBM_WALLTIME:-20:00:00}" --chdir="$repo_dir" \
+default_qos="qos_gpu_a100-t3"
+default_walltime="20:00:00"
+if [[ "$config" == *"/smoke.yaml" || "$config" == "smoke.yaml" ]]; then
+  default_qos="qos_gpu_a100-dev"
+  default_walltime="02:00:00"
+fi
+submission="$(sbatch "${array_args[@]}" --qos="${GNBM_QOS:-$default_qos}" \
+  --time="${GNBM_WALLTIME:-$default_walltime}" --chdir="$repo_dir" \
   --output="$log_dir/%x-%A_%a.out" --error="$log_dir/%x-%A_%a.err" \
   "$repo_dir/cluster/jean_zay/staged_betti_activation_a100.slurm")"
 echo "$submission"
