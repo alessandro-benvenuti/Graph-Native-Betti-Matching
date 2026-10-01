@@ -20,6 +20,12 @@ bash cluster/jean_zay/submit_staged_betti_activation.sh status
 Optuna COMPLETE/RUNNING/FAIL counts, latest trial epochs, and resume counts.
 Use `resume BRANCH 4` only after the old array job has stopped. Completion
 markers are emitted only after checkpoint and metric validation succeeds.
+Production actions submit sequential `afterany` dependency chains so a later
+segment resumes after a 20-hour predecessor exits. Set
+`GNBM_STAGED_CHAIN_SEGMENTS` to override the action-specific chain length.
+W&B is always buffered offline on compute nodes; selected final candidates
+stitch node-focal prefix metrics and Betti metrics into one epoch-indexed W&B
+curve. Sync with `GNBM_WANDB_SYNC_PROJECT=gnbm` from a login node.
 
 This directory currently provides production launchers for Jean Zay's H100
 partition and separate environment setup for the A100 migration:

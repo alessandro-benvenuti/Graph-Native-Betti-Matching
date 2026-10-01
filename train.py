@@ -85,6 +85,33 @@ def _enable_deterministic_algorithms():
         )
 
 
+def _bootstrap_tracker_metrics(tracker, history_path: Path, marker_path: Path):
+    """Replay pre-branch metrics once so a candidate has one epoch curve."""
+
+    if tracker is None or not history_path.is_file() or marker_path.is_file():
+        return 0
+    count = 0
+    with history_path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            metrics = {
+                key: value
+                for key, value in record.items()
+                if key not in {"epoch", "iteration"}
+                and isinstance(value, (int, float))
+            }
+            tracker.log_metrics(
+                metrics,
+                iteration=int(record.get("iteration", 0)),
+                epoch=int(record["epoch"]),
+            )
+            count += 1
+    marker_path.write_text("complete\n", encoding="utf-8")
+    return count
+
+
 def main():
     args = _parser().parse_args()
     config = _apply_operational_overrides(load_config(args.config), args)
@@ -186,6 +213,13 @@ def main():
     tracker = None
     if rank == 0:
         run_dir.mkdir(parents=True, exist_ok=True)
+        configured_bootstrap = config["tracking"].get("bootstrap_metrics_path")
+        bootstrap_path = (
+            Path(configured_bootstrap)
+            if configured_bootstrap
+            else run_dir / "wandb-metric-bootstrap.jsonl"
+        )
+        bootstrap_marker = run_dir / ".wandb-metric-bootstrap-complete"
         with (run_dir / "resolved-config.yaml").open("w", encoding="utf-8") as handle:
             yaml.safe_dump(config, handle, sort_keys=False)
         (run_dir / "dataset-manifest.json").write_text(
@@ -215,6 +249,7 @@ def main():
                 "world_size": world_size,
             },
         )
+        _bootstrap_tracker_metrics(tracker, bootstrap_path, bootstrap_marker)
     barrier()
     try:
         Trainer(

@@ -15,9 +15,7 @@ repo_dir="${GNBM_REPO_DIR:-$SLURM_SUBMIT_DIR}"
 source "$repo_dir/cluster/jean_zay/env_a100.sh"
 export WANDB_PROJECT=gnbm
 export WANDB_RUN_GROUP=staged-betti-activation
-if [[ "$GNBM_STAGED_CONFIG" == *"/smoke.yaml" || "$GNBM_STAGED_CONFIG" == "smoke.yaml" ]]; then
-  export WANDB_MODE=offline
-fi
+export WANDB_MODE="${WANDB_MODE:-offline}"
 
 python_bin="$GNBM_VENV/bin/python"
 common=(
@@ -27,6 +25,7 @@ common=(
 )
 
 echo "job=$SLURM_JOB_ID host=$(hostname) action=$GNBM_STAGED_ACTION branch=${GNBM_STAGED_BRANCH:-none}"
+echo "wandb_project=$WANDB_PROJECT wandb_group=$WANDB_RUN_GROUP wandb_mode=$WANDB_MODE"
 "$python_bin" -c 'import optuna; print("optuna=" + optuna.__version__)'
 
 case "$GNBM_STAGED_ACTION" in

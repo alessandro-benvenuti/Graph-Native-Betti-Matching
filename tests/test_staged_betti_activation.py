@@ -21,6 +21,7 @@ from scripts.staged_betti_activation import (
     ABSOLUTE_OBJECTIVES,
     DELTA_OBJECTIVES,
     _deltas,
+    _merge_epoch_records,
     _trial_config,
     load_staged,
 )
@@ -35,6 +36,14 @@ ENVIRONMENT = {
 
 
 class StagedBettiUnitTests(unittest.TestCase):
+    def test_metric_histories_are_epoch_sorted_and_later_phases_win(self):
+        merged = _merge_epoch_records(
+            [{"epoch": 10, "node_mAP": 0.1}, {"epoch": 5, "node_mAP": 0.05}],
+            [{"epoch": 10, "node_mAP": 0.2}, {"epoch": 15, "node_mAP": 0.3}],
+        )
+        self.assertEqual([row["epoch"] for row in merged], [5, 10, 15])
+        self.assertEqual(merged[1]["node_mAP"], 0.2)
+
     def test_protocol_and_delta_signs_are_fixed(self):
         base, staged = load_staged(SMOKE, ENVIRONMENT)
         self.assertEqual(
@@ -211,6 +220,23 @@ class StagedBettiIntegrationTests(unittest.TestCase):
             self.assertTrue(
                 (output / "final-continuations/branch-e2-final-0000/.complete.json").is_file()
             )
+            final_run = output / "final-continuations/branch-e2-final-0000"
+            bootstrap_path = (
+                output
+                / "final-continuations/metric-history/branch-e2-final-0000.jsonl"
+            )
+            bootstrap = [
+                json.loads(line)
+                for line in bootstrap_path.read_text().splitlines()
+            ]
+            stitched = [
+                json.loads(line)
+                for line in (final_run / "stitched-validation-metrics.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual([row["epoch"] for row in bootstrap], [1, 2, 3, 4])
+            self.assertEqual([row["epoch"] for row in stitched], list(range(1, 9)))
+            self.assertEqual([row["betti_active"] for row in stitched[:2]], [0.0, 0.0])
+            self.assertTrue(all(row["betti_active"] == 1.0 for row in stitched[2:]))
 
 
 if __name__ == "__main__":

@@ -109,6 +109,65 @@ def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
             })
 
 
+def _write_jsonl(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(dict(row), sort_keys=True) + "\n")
+    temporary.replace(path)
+
+
+def _merge_epoch_records(*histories: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Merge metric histories, allowing later phases to own boundary epochs."""
+
+    by_epoch: dict[int, dict[str, Any]] = {}
+    for history in histories:
+        for record in history:
+            by_epoch[int(record["epoch"])] = dict(record)
+    return [by_epoch[epoch] for epoch in sorted(by_epoch)]
+
+
+def _candidate_metric_history(args, staged, branch, source_run):
+    """Build the node-focal -> Betti metric history for one selected trial."""
+
+    endpoint = branch + staged["screening_epochs"]
+    prefix_records = _read_records(
+        args.output / "shared-prefix/validation-metrics.jsonl"
+    )
+    screening_records = _read_records(source_run / "validation-metrics.jsonl")
+    prefix_phase = [
+        {**record, "betti_active": 0.0, "betti_activation_epoch": branch}
+        for record in prefix_records
+        if int(record["epoch"]) <= branch
+    ]
+    betti_phase = [
+        {**record, "betti_active": 1.0, "betti_activation_epoch": branch}
+        for record in screening_records
+        if branch < int(record["epoch"]) <= endpoint
+    ]
+    history = _merge_epoch_records(prefix_phase, betti_phase)
+    if not history or int(history[-1]["epoch"]) != endpoint:
+        raise CampaignError(
+            f"candidate history does not reach screening endpoint {endpoint}"
+        )
+    return history
+
+
+def _prefix_metric_history(args, branch):
+    prefix_records = _read_records(
+        args.output / "shared-prefix/validation-metrics.jsonl"
+    )
+    history = [
+        {**record, "betti_active": 0.0, "betti_activation_epoch": branch}
+        for record in prefix_records
+        if int(record["epoch"]) <= branch
+    ]
+    if not history or int(history[-1]["epoch"]) != branch:
+        raise CampaignError(f"shared prefix metric history does not reach epoch {branch}")
+    return history
+
+
 def load_staged(path: Path, environment=None):
     resolved = load_config(path, environment=environment)
     staged = resolved.pop("staged_betti", None)
@@ -510,6 +569,9 @@ def _execute_trial(args, base, staged, branch, trial, reference, *, resuming):
     relative_name = f"screening/branch_{branch:04d}/runs/trial_{trial.number:04d}"
     run_dir = args.output / relative_name
     config_path = directory / "trial-configs" / f"trial_{trial.number:04d}.yaml"
+    bootstrap_path = (
+        directory / "metric-history" / f"trial_{trial.number:04d}.jsonl"
+    )
     if resuming:
         if not config_path.is_file() or not run_dir.is_dir():
             raise CampaignError(f"trial {trial.number} has no resumable config/run")
@@ -520,7 +582,6 @@ def _execute_trial(args, base, staged, branch, trial, reference, *, resuming):
         trial.set_user_attr("resumed_from", str(checkpoint.resolve()))
         config = yaml.safe_load(config_path.read_text())
         config.setdefault("staged_metadata", {})["resume_count"] = resume_count
-        _write_yaml(config_path, config)
     else:
         params = {
             name: trial.suggest_categorical(name, choices)
@@ -529,12 +590,14 @@ def _execute_trial(args, base, staged, branch, trial, reference, *, resuming):
         if run_dir.exists():
             raise CampaignError("refusing to reuse trial directory: " + str(run_dir))
         config = _trial_config(base, staged, branch, trial.number, params, reference)
-        _write_yaml(config_path, config)
         checkpoint = Path(reference["branch_checkpoint"])
         trial.set_user_attr("run_dir", str(run_dir.resolve()))
         trial.set_user_attr("config_path", str(config_path.resolve()))
         trial.set_user_attr("branch_checkpoint", str(checkpoint.resolve()))
         trial.set_user_attr("resume_count", 0)
+    _write_jsonl(bootstrap_path, _prefix_metric_history(args, branch))
+    config["tracking"]["bootstrap_metrics_path"] = str(bootstrap_path.resolve())
+    _write_yaml(config_path, config)
     trial.set_user_attr("slurm_job_id", os.environ.get("SLURM_JOB_ID"))
     trial.set_user_attr("sampler_seed", int(staged["sampler"]["seed"]) + int(os.environ.get("SLURM_ARRAY_TASK_ID", 0)))
     trial.set_user_attr("started_at", utc_now())
@@ -552,6 +615,18 @@ def _execute_trial(args, base, staged, branch, trial, reference, *, resuming):
         raise CampaignError(
             f"trial ended at epoch {aggregation['final_epoch']}, expected {endpoint}"
         )
+    screening_history = [
+        {
+            **record,
+            "betti_active": 1.0,
+            "betti_activation_epoch": branch,
+        }
+        for record in records
+    ]
+    _write_jsonl(
+        run_dir / "stitched-validation-metrics.jsonl",
+        _merge_epoch_records(_prefix_metric_history(args, branch), screening_history),
+    )
     manifest = run_dir / "dataset-manifest.json"
     if not manifest.is_file() or _sha256(manifest) != reference["dataset_manifest_sha256"]:
         raise CampaignError("trial dataset manifest differs from shared control")
@@ -844,6 +919,9 @@ def _run_final_unlocked(args, base, staged):
     relative_name = "final-continuations/" + name
     run_dir = args.output / relative_name
     config_path = args.output / "final-continuations/configs" / (name + ".yaml")
+    bootstrap_path = (
+        args.output / "final-continuations/metric-history" / (name + ".jsonl")
+    )
     complete = run_dir / ".complete.json"
     if complete.is_file():
         print(name + " already complete")
@@ -871,7 +949,12 @@ def _run_final_unlocked(args, base, staged):
             "betti_supervised_epochs": int(config["training"]["epochs"]) - args.branch,
             "control_metrics": final_controls[0],
         })
-        _write_yaml(config_path, config)
+    candidate_history = _candidate_metric_history(
+        args, staged, args.branch, source_run
+    )
+    _write_jsonl(bootstrap_path, candidate_history)
+    config["tracking"]["bootstrap_metrics_path"] = str(bootstrap_path.resolve())
+    _write_yaml(config_path, config)
     own_latest = run_dir / "models/latest_checkpoint.pt"
     checkpoint = own_latest if own_latest.is_file() else source_run / "models/latest_checkpoint.pt"
     payload = _checkpoint(checkpoint)
@@ -888,6 +971,18 @@ def _run_final_unlocked(args, base, staged):
     records = _read_records(run_dir / "validation-metrics.jsonl")
     if not records or int(records[-1]["epoch"]) != final_epoch:
         raise CampaignError("final continuation has no epoch-500 metrics")
+    continued_history = [
+        {
+            **record,
+            "betti_active": 1.0,
+            "betti_activation_epoch": args.branch,
+        }
+        for record in records
+    ]
+    _write_jsonl(
+        run_dir / "stitched-validation-metrics.jsonl",
+        _merge_epoch_records(candidate_history, continued_history),
+    )
     completion = {
         "completed_at": utc_now(), "branch_epoch": args.branch,
         "trial": args.trial, "epoch": final_epoch,

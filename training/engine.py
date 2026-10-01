@@ -483,6 +483,30 @@ class Trainer:
                     )
                     staged_metadata = self.config.get("staged_metadata", {})
                     control_metrics = staged_metadata.get("control_metrics", {})
+                    branch_epoch = staged_metadata.get("branch_epoch")
+                    if branch_epoch is not None:
+                        branch_epoch = int(branch_epoch)
+                        progress = max(0, epoch - branch_epoch)
+                        task_metrics["betti_active"] = float(progress > 0)
+                        task_metrics["betti_supervised_epochs"] = float(progress)
+                        for topology_name in ("betti_h0", "betti_h1"):
+                            topology_config = self.config["topology"][topology_name]
+                            ramp_epochs = int(topology_config.get("ramp_epochs", 0))
+                            multiplier = (
+                                1.0
+                                if ramp_epochs <= 0
+                                else min(1.0, float(progress) / float(ramp_epochs))
+                            )
+                            task_metrics[
+                                "effective_{}_weight".format(topology_name)
+                            ] = float(topology_config["weight"]) * multiplier
+                    elif not any(
+                        self.config["topology"][name]["enabled"]
+                        for name in ("betti_h0", "betti_h1")
+                    ):
+                        task_metrics["betti_active"] = 0.0
+                        task_metrics["effective_betti_h0_weight"] = 0.0
+                        task_metrics["effective_betti_h1_weight"] = 0.0
                     delta_names = {
                         "node_mAP": "delta_node_mAP",
                         "edge_mAP": "delta_edge_mAP",

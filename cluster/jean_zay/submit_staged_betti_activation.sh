@@ -81,6 +81,10 @@ case "$action" in
   test) export GNBM_STAGED_ACTION=test GNBM_STAGED_TRIAL="$value" ;;
 esac
 export WANDB_PROJECT=gnbm WANDB_RUN_GROUP=staged-betti-activation
+# Jean Zay compute nodes cannot reach wandb.ai.  Every segment writes an
+# offline transaction with a stable run ID; sync_wandb_offline.sh appends the
+# segments to the same cloud run from a login node.
+export WANDB_MODE="${GNBM_STAGED_WANDB_MODE:-offline}"
 
 log_dir="$WORK/logs/graph-native-betti-matching/a100"
 mkdir -p "$log_dir" "$GNBM_OUTPUT_DIR"
@@ -94,12 +98,57 @@ if [[ "$config" == *"/smoke.yaml" || "$config" == "smoke.yaml" ]]; then
   default_qos="qos_gpu_a100-dev"
   default_walltime="02:00:00"
 fi
-submission="$(sbatch "${array_args[@]}" --qos="${GNBM_QOS:-$default_qos}" \
-  --time="${GNBM_WALLTIME:-$default_walltime}" --chdir="$repo_dir" \
-  --output="$log_dir/%x-%A_%a.out" --error="$log_dir/%x-%A_%a.err" \
-  "$repo_dir/cluster/jean_zay/staged_betti_activation_a100.slurm")"
-echo "$submission"
-job_id="${submission##* }"
-echo "Queue: squeue -j $job_id"
-echo "Accounting: sacct -j $job_id --format=JobID,State,Elapsed,ExitCode,MaxRSS"
-echo "Logs: $log_dir/gnbm-staged-betti-${job_id}_*.{out,err}"
+if [[ "$config" == *"/smoke.yaml" || "$config" == "smoke.yaml" ]]; then
+  default_segments=1
+else
+  case "$action" in
+    prefix) default_segments=12 ;;
+    screen|resume) default_segments=4 ;;
+    final) default_segments=8 ;;
+    test) default_segments=1 ;;
+  esac
+fi
+segments="${GNBM_STAGED_CHAIN_SEGMENTS:-$default_segments}"
+[[ "$segments" =~ ^[1-9][0-9]*$ ]] || {
+  echo "GNBM_STAGED_CHAIN_SEGMENTS must be a positive integer." >&2
+  exit 2
+}
+(( segments <= 32 )) || {
+  echo "GNBM_STAGED_CHAIN_SEGMENTS must not exceed 32." >&2
+  exit 2
+}
+
+previous_job="${GNBM_STAGED_AFTER_JOB_ID:-}"
+job_ids=()
+for ((segment = 1; segment <= segments; segment++)); do
+  # A successor screening segment must recover stale RUNNING trials before it
+  # allocates WAITING/new trials.  Prefix and final actions discover their own
+  # latest checkpoint and completion marker automatically.
+  if [[ "$action" == "screen" || "$action" == "resume" ]]; then
+    if (( segment > 1 )) || [[ "$action" == "resume" ]]; then
+      export GNBM_STAGED_RESUME=1
+    else
+      export GNBM_STAGED_RESUME=0
+    fi
+  fi
+  dependency_args=()
+  if [[ -n "$previous_job" ]]; then
+    dependency_args=(--dependency="afterany:$previous_job")
+  fi
+  submission="$(sbatch "${array_args[@]}" "${dependency_args[@]}" \
+    --qos="${GNBM_QOS:-$default_qos}" \
+    --time="${GNBM_WALLTIME:-$default_walltime}" --chdir="$repo_dir" \
+    --output="$log_dir/%x-%A_%a.out" --error="$log_dir/%x-%A_%a.err" \
+    "$repo_dir/cluster/jean_zay/staged_betti_activation_a100.slurm")"
+  echo "$submission (segment $segment/$segments)"
+  job_id="${submission##* }"
+  job_ids+=("$job_id")
+  previous_job="$job_id"
+done
+
+job_list="$(IFS=,; echo "${job_ids[*]}")"
+echo "Chain: $job_list"
+echo "Queue: squeue -j $job_list"
+echo "Accounting: sacct -j $job_list --format=JobID,State,Elapsed,ExitCode,MaxRSS"
+echo "Logs: $log_dir/gnbm-staged-betti-{${job_list}}_*.{out,err}"
+echo "W&B: project=$WANDB_PROJECT group=$WANDB_RUN_GROUP mode=$WANDB_MODE"

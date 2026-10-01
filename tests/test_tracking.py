@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from training.tracking import build_tracker
+from train import _bootstrap_tracker_metrics
 
 
 class _FakeRun:
@@ -59,6 +60,49 @@ def _config():
 
 
 class WandbTrackingTests(unittest.TestCase):
+    def test_bootstrap_replays_map_mar_and_activation_phase_once(self):
+        class Tracker:
+            def __init__(self):
+                self.records = []
+
+            def log_metrics(self, metrics, *, iteration, epoch):
+                self.records.append((metrics, iteration, epoch))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            history = root / "history.jsonl"
+            marker = root / ".complete"
+            history.write_text(
+                json.dumps({
+                    "epoch": 200,
+                    "iteration": 1000,
+                    "node_mAP": 0.4,
+                    "node_mAR": 0.5,
+                    "edge_mAP": 0.3,
+                    "edge_mAR": 0.35,
+                    "betti_active": 0.0,
+                }) + "\n" + json.dumps({
+                    "epoch": 205,
+                    "iteration": 1025,
+                    "node_mAP": 0.42,
+                    "node_mAR": 0.51,
+                    "edge_mAP": 0.32,
+                    "edge_mAR": 0.36,
+                    "betti_active": 1.0,
+                }) + "\n",
+                encoding="utf-8",
+            )
+            tracker = Tracker()
+            self.assertEqual(
+                _bootstrap_tracker_metrics(tracker, history, marker), 2
+            )
+            self.assertEqual(
+                _bootstrap_tracker_metrics(tracker, history, marker), 0
+            )
+            self.assertEqual([item[2] for item in tracker.records], [200, 205])
+            self.assertEqual(tracker.records[0][0]["node_mAR"], 0.5)
+            self.assertEqual(tracker.records[1][0]["betti_active"], 1.0)
+
     def test_selection_epochs_and_patience_are_logged(self):
         from training.tracking import WandbTracker
         run = _FakeRun()

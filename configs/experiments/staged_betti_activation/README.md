@@ -51,6 +51,25 @@ campaign command. `summarize` writes a passing `smoke-validation.json` only
 after all six trials, at least one resumed trial, and one final continuation
 are complete.
 
+Use a fresh directory. Production submissions are dependency chains: by
+default `prefix` submits 12 sequential 20-hour jobs, each screening submission
+uses 4 sequential arrays, and each selected final continuation uses 8
+sequential jobs. A successor starts with `afterany` only after its predecessor
+has stopped, restores the latest full-state checkpoint, and exits quickly if
+the stage is already complete. Override a chain length when needed with, for
+example, `GNBM_STAGED_CHAIN_SEGMENTS=16`.
+
+Every compute job forces W&B offline mode. All resumed segments retain the
+same run ID and can be appended into one cloud run from a login node. The
+shared-prefix control records the complete no-Betti curve. Each selected final
+candidate additionally bootstraps its W&B metric history with the shared
+node-focal trajectory through its activation epoch and its own screening
+history, then logs its continuation through epoch 500. Consequently
+`metrics/node_mAP`, `metrics/node_mAR`, `metrics/edge_mAP`, and
+`metrics/edge_mAR` form a single activation-aware curve. The numerical
+`metrics/betti_active` series marks the transition, and the effective H0/H1
+weights are logged during Betti-supervised epochs.
+
 Use a fresh directory:
 
 ```bash
@@ -67,8 +86,9 @@ bash cluster/jean_zay/submit_staged_betti_activation.sh screen 400 4
 bash cluster/jean_zay/submit_staged_betti_activation.sh summarize
 ```
 
-If the shared prefix reaches the wall-time limit, submit `prefix` again. It
-resumes `shared-prefix/models/latest_checkpoint.pt`; it never starts a second
+The dependency chain automatically covers ordinary wall-time exits. If every
+reserved segment is exhausted before completion, submit `prefix` again; it
+resumes `shared-prefix/models/latest_checkpoint.pt` and never starts a second
 trajectory in the marked output directory.
 
 Inspect `summaries/screening-pareto.csv`, duplicate-noise labels, and the
@@ -78,6 +98,15 @@ again after those continuations finish.
 
 Do not use the test split.  Inspect the three Pareto fronts before explicitly
 starting any final continuation.
+
+After jobs finish, upload all offline segments from a login node. The legacy
+append path tolerates the truncated final transaction commonly left by a
+wall-time termination:
+
+```bash
+GNBM_WANDB_SYNC_PROJECT=gnbm \
+  bash cluster/jean_zay/sync_wandb_offline.sh "$GNBM_OUTPUT_DIR"
+```
 
 After selecting exactly one final model, the guarded command below performs
 the campaign's only test evaluation. It records the selection before loading
