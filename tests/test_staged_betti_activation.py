@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 import yaml
 
@@ -36,6 +37,17 @@ ENVIRONMENT = {
 
 
 class StagedBettiUnitTests(unittest.TestCase):
+    def test_two_gpu_execution_preserves_global_batch(self):
+        environment = {
+            **ENVIRONMENT,
+            "GNBM_STAGED_GPUS": "2",
+            "GNBM_STAGED_GLOBAL_BATCH_SIZE": "32",
+        }
+        with patch.dict(os.environ, environment, clear=False):
+            base, _ = load_staged(SMOKE, environment)
+        self.assertTrue(base["runtime"]["distributed"])
+        self.assertEqual(base["data"]["batch_size"], 16)
+
     def test_metric_histories_are_epoch_sorted_and_later_phases_win(self):
         merged = _merge_epoch_records(
             [{"epoch": 10, "node_mAP": 0.1}, {"epoch": 5, "node_mAP": 0.05}],

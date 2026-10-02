@@ -70,6 +70,12 @@ history, then logs its continuation through epoch 500. Consequently
 `metrics/betti_active` series marks the transition, and the effective H0/H1
 weights are logged during Betti-supervised epochs.
 
+Production execution defaults to two A100s with DDP, matching the earlier
+node-focal fine-tuning campaign. The global training batch remains 32, split
+as 16 samples per GPU. `GNBM_STAGED_GPUS` may be set to 1, 2, or 4 before a
+new campaign, but a trajectory must retain the same world size when resumed.
+Changing GPU count therefore requires a fresh output directory.
+
 Use a fresh directory:
 
 ```bash

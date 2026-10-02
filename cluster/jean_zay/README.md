@@ -23,6 +23,8 @@ markers are emitted only after checkpoint and metric validation succeeds.
 Production actions submit sequential `afterany` dependency chains so a later
 segment resumes after a 20-hour predecessor exits. Set
 `GNBM_STAGED_CHAIN_SEGMENTS` to override the action-specific chain length.
+Each training run defaults to two A100s under DDP with global batch 32
+(per-GPU batch 16), matching the previous node-focal fine-tuning setup.
 W&B is always buffered offline on compute nodes; selected final candidates
 stitch node-focal prefix metrics and Betti metrics into one epoch-indexed W&B
 curve. Sync with `GNBM_WANDB_SYNC_PROJECT=gnbm` from a login node.

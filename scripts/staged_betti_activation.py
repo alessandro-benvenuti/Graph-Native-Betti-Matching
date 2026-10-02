@@ -219,6 +219,22 @@ def load_staged(path: Path, environment=None):
         raise CampaignError("staged Betti fixes edge loss to cross-entropy")
     if float(resolved["topology"]["complex"]["alpha"]) != 0.5:
         raise CampaignError("staged Betti fixes node-edge filtration alpha to 0.5")
+    staged_gpus = int(os.environ.get("GNBM_STAGED_GPUS", "1"))
+    global_batch_size = int(
+        os.environ.get(
+            "GNBM_STAGED_GLOBAL_BATCH_SIZE",
+            str(resolved["data"]["batch_size"]),
+        )
+    )
+    if staged_gpus not in {1, 2, 4}:
+        raise CampaignError("GNBM_STAGED_GPUS must be 1, 2, or 4")
+    if global_batch_size <= 0 or global_batch_size % staged_gpus:
+        raise CampaignError(
+            "GNBM_STAGED_GLOBAL_BATCH_SIZE must be positive and divisible by GPUs"
+        )
+    resolved["data"]["batch_size"] = global_batch_size // staged_gpus
+    resolved["runtime"]["distributed"] = staged_gpus > 1
+    validate_config(resolved)
     return resolved, staged
 
 
@@ -247,6 +263,12 @@ def _campaign_marker(output: Path, initial_weights: Path, config_path: Path, *, 
         "initial_weights": str(initial_weights.resolve()),
         "initial_weights_sha256": _sha256(initial_weights),
         "config": str(config_path.resolve()),
+        "execution": {
+            "gpus": int(os.environ.get("GNBM_STAGED_GPUS", "1")),
+            "global_batch_size": int(
+                os.environ.get("GNBM_STAGED_GLOBAL_BATCH_SIZE", "32")
+            ),
+        },
         "test_split_used": False,
     }
     _atomic_json(marker, payload)
@@ -306,10 +328,20 @@ def _command(args, config_path: Path, run_name: str, *, resume=None, initial=Non
             for part in args.train_command
         ]
     else:
-        command = [
-            sys.executable, "-u", "train.py", "--config", str(config_path),
+        staged_gpus = int(os.environ.get("GNBM_STAGED_GPUS", "1"))
+        if staged_gpus > 1:
+            command = [
+                sys.executable, "-u", "-m", "torch.distributed.run",
+                "--standalone", "--nnodes=1",
+                "--nproc_per_node={}".format(staged_gpus),
+                "train.py", "--distributed",
+            ]
+        else:
+            command = [sys.executable, "-u", "train.py"]
+        command.extend([
+            "--config", str(config_path),
             "--output-dir", str(args.output), "--run-name", run_name,
-        ]
+        ])
     if resume is not None:
         command.extend(("--resume", str(resume)))
     elif initial is not None:
@@ -333,6 +365,19 @@ def _run_prefix_unlocked(args, base, staged):
     if run_dir.exists() and not latest.is_file():
         raise CampaignError("shared prefix exists but has no resumable latest checkpoint")
     resume = latest if latest.is_file() else None
+    if resume is not None:
+        checkpoint = _checkpoint(resume)
+        stored_world_size = int(
+            checkpoint.get("trainer_state", {}).get("world_size", 1)
+        )
+        requested_world_size = int(os.environ.get("GNBM_STAGED_GPUS", "1"))
+        if stored_world_size != requested_world_size:
+            raise CampaignError(
+                "shared prefix checkpoint world_size={} cannot resume with {} GPUs; "
+                "use a fresh output directory".format(
+                    stored_world_size, requested_world_size
+                )
+            )
     command = _command(
         args, config_path, run_name, resume=resume,
         initial=None if resume else args.initial_weights,
@@ -1206,6 +1251,15 @@ def print_preflight(args, base, staged):
     print("  branch epochs:", staged["branch_epochs"])
     print("  screening endpoints:", [value + staged["screening_epochs"] for value in staged["branch_epochs"]])
     print("  trials per branch:", staged["trials_per_branch"])
+    gpus = int(os.environ.get("GNBM_STAGED_GPUS", "1"))
+    print(
+        "  execution: gpus={} distributed={} per_gpu_batch={} global_batch={}".format(
+            gpus,
+            base["runtime"]["distributed"],
+            base["data"]["batch_size"],
+            base["data"]["batch_size"] * gpus,
+        )
+    )
     print("  objectives:", list(DELTA_OBJECTIVES))
     print("  matcher: hungarian; node loss: focal; edge loss: cross_entropy; alpha: 0.5")
     print("  test split: UNUSED")

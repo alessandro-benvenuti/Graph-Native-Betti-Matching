@@ -25,8 +25,13 @@ common=(
 )
 
 echo "job=$SLURM_JOB_ID host=$(hostname) action=$GNBM_STAGED_ACTION branch=${GNBM_STAGED_BRANCH:-none}"
+echo "gpus=${GNBM_STAGED_GPUS:-1} global_batch=${GNBM_STAGED_GLOBAL_BATCH_SIZE:-32}"
 echo "wandb_project=$WANDB_PROJECT wandb_group=$WANDB_RUN_GROUP wandb_mode=$WANDB_MODE"
 "$python_bin" -c 'import optuna; print("optuna=" + optuna.__version__)'
+if (( ${GNBM_STAGED_GPUS:-1} > 1 )); then
+  "$python_bin" cluster/jean_zay/check_multi_gpu_ops.py \
+    --devices "$GNBM_STAGED_GPUS"
+fi
 
 case "$GNBM_STAGED_ACTION" in
   prefix)

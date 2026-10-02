@@ -86,6 +86,23 @@ export WANDB_PROJECT=gnbm WANDB_RUN_GROUP=staged-betti-activation
 # segments to the same cloud run from a login node.
 export WANDB_MODE="${GNBM_STAGED_WANDB_MODE:-offline}"
 
+gpus="${GNBM_STAGED_GPUS:-2}"
+case "$gpus" in
+  1|2|4) ;;
+  *) echo "GNBM_STAGED_GPUS must be 1, 2, or 4." >&2; exit 2 ;;
+esac
+global_batch_size="${GNBM_STAGED_GLOBAL_BATCH_SIZE:-32}"
+[[ "$global_batch_size" =~ ^[1-9][0-9]*$ ]] || {
+  echo "GNBM_STAGED_GLOBAL_BATCH_SIZE must be a positive integer." >&2
+  exit 2
+}
+(( global_batch_size % gpus == 0 )) || {
+  echo "Global batch size $global_batch_size is not divisible by $gpus GPUs." >&2
+  exit 2
+}
+export GNBM_STAGED_GPUS="$gpus"
+export GNBM_STAGED_GLOBAL_BATCH_SIZE="$global_batch_size"
+
 log_dir="$WORK/logs/graph-native-betti-matching/a100"
 mkdir -p "$log_dir" "$GNBM_OUTPUT_DIR"
 array_args=()
@@ -137,6 +154,7 @@ for ((segment = 1; segment <= segments; segment++)); do
   fi
   submission="$(sbatch "${array_args[@]}" "${dependency_args[@]}" \
     --qos="${GNBM_QOS:-$default_qos}" \
+    --gres="gpu:$gpus" --cpus-per-task="$((8 * gpus))" \
     --time="${GNBM_WALLTIME:-$default_walltime}" --chdir="$repo_dir" \
     --output="$log_dir/%x-%A_%a.out" --error="$log_dir/%x-%A_%a.err" \
     "$repo_dir/cluster/jean_zay/staged_betti_activation_a100.slurm")"
@@ -151,4 +169,5 @@ echo "Chain: $job_list"
 echo "Queue: squeue -j $job_list"
 echo "Accounting: sacct -j $job_list --format=JobID,State,Elapsed,ExitCode,MaxRSS"
 echo "Logs: $log_dir/gnbm-staged-betti-{${job_list}}_*.{out,err}"
+echo "Training: gpus=$gpus global_batch=$global_batch_size per_gpu_batch=$((global_batch_size / gpus))"
 echo "W&B: project=$WANDB_PROJECT group=$WANDB_RUN_GROUP mode=$WANDB_MODE"
