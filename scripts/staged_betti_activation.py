@@ -466,7 +466,21 @@ def _prepare_controls_unlocked(args, base, staged, branch=None):
         _atomic_json(reference, frozen)
         study = _study(optuna, directory, branch_epoch, staged)
         if not study.user_attrs.get("noise_duplicates_enqueued"):
-            if study.trials:
+            anchor_trials = [
+                trial for trial in study.trials
+                if trial.user_attrs.get("noise_duplicate_group") == "anchor"
+            ]
+            replicates = {
+                trial.user_attrs.get("noise_duplicate_replicate")
+                for trial in anchor_trials
+            }
+            if anchor_trials and (
+                len(anchor_trials) != 2 or replicates != {0, 1}
+            ):
+                raise CampaignError(
+                    "branch has an incomplete or invalid anchor duplicate pair"
+                )
+            if study.trials and not anchor_trials:
                 raise CampaignError(
                     "cannot enqueue noise duplicates after branch trials exist"
                 )
@@ -474,14 +488,15 @@ def _prepare_controls_unlocked(args, base, staged, branch=None):
                 name: choices[(len(choices) - 1) // 2]
                 for name, choices in staged["search_space"].items()
             }
-            for replicate in (0, 1):
-                study.enqueue_trial(
-                    anchor,
-                    user_attrs={
-                        "noise_duplicate_group": "anchor",
-                        "noise_duplicate_replicate": replicate,
-                    },
-                )
+            if not anchor_trials:
+                for replicate in (0, 1):
+                    study.enqueue_trial(
+                        anchor,
+                        user_attrs={
+                            "noise_duplicate_group": "anchor",
+                            "noise_duplicate_replicate": replicate,
+                        },
+                    )
             study.set_user_attr("noise_duplicates_enqueued", True)
         print(f"branch={branch_epoch} control_endpoint={endpoint} checkpoint=OK")
 
