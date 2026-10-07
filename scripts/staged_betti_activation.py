@@ -461,6 +461,10 @@ def _prepare_controls_unlocked(args, base, staged, branch=None):
             "dataset_manifest_sha256": manifest_sha,
             "test_split_used": False,
         }
+        # Compare the persisted JSON representation, not Python container
+        # identities.  aggregate_tail intentionally returns its objective
+        # vector as a tuple, while JSON reloads that value as a list.
+        frozen = json.loads(json.dumps(frozen, sort_keys=True))
         if reference.is_file() and json.loads(reference.read_text()) != frozen:
             raise CampaignError("refusing to change frozen branch control: " + str(reference))
         _atomic_json(reference, frozen)
