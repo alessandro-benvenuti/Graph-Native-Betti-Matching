@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 prefix|prepare|screen|resume|status|summarize|final|test BRANCH [WORKERS_OR_TRIAL]" >&2
+  echo "Usage: $0 prefix|status|summarize | prepare [BRANCH] | screen|resume BRANCH [WORKERS] | final|test BRANCH TRIAL" >&2
   exit 2
 }
 
@@ -12,7 +12,8 @@ action="$1"
 branch="${2:-}"
 value="${3:-}"
 case "$action" in
-  prefix|prepare|status|summarize) [[ -z "$branch" && -z "$value" ]] || usage ;;
+  prefix|status|summarize) [[ -z "$branch" && -z "$value" ]] || usage ;;
+  prepare) [[ -z "$value" && ( -z "$branch" || "$branch" =~ ^[0-9]+$ ) ]] || usage ;;
   screen|resume) [[ "$branch" =~ ^[0-9]+$ ]] || usage ;;
   final|test) [[ "$branch" =~ ^[0-9]+$ && "$value" =~ ^[0-9]+$ ]] || usage ;;
   *) usage ;;
@@ -53,7 +54,9 @@ cd "$repo_dir"
 
 case "$action" in
   prepare)
-    exec "$python_bin" scripts/staged_betti_activation.py prepare "${common[@]}"
+    prepare_args=()
+    [[ -z "$branch" ]] || prepare_args=(--branch "$branch")
+    exec "$python_bin" scripts/staged_betti_activation.py prepare "${common[@]}" "${prepare_args[@]}"
     ;;
   summarize)
     exec "$python_bin" scripts/staged_betti_activation.py summarize "${common[@]}"

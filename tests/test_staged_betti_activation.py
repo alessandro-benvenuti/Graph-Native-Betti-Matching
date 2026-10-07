@@ -202,6 +202,21 @@ class StagedBettiIntegrationTests(unittest.TestCase):
             self.assertEqual(len(set(resumed.trials[0].params)), 4)
             config = yaml.safe_load(Path(resumed.trials[0].user_attrs["config_path"]).read_text())
             self.assertEqual(config["topology"]["betti_h0"]["activation_epoch"], 2)
+            trial_bootstrap = [
+                json.loads(line)
+                for line in Path(config["tracking"]["bootstrap_metrics_path"])
+                .read_text().splitlines()
+            ]
+            self.assertEqual([row["epoch"] for row in trial_bootstrap], [1, 2])
+            trial_stitched = [
+                json.loads(line)
+                for line in (
+                    Path(resumed.trials[0].user_attrs["run_dir"])
+                    / "stitched-validation-metrics.jsonl"
+                ).read_text().splitlines()
+            ]
+            self.assertEqual([row["epoch"] for row in trial_stitched], [1, 2, 3, 4])
+            self.assertEqual(len({row["epoch"] for row in trial_stitched}), 4)
             provenance = json.loads(
                 (Path(resumed.trials[0].user_attrs["run_dir"]) / "resume-provenance.json").read_text()
             )
@@ -249,6 +264,67 @@ class StagedBettiIntegrationTests(unittest.TestCase):
             self.assertEqual([row["epoch"] for row in stitched], list(range(1, 9)))
             self.assertEqual([row["betti_active"] for row in stitched[:2]], [0.0, 0.0])
             self.assertTrue(all(row["betti_active"] == 1.0 for row in stitched[2:]))
+
+    def test_branch_prepare_is_incremental_frozen_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "staged"
+            initial = root / "initial.pt"
+            initial.write_bytes(b"model-only-initialization")
+
+            self.run_checked(self.command("prefix", output, initial))
+            (output / "shared-prefix/.complete.json").unlink()
+            history_path = output / "shared-prefix/validation-metrics.jsonl"
+            rows = [
+                json.loads(line)
+                for line in history_path.read_text().splitlines()
+                if line.strip()
+            ]
+            history_path.write_text(
+                "".join(
+                    json.dumps(row) + "\n"
+                    for row in rows
+                    if int(row["epoch"]) <= 5
+                )
+            )
+            checkpoint = output / "shared-prefix/checkpoints/epoch_0002.pt"
+            checkpoint_before = checkpoint.read_bytes()
+            history_before = history_path.read_bytes()
+
+            prepare_two = self.command(
+                "prepare", output, initial, "--branch", "2"
+            )
+            self.run_checked(prepare_two)
+            reference = output / "screening/branch_0002/control-reference.json"
+            frozen_before = reference.read_bytes()
+            self.run_checked(prepare_two)
+
+            self.assertEqual(reference.read_bytes(), frozen_before)
+            self.assertEqual(checkpoint.read_bytes(), checkpoint_before)
+            self.assertEqual(history_path.read_bytes(), history_before)
+            self.assertFalse(
+                (output / "screening/branch_0004/control-reference.json").exists()
+            )
+
+            missing_endpoint = subprocess.run(
+                self.command("prepare", output, initial, "--branch", "4"),
+                cwd=ROOT,
+                env=self.environment,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(missing_endpoint.returncode, 0)
+            self.assertIn("epoch 6", missing_endpoint.stderr)
+
+            incomplete_all = subprocess.run(
+                self.command("prepare", output, initial),
+                cwd=ROOT,
+                env=self.environment,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(incomplete_all.returncode, 0)
+            self.assertIn("shared prefix is not complete", incomplete_all.stderr)
 
 
 if __name__ == "__main__":

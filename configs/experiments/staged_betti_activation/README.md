@@ -97,6 +97,22 @@ reserved segment is exhausted before completion, submit `prefix` again; it
 resumes `shared-prefix/models/latest_checkpoint.pt` and never starts a second
 trajectory in the marked output directory.
 
+Once a branch checkpoint and its matched 50-epoch control endpoint exist, that
+branch may be prepared and screened while the shared prefix continues.  The
+branch-scoped command freezes only that control reference and does not require
+the epoch-500 completion marker:
+
+```bash
+bash cluster/jean_zay/submit_staged_betti_activation.sh prepare 200
+bash cluster/jean_zay/submit_staged_betti_activation.sh screen 200 2
+```
+
+Branch 300 becomes eligible after validation epoch 350, and branch 400 after
+validation epoch 450.  Calling `prepare` without a branch retains the stricter
+final audit: it requires the completed prefix and validates every branch.
+Each screening run bootstraps only the shared metric history through its own
+activation epoch, so later prefix writes cannot change its W&B history.
+
 Inspect `summaries/screening-pareto.csv`, duplicate-noise labels, and the
 descriptive candidate suggestions. Then submit zero, one, or at most two
 reviewed candidates per branch with `final BRANCH TRIAL`. Run `summarize`

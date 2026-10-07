@@ -412,10 +412,12 @@ def _records_through(records, endpoint):
     return selected
 
 
-def _prepare_controls_unlocked(args, base, staged):
+def _prepare_controls_unlocked(args, base, staged, branch=None):
     prefix = args.output / "shared-prefix"
-    if not (prefix / ".complete.json").is_file():
+    if branch is None and not (prefix / ".complete.json").is_file():
         raise CampaignError("shared prefix is not complete")
+    if branch is not None and branch not in staged["branch_epochs"]:
+        raise CampaignError("branch is not configured: " + str(branch))
     history = _read_records(prefix / "validation-metrics.jsonl")
     manifest = prefix / "dataset-manifest.json"
     if not manifest.is_file():
@@ -425,29 +427,30 @@ def _prepare_controls_unlocked(args, base, staged):
     expected_prefix = _prefix_config(base, staged)
     previous_iteration = -1
     optuna = _import_optuna()
-    for branch in staged["branch_epochs"]:
-        snapshot = prefix / "checkpoints" / f"epoch_{branch:04d}.pt"
-        payload = _checkpoint(snapshot, branch)
+    branches = staged["branch_epochs"] if branch is None else [branch]
+    for branch_epoch in branches:
+        snapshot = prefix / "checkpoints" / f"epoch_{branch_epoch:04d}.pt"
+        payload = _checkpoint(snapshot, branch_epoch)
         stored = payload["training_config"]
         for key in ("model", "data", "loss"):
             if stored.get(key) != expected_prefix.get(key):
                 raise CampaignError(
-                    f"epoch-{branch} checkpoint has incompatible {key} configuration"
+                    f"epoch-{branch_epoch} checkpoint has incompatible {key} configuration"
                 )
         if stored.get("training", {}).get("optimizer") != expected_prefix["training"]["optimizer"]:
-            raise CampaignError(f"epoch-{branch} checkpoint optimizer configuration changed")
+            raise CampaignError(f"epoch-{branch_epoch} checkpoint optimizer configuration changed")
         if stored.get("training", {}).get("scheduler") != expected_prefix["training"]["scheduler"]:
-            raise CampaignError(f"epoch-{branch} checkpoint scheduler configuration changed")
+            raise CampaignError(f"epoch-{branch_epoch} checkpoint scheduler configuration changed")
         if int(payload["iteration"]) <= previous_iteration:
             raise CampaignError("shared-prefix checkpoint iterations are not increasing")
         previous_iteration = int(payload["iteration"])
-        endpoint = branch + staged["screening_epochs"]
+        endpoint = branch_epoch + staged["screening_epochs"]
         aggregation = aggregate_tail(_records_through(history, endpoint), observations)
-        directory = args.output / "screening" / f"branch_{branch:04d}"
+        directory = args.output / "screening" / f"branch_{branch_epoch:04d}"
         reference = directory / "control-reference.json"
         frozen = {
             "schema_version": 1,
-            "branch_epoch": branch,
+            "branch_epoch": branch_epoch,
             "screening_endpoint": endpoint,
             "branch_checkpoint": str(snapshot.resolve()),
             "branch_checkpoint_sha256": _sha256(snapshot),
@@ -461,7 +464,7 @@ def _prepare_controls_unlocked(args, base, staged):
         if reference.is_file() and json.loads(reference.read_text()) != frozen:
             raise CampaignError("refusing to change frozen branch control: " + str(reference))
         _atomic_json(reference, frozen)
-        study = _study(optuna, directory, branch, staged)
+        study = _study(optuna, directory, branch_epoch, staged)
         if not study.user_attrs.get("noise_duplicates_enqueued"):
             if study.trials:
                 raise CampaignError(
@@ -480,13 +483,13 @@ def _prepare_controls_unlocked(args, base, staged):
                     },
                 )
             study.set_user_attr("noise_duplicates_enqueued", True)
-        print(f"branch={branch} control_endpoint={endpoint} checkpoint=OK")
+        print(f"branch={branch_epoch} control_endpoint={endpoint} checkpoint=OK")
 
 
 def prepare_controls(args, base, staged):
     _campaign_marker(args.output, args.initial_weights, args.config)
     with AllocationLock(args.output / ".prepare.lock"):
-        _prepare_controls_unlocked(args, base, staged)
+        _prepare_controls_unlocked(args, base, staged, branch=args.branch)
 
 
 def _import_optuna():
