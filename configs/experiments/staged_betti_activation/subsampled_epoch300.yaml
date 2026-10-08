@@ -1,0 +1,28 @@
+defaults:
+  - screening.yaml
+
+experiment:
+  name: staged-betti-subsampled-epoch300-placeholder
+
+tracking:
+  tags: [gnbm, staged-betti-activation, topology-subsampling, epoch-300, validation-only]
+
+topology:
+  sampling:
+    enabled: true
+    # Per DDP rank: 4 of the 16 local graphs on the current 2-GPU setup.
+    # H0 and H1 share a random ordering so their scored sets overlap.
+    max_graphs_per_rank: 4
+
+staged_betti:
+  # Tune at one mature-but-not-converged checkpoint. Activation timing is
+  # tested separately after selecting one or two configurations.
+  branch_epochs: [300]
+  screening_epochs: 15
+  trials_per_branch: 8
+  search_space:
+    topology.betti_h0.weight: [0.001, 0.003, 0.01]
+    topology.betti_h1.weight: [0.003, 0.01]
+    topology.betti_h1.false_positive_weight: [0.1, 0.25]
+    betti_ramp_epochs: [10]
+

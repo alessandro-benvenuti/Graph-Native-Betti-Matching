@@ -573,6 +573,20 @@ def validate_config(config: Mapping[str, Any]) -> None:
     topology = config.get("topology")
     if not isinstance(topology, Mapping):
         raise ConfigError("topology must be a mapping")
+    topology_sampling = topology.get("sampling")
+    if not isinstance(topology_sampling, Mapping):
+        raise ConfigError("topology.sampling must be a mapping")
+    if not isinstance(topology_sampling.get("enabled"), bool):
+        raise ConfigError("topology.sampling.enabled must be a boolean")
+    sampling_limit = topology_sampling.get("max_graphs_per_rank")
+    if sampling_limit is not None:
+        _positive_int(
+            sampling_limit, "topology.sampling.max_graphs_per_rank"
+        )
+    if topology_sampling["enabled"] and sampling_limit is None:
+        raise ConfigError(
+            "topology.sampling.max_graphs_per_rank is required when enabled"
+        )
     topology_complex = topology.get("complex")
     if not isinstance(topology_complex, Mapping):
         raise ConfigError("topology.complex must be a mapping")

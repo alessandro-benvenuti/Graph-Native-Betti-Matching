@@ -137,3 +137,25 @@ test data and refuses to evaluate a different model afterward:
 ```bash
 bash cluster/jean_zay/submit_staged_betti_activation.sh test 300 TRIAL_NUMBER
 ```
+
+## Subsampled epoch-300 search
+
+`subsampled_epoch300.yaml` is the feasible follow-up to the full-batch timing
+diagnosis. During training it computes H0/H1 on at most four eligible graphs
+per rank and averages only those selected losses; it does not divide by the
+full local batch. Validation remains full-batch. The search uses the frozen
+epoch-300 prefix checkpoint, eight trials, and a 15-epoch endpoint.
+
+It can reuse an existing staged campaign whose epoch-300 study has not yet
+been created:
+
+```bash
+export GNBM_STAGED_CONFIG_OVERRIDE="configs/experiments/staged_betti_activation/subsampled_epoch300.yaml"
+bash cluster/jean_zay/submit_staged_betti_activation.sh prepare 300
+bash cluster/jean_zay/submit_staged_betti_activation.sh screen 300 2
+```
+
+Keep the existing `GNBM_OUTPUT_DIR`, `GNBM_INITIAL_WEIGHTS`, GPU count, and
+global batch variables. Do not run this concurrently with old branch-200
+screening jobs. Inspect `topology_scored_graphs` and the per-loss eligible,
+selected, and sampling-fraction training metrics before extending the search.

@@ -169,6 +169,11 @@ loss:
       tolerance: 0.02
 
 topology:
+  sampling:
+    # Training-only graph subsampling. Validation always evaluates every
+    # topology-eligible graph so validation losses remain comparable.
+    enabled: false
+    max_graphs_per_rank: null
   complex:
     mode: matched_only
     aggregation: hybrid

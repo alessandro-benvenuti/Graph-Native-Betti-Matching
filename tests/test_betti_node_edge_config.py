@@ -16,6 +16,30 @@ ENVIRONMENT = {
 
 
 class NodeEdgeBettiConfigTests(unittest.TestCase):
+    def test_topology_sampling_defaults_to_full_training_batch(self):
+        config = load_config(
+            ROOT / "configs" / "pretrain_mixed.yaml",
+            environment=ENVIRONMENT,
+        )
+        self.assertFalse(config["topology"]["sampling"]["enabled"])
+        self.assertIsNone(
+            config["topology"]["sampling"]["max_graphs_per_rank"]
+        )
+
+    def test_enabled_topology_sampling_requires_positive_limit(self):
+        config = load_config(
+            ROOT / "configs" / "pretrain_mixed.yaml",
+            environment=ENVIRONMENT,
+        )
+        config["topology"]["sampling"]["enabled"] = True
+        with self.assertRaises(ConfigError):
+            validate_config(config)
+        config["topology"]["sampling"]["max_graphs_per_rank"] = 0
+        with self.assertRaises(ConfigError):
+            validate_config(config)
+        config["topology"]["sampling"]["max_graphs_per_rank"] = 4
+        validate_config(config)
+
     def test_smoke_overlay_enables_node_aware_hybrid_complex(self):
         config = load_config(
             ROOT / "configs" / "smoke_mixed_focal_betti_node_edge.yaml",

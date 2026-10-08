@@ -68,6 +68,16 @@ During training, a Betti term whose scheduled weight is zero is not computed.
 This makes the warmup computation-free and prevents its extra relation-head
 calls from changing the random-number stream before topology supervision starts.
 
+`topology.sampling` optionally limits topology computation during training to
+a uniform sample of eligible graphs on each DDP rank. H0 and H1 restrict the
+same random graph ordering to their respective eligibility sets, which keeps
+their scored graphs strongly overlapping. Each term is averaged over its
+selected graphs, not divided by the full batch, so the estimator keeps the
+original expected loss scale and the configured Betti weights do not need an
+inverse-sampling correction. Validation always uses every eligible graph.
+Training logs expose eligible and selected counts, sampling fractions, and the
+number of graphs for which relation pairs were actually scored.
+
 When `detach_unmatched_edge_probabilities` is enabled, edges incident to an
 unmatched topology vertex still participate in the forward filtration, but
 their relation probabilities are detached. Gradients continue through the

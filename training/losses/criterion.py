@@ -451,6 +451,34 @@ class GraphCriterion(nn.Module):
             configuration["ramp_epochs"],
         )
 
+    def _sample_topology_graphs(self, eligible):
+        """Uniformly subsample eligible graphs with coupled H0/H1 ordering.
+
+        Restricting one random permutation to either eligibility set produces
+        a uniform sample without replacement for each loss.  The shared order
+        also maximizes overlap in the expensive graph scoring performed for
+        H0 and H1.  Validation deliberately bypasses sampling.
+        """
+        sampling = self.topology["sampling"]
+        if self.validation or not sampling["enabled"]:
+            return {name: set(indices) for name, indices in eligible.items()}
+
+        limit = int(sampling["max_graphs_per_rank"])
+        union = sorted(set().union(*eligible.values()))
+        if not union:
+            return {name: set() for name in eligible}
+        # CPU RNG is part of the saved per-rank runtime state, so timeout
+        # resumption reproduces the sampling stream without a GPU sync here.
+        permutation = torch.randperm(len(union)).tolist()
+        ordered = [union[index] for index in permutation]
+        selected = {}
+        for name, indices in eligible.items():
+            eligible_set = set(indices)
+            selected[name] = set(
+                [batch for batch in ordered if batch in eligible_set][:limit]
+            )
+        return selected
+
     def loss_topology(self, tokens, node_logits, target_edges, assignments):
         zero = tokens.sum() * 0.0
         metrics = {"betti_h0": zero, "betti_h1": zero}
@@ -463,6 +491,11 @@ class GraphCriterion(nn.Module):
                 or self._topology_weight(name) > 0.0
             )
         if not any(enabled.values()):
+            for name in ("betti_h0", "betti_h1"):
+                metrics[f"topology_{name}_eligible_graphs"] = zero.detach()
+                metrics[f"topology_{name}_selected_graphs"] = zero.detach()
+                metrics[f"topology_{name}_sampling_fraction"] = zero.detach()
+            metrics["topology_scored_graphs"] = zero.detach()
             return metrics
         sample_losses = {"betti_h0": [], "betti_h1": []}
         object_tokens = tokens[..., : self.object_queries, :]
@@ -471,6 +504,8 @@ class GraphCriterion(nn.Module):
         ]
         complex_configuration = self.topology["complex"]
         node_aware = complex_configuration["mode"] == "node_aware"
+        graph_states = []
+        eligible = {"betti_h0": [], "betti_h1": []}
         for batch, (source, target) in enumerate(assignments):
             source = source.to(tokens.device)
             target = target.to(tokens.device)
@@ -479,8 +514,31 @@ class GraphCriterion(nn.Module):
                 node_logits[batch], source
             )
             count = int(selected.numel())
-            if count < 2:
-                continue
+            graph_states.append(
+                {
+                    "target": target,
+                    "selected": selected,
+                    "node_probabilities": node_probabilities,
+                    "target_presence": target_presence,
+                    "count": count,
+                }
+            )
+            if enabled["betti_h0"] and count >= 2 and not (
+                node_aware and matched_count == 0
+            ):
+                eligible["betti_h0"].append(batch)
+            if enabled["betti_h1"] and count >= 3:
+                eligible["betti_h1"].append(batch)
+
+        selected_graphs = self._sample_topology_graphs(eligible)
+        scored_graphs = set().union(*selected_graphs.values())
+        for batch in sorted(scored_graphs):
+            state = graph_states[batch]
+            target = state["target"]
+            selected = state["selected"]
+            node_probabilities = state["node_probabilities"]
+            target_presence = state["target_presence"]
+            count = state["count"]
             pairs = torch.combinations(
                 torch.arange(count, device=tokens.device), r=2
             )
@@ -512,16 +570,14 @@ class GraphCriterion(nn.Module):
                 target_edges[batch], target, tokens.device
             )
 
-            for name, minimum_nodes, loss_function in (
-                ("betti_h0", 2, h0_betti_matching_loss),
-                ("betti_h1", 3, cycle_space_matching_loss),
+            for name, loss_function in (
+                ("betti_h0", h0_betti_matching_loss),
+                ("betti_h1", cycle_space_matching_loss),
             ):
-                if not enabled[name] or count < minimum_nodes:
+                if batch not in selected_graphs[name]:
                     continue
                 # Reduced H0 needs a real target component as its fixed oldest
                 # class. Empty-target images remain covered by node focal/CE.
-                if name == "betti_h0" and node_aware and matched_count == 0:
-                    continue
                 configuration = self.topology[name]
                 keywords = dict(
                     num_vertices=count,
@@ -554,6 +610,21 @@ class GraphCriterion(nn.Module):
         for name in metrics:
             if sample_losses[name]:
                 metrics[name] = torch.stack(sample_losses[name]).mean()
+        for name in ("betti_h0", "betti_h1"):
+            eligible_count = len(eligible[name])
+            selected_count = len(selected_graphs[name])
+            metrics[f"topology_{name}_eligible_graphs"] = zero.new_tensor(
+                float(eligible_count)
+            )
+            metrics[f"topology_{name}_selected_graphs"] = zero.new_tensor(
+                float(selected_count)
+            )
+            metrics[f"topology_{name}_sampling_fraction"] = zero.new_tensor(
+                float(selected_count) / max(1, eligible_count)
+            )
+        metrics["topology_scored_graphs"] = zero.new_tensor(
+            float(len(scored_graphs))
+        )
         return metrics
 
     def forward(self, tokens, predictions, targets):
@@ -585,12 +656,16 @@ class GraphCriterion(nn.Module):
             targets["edges"],
             assignments,
         )
-        for name, value in topology_losses.items():
+        for name in ("betti_h0", "betti_h1"):
+            value = topology_losses[name]
             configuration = self.topology[name]
             weight = self._topology_weight(name)
             losses[name] = value
             losses[name + "_weighted"] = value * weight
             losses[name + "_effective_weight"] = value.new_tensor(weight)
+        for name, value in topology_losses.items():
+            if name not in {"betti_h0", "betti_h1"}:
+                losses[name] = value
 
         losses["total"] = sum(
             losses[name] * self.weights[name]

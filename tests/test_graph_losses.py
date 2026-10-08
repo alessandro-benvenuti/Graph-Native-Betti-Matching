@@ -208,6 +208,91 @@ class GraphCriterionTests(unittest.TestCase):
         losses["total"].backward()
         self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
 
+    def test_topology_subsampling_reduces_scoring_without_dilution(self):
+        config = _config()
+        config["topology"]["sampling"].update(
+            enabled=True, max_graphs_per_rank=2
+        )
+        for name in ("betti_h0", "betti_h1"):
+            config["topology"][name].update(
+                enabled=True, log_only=False, weight=0.2
+            )
+        sampled, sampled_relation = self._criterion(config)
+        full_config = copy.deepcopy(config)
+        full_config["topology"]["sampling"]["enabled"] = False
+        full, full_relation = self._criterion(full_config)
+        full_relation.load_state_dict(sampled_relation.state_dict())
+
+        tokens, predictions, targets = _batch()
+        tokens = tokens.repeat(4, 1, 1).detach().requires_grad_(True)
+        logits = (
+            predictions["pred_logits"]
+            .repeat(4, 1, 1)
+            .detach()
+            .requires_grad_(True)
+        )
+        edges = targets["edges"] * 4
+        assignments = [
+            (torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))
+            for _ in range(4)
+        ]
+        torch.manual_seed(91)
+        sampled_losses = sampled.loss_topology(tokens, logits, edges, assignments)
+        full_losses = full.loss_topology(tokens, logits, edges, assignments)
+
+        self.assertEqual(
+            float(sampled_losses["topology_betti_h0_eligible_graphs"]), 4.0
+        )
+        self.assertEqual(
+            float(sampled_losses["topology_betti_h0_selected_graphs"]), 2.0
+        )
+        self.assertEqual(float(sampled_losses["topology_scored_graphs"]), 2.0)
+        self.assertEqual(sampled_relation.calls, 4)
+        # Identical graphs make the selected-graph mean exactly equal to the
+        # full mean. Dividing by the original batch size would fail this.
+        self.assertTrue(
+            torch.allclose(sampled_losses["betti_h0"], full_losses["betti_h0"])
+        )
+        self.assertTrue(
+            torch.allclose(sampled_losses["betti_h1"], full_losses["betti_h1"])
+        )
+        (sampled_losses["betti_h0"] + sampled_losses["betti_h1"]).backward()
+        self.assertTrue(torch.isfinite(sampled_relation.linear.weight.grad).all())
+
+    def test_validation_ignores_topology_subsampling(self):
+        config = _config()
+        config["topology"]["sampling"].update(
+            enabled=True, max_graphs_per_rank=1
+        )
+        for name in ("betti_h0", "betti_h1"):
+            config["topology"][name].update(
+                enabled=True, log_only=False, weight=0.2
+            )
+        relation = CountingRelationHead()
+        matcher_config = config["model"]["matcher"]
+        criterion = GraphCriterion(
+            config,
+            HungarianMatcher(
+                matcher_config["class_cost"], matcher_config["node_cost"]
+            ),
+            relation,
+            validation=True,
+        )
+        tokens, predictions, targets = _batch()
+        tokens = tokens.repeat(3, 1, 1)
+        logits = predictions["pred_logits"].repeat(3, 1, 1)
+        assignments = [
+            (torch.tensor([0, 1, 2]), torch.tensor([0, 1, 2]))
+            for _ in range(3)
+        ]
+        losses = criterion.loss_topology(
+            tokens, logits, targets["edges"] * 3, assignments
+        )
+        self.assertEqual(
+            float(losses["topology_betti_h1_selected_graphs"]), 3.0
+        )
+        self.assertEqual(float(losses["topology_scored_graphs"]), 3.0)
+
     def test_node_aware_betti_reaches_unmatched_node_logits(self):
         config = _config()
         config["topology"]["complex"].update(
