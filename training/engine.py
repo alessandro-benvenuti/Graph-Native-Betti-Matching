@@ -412,6 +412,19 @@ class Trainer:
                         performance["global_batch_size"],
                     )
                 )
+                topology_sampling = self.config["topology"]["sampling"]
+                if topology_sampling["enabled"]:
+                    print(
+                        "topology_sampling epoch={} h0_selected={:.3f}/{:.3f} "
+                        "h1_selected={:.3f}/{:.3f} scored_graphs={:.3f}".format(
+                            epoch,
+                            means.get("topology_betti_h0_selected_graphs", 0.0),
+                            means.get("topology_betti_h0_eligible_graphs", 0.0),
+                            means.get("topology_betti_h1_selected_graphs", 0.0),
+                            means.get("topology_betti_h1_eligible_graphs", 0.0),
+                            means.get("topology_scored_graphs", 0.0),
+                        )
+                    )
                 performance_path = output.parent / "performance.jsonl"
                 performance_path.parent.mkdir(parents=True, exist_ok=True)
                 with performance_path.open("a", encoding="utf-8") as handle:
