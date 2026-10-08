@@ -174,6 +174,9 @@ topology:
     # topology-eligible graph so validation losses remain comparable.
     enabled: false
     max_graphs_per_rank: null
+    # Optional per-loss overrides. A null value inherits the common limit.
+    betti_h0_max_graphs_per_rank: null
+    betti_h1_max_graphs_per_rank: null
   complex:
     mode: matched_only
     aggregation: hybrid

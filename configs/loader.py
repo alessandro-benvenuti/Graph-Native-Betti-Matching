@@ -578,15 +578,28 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ConfigError("topology.sampling must be a mapping")
     if not isinstance(topology_sampling.get("enabled"), bool):
         raise ConfigError("topology.sampling.enabled must be a boolean")
-    sampling_limit = topology_sampling.get("max_graphs_per_rank")
-    if sampling_limit is not None:
-        _positive_int(
-            sampling_limit, "topology.sampling.max_graphs_per_rank"
-        )
-    if topology_sampling["enabled"] and sampling_limit is None:
-        raise ConfigError(
-            "topology.sampling.max_graphs_per_rank is required when enabled"
-        )
+    sampling_limits = {}
+    for sampling_name in (
+        "max_graphs_per_rank",
+        "betti_h0_max_graphs_per_rank",
+        "betti_h1_max_graphs_per_rank",
+    ):
+        sampling_limit = topology_sampling.get(sampling_name)
+        sampling_limits[sampling_name] = sampling_limit
+        if sampling_limit is not None:
+            _positive_int(
+                sampling_limit, f"topology.sampling.{sampling_name}"
+            )
+    if topology_sampling["enabled"]:
+        common_limit = sampling_limits["max_graphs_per_rank"]
+        for name in ("betti_h0", "betti_h1"):
+            if (
+                sampling_limits[f"{name}_max_graphs_per_rank"] is None
+                and common_limit is None
+            ):
+                raise ConfigError(
+                    f"topology.sampling requires a limit for {name}"
+                )
     topology_complex = topology.get("complex")
     if not isinstance(topology_complex, Mapping):
         raise ConfigError("topology.complex must be a mapping")

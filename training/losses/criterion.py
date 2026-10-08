@@ -463,7 +463,6 @@ class GraphCriterion(nn.Module):
         if self.validation or not sampling["enabled"]:
             return {name: set(indices) for name, indices in eligible.items()}
 
-        limit = int(sampling["max_graphs_per_rank"])
         union = sorted(set().union(*eligible.values()))
         if not union:
             return {name: set() for name in eligible}
@@ -473,6 +472,10 @@ class GraphCriterion(nn.Module):
         ordered = [union[index] for index in permutation]
         selected = {}
         for name, indices in eligible.items():
+            configured_limit = sampling.get(f"{name}_max_graphs_per_rank")
+            if configured_limit is None:
+                configured_limit = sampling["max_graphs_per_rank"]
+            limit = int(configured_limit)
             eligible_set = set(indices)
             selected[name] = set(
                 [batch for batch in ordered if batch in eligible_set][:limit]

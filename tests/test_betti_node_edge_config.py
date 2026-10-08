@@ -25,6 +25,9 @@ class NodeEdgeBettiConfigTests(unittest.TestCase):
         self.assertIsNone(
             config["topology"]["sampling"]["max_graphs_per_rank"]
         )
+        self.assertIsNone(
+            config["topology"]["sampling"]["betti_h0_max_graphs_per_rank"]
+        )
 
     def test_enabled_topology_sampling_requires_positive_limit(self):
         config = load_config(
@@ -39,6 +42,16 @@ class NodeEdgeBettiConfigTests(unittest.TestCase):
             validate_config(config)
         config["topology"]["sampling"]["max_graphs_per_rank"] = 4
         validate_config(config)
+
+        config["topology"]["sampling"].update(
+            max_graphs_per_rank=None,
+            betti_h0_max_graphs_per_rank=4,
+            betti_h1_max_graphs_per_rank=2,
+        )
+        validate_config(config)
+        config["topology"]["sampling"]["betti_h1_max_graphs_per_rank"] = None
+        with self.assertRaises(ConfigError):
+            validate_config(config)
 
     def test_smoke_overlay_enables_node_aware_hybrid_complex(self):
         config = load_config(

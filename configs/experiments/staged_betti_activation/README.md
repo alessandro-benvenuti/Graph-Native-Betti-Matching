@@ -159,3 +159,16 @@ Keep the existing `GNBM_OUTPUT_DIR`, `GNBM_INITIAL_WEIGHTS`, GPU count, and
 global batch variables. Do not run this concurrently with old branch-200
 screening jobs. Inspect `topology_scored_graphs` and the per-loss eligible,
 selected, and sampling-fraction training metrics before extending the search.
+
+Before launching the search, profile the epoch-300 checkpoint with:
+
+```bash
+bash cluster/jean_zay/submit_betti_sampling_profile.sh
+```
+
+The one-A100 diagnostic uses identical train streams for baseline, H0-only,
+H1-only, full H0+H1, and H0+H1 with two or four graphs per rank. It writes
+`summary.json` and `timings.csv` under
+`$GNBM_OUTPUT_DIR/profiles/betti-sampling-epoch300`. The JSON also compares
+sampled topology gradients against the full-batch topology gradient. This is
+a diagnostic only: it does not create or mutate an Optuna study.

@@ -293,6 +293,23 @@ class GraphCriterionTests(unittest.TestCase):
         )
         self.assertEqual(float(losses["topology_scored_graphs"]), 3.0)
 
+    def test_topology_sampling_accepts_separate_h0_h1_budgets(self):
+        config = _config()
+        config["topology"]["sampling"].update(
+            enabled=True,
+            max_graphs_per_rank=None,
+            betti_h0_max_graphs_per_rank=3,
+            betti_h1_max_graphs_per_rank=1,
+        )
+        criterion, _ = self._criterion(config)
+        torch.manual_seed(7)
+        selected = criterion._sample_topology_graphs(
+            {"betti_h0": [0, 1, 2, 3], "betti_h1": [0, 1, 2, 3]}
+        )
+        self.assertEqual(len(selected["betti_h0"]), 3)
+        self.assertEqual(len(selected["betti_h1"]), 1)
+        self.assertTrue(selected["betti_h1"] <= selected["betti_h0"])
+
     def test_node_aware_betti_reaches_unmatched_node_logits(self):
         config = _config()
         config["topology"]["complex"].update(

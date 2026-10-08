@@ -77,6 +77,10 @@ original expected loss scale and the configured Betti weights do not need an
 inverse-sampling correction. Validation always uses every eligible graph.
 Training logs expose eligible and selected counts, sampling fractions, and the
 number of graphs for which relation pairs were actually scored.
+`max_graphs_per_rank` sets a common H0/H1 budget, while
+`betti_h0_max_graphs_per_rank` and `betti_h1_max_graphs_per_rank` optionally
+override it. With shared eligibility, the smaller selection is a subset of the
+larger one and therefore does not trigger additional relation scoring.
 
 When `detach_unmatched_edge_probabilities` is enabled, edges incident to an
 unmatched topology vertex still participate in the forward filtration, but

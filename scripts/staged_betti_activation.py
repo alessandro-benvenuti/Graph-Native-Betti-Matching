@@ -1286,8 +1286,11 @@ def print_preflight(args, base, staged):
     print("  matcher: hungarian; node loss: focal; edge loss: cross_entropy; alpha: 0.5")
     sampling = base["topology"]["sampling"]
     print(
-        "  topology sampling: enabled={} max_graphs_per_rank={} validation=full".format(
-            sampling["enabled"], sampling["max_graphs_per_rank"]
+        "  topology sampling: enabled={} common={} h0={} h1={} validation=full".format(
+            sampling["enabled"],
+            sampling["max_graphs_per_rank"],
+            sampling["betti_h0_max_graphs_per_rank"],
+            sampling["betti_h1_max_graphs_per_rank"],
         )
     )
     print("  test split: UNUSED")
