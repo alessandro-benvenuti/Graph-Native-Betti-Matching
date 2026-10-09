@@ -10,9 +10,13 @@ tracking:
 topology:
   sampling:
     enabled: true
-    # Per DDP rank: 4 of the 16 local graphs on the current 2-GPU setup.
-    # H0 and H1 share a random ordering so their scored sets overlap.
-    max_graphs_per_rank: 4
+    # H0 is inexpensive enough to supervise every local graph. H1 accounts
+    # for about 89% of topology overhead and is sampled without changing its
+    # expected loss scale. With two ranks this gives 32 H0 and 4 H1 graphs per
+    # global optimizer step.
+    max_graphs_per_rank: null
+    betti_h0_max_graphs_per_rank: 16
+    betti_h1_max_graphs_per_rank: 2
 
 staged_betti:
   # Tune at one mature-but-not-converged checkpoint. Activation timing is
@@ -25,4 +29,3 @@ staged_betti:
     topology.betti_h1.weight: [0.003, 0.01]
     topology.betti_h1.false_positive_weight: [0.1, 0.25]
     betti_ramp_epochs: [10]
-

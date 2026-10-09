@@ -70,6 +70,21 @@ class NodeEdgeBettiConfigTests(unittest.TestCase):
             config["topology"]["betti_h1"]["normalization"], "matched_mean"
         )
 
+    def test_epoch300_screening_uses_full_h0_and_sampled_h1(self):
+        config = load_config(
+            ROOT
+            / "configs"
+            / "experiments"
+            / "staged_betti_activation"
+            / "subsampled_epoch300.yaml",
+            environment=ENVIRONMENT,
+        )
+        sampling = config["topology"]["sampling"]
+        self.assertTrue(sampling["enabled"])
+        self.assertIsNone(sampling["max_graphs_per_rank"])
+        self.assertEqual(sampling["betti_h0_max_graphs_per_rank"], 16)
+        self.assertEqual(sampling["betti_h1_max_graphs_per_rank"], 2)
+
     def test_invalid_complex_configuration_is_rejected(self):
         config = load_config(
             ROOT / "configs" / "pretrain_mixed.yaml",

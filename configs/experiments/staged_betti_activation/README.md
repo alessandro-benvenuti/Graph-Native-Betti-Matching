@@ -141,10 +141,11 @@ bash cluster/jean_zay/submit_staged_betti_activation.sh test 300 TRIAL_NUMBER
 ## Subsampled epoch-300 search
 
 `subsampled_epoch300.yaml` is the feasible follow-up to the full-batch timing
-diagnosis. During training it computes H0/H1 on at most four eligible graphs
-per rank and averages only those selected losses; it does not divide by the
-full local batch. Validation remains full-batch. The search uses the frozen
-epoch-300 prefix checkpoint, eight trials, and a 15-epoch endpoint.
+diagnosis. During screening it computes H0 on all 16 local graphs and H1 on
+two uniformly sampled graphs per rank. It averages only the selected H1
+losses; it does not divide by the full local batch. Validation remains
+full-batch. The search uses the frozen epoch-300 prefix checkpoint, eight
+trials, and a 15-epoch endpoint.
 
 It can reuse an existing staged campaign whose epoch-300 study has not yet
 been created:
