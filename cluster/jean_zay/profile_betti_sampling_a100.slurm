@@ -21,7 +21,8 @@ echo "checkpoint=$GNBM_PROFILE_CHECKPOINT"
 echo "output=$GNBM_PROFILE_OUTPUT"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 
-exec "$python_bin" -u "$repo_dir/scripts/profile_betti_sampling.py" \
+cd "$repo_dir"
+exec "$python_bin" -u -m scripts.profile_betti_sampling \
   --config "$repo_dir/configs/experiments/staged_betti_activation/subsampled_epoch300.yaml" \
   --checkpoint "$GNBM_PROFILE_CHECKPOINT" \
   --output "$GNBM_PROFILE_OUTPUT" \
@@ -30,4 +31,3 @@ exec "$python_bin" -u "$repo_dir/scripts/profile_betti_sampling.py" \
   --gradient-repeats "${GNBM_PROFILE_GRADIENT_REPEATS:-12}" \
   --batch-size "${GNBM_PROFILE_BATCH_SIZE:-16}" \
   --workers "${GNBM_PROFILE_WORKERS:-4}"
-
