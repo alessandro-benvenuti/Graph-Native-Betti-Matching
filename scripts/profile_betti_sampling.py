@@ -60,7 +60,11 @@ def _mode_config(base, mode):
     config = copy.deepcopy(base)
     config["runtime"].update(device="cuda", distributed=False)
     config["tracking"]["enabled"] = False
-    config["evaluation"]["training_metrics"]["enabled"] = False
+    config["evaluation"]["training_metrics"].update(
+        enabled=False,
+        save_best_checkpoint=False,
+        save_f1_checkpoints=False,
+    )
     for name in ("betti_h0", "betti_h1"):
         config["topology"][name].update(
             enabled=False,
