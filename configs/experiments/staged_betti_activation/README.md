@@ -161,6 +161,29 @@ global batch variables. Do not run this concurrently with old branch-200
 screening jobs. Inspect `topology_scored_graphs` and the per-loss eligible,
 selected, and sampling-fraction training metrics before extending the search.
 
+After all eight epoch-315 trials are `COMPLETE`, continue every frozen trial
+to epoch 325 without mutating the original Optuna study:
+
+```bash
+bash cluster/jean_zay/submit_staged_betti_activation.sh extend 300 325 2
+```
+
+This submits an eight-element array throttled to two concurrent workers. Each
+element resumes the corresponding trial's full epoch-315 state, writes to an
+independent extension directory and W&B run, and stops exactly at epoch 325.
+The launcher freezes a separate matched control whose tail mean uses epochs
+315, 320, and 325. The command is idempotent: completed trials exit, while an
+interrupted trial resumes its own latest extension checkpoint. Afterward run:
+
+```bash
+bash cluster/jean_zay/submit_staged_betti_activation.sh extension-summary 300 325
+```
+
+The comparison is written below
+`screening/branch_0300/extensions/endpoint_0325`. The original epoch-315
+journal, control reference, metrics, checkpoints, and completion markers are
+never changed.
+
 Before launching the search, profile the epoch-300 checkpoint with:
 
 ```bash

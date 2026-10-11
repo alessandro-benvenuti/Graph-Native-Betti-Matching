@@ -45,6 +45,11 @@ case "$GNBM_STAGED_ACTION" in
     exec "$python_bin" -u scripts/staged_betti_activation.py screen "${common[@]}" \
       --branch "$GNBM_STAGED_BRANCH" "${resume_args[@]}"
     ;;
+  extend)
+    exec "$python_bin" -u scripts/staged_betti_activation.py extend "${common[@]}" \
+      --branch "$GNBM_STAGED_BRANCH" --endpoint "$GNBM_STAGED_ENDPOINT" \
+      --trial "$SLURM_ARRAY_TASK_ID"
+    ;;
   final)
     exec "$python_bin" -u scripts/staged_betti_activation.py final "${common[@]}" \
       --branch "$GNBM_STAGED_BRANCH" --trial "$GNBM_STAGED_TRIAL"

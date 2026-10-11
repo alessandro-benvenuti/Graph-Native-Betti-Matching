@@ -976,6 +976,261 @@ def _trial_by_number(args, staged, branch, number):
     return matches[0]
 
 
+def _extension_dir(args, branch: int, endpoint: int) -> Path:
+    return (
+        _branch_dir(args.output, branch)
+        / "extensions"
+        / f"endpoint_{endpoint:04d}"
+    )
+
+
+def prepare_extension(args, base, staged):
+    """Freeze a matched control for a finite continuation of all screen trials."""
+
+    _campaign_marker(args.output, args.initial_weights, args.config)
+    if args.branch not in staged["branch_epochs"]:
+        raise CampaignError("extension branch is not configured")
+    screening_endpoint = args.branch + staged["screening_epochs"]
+    if args.endpoint <= screening_endpoint:
+        raise CampaignError(
+            f"extension endpoint must be greater than {screening_endpoint}"
+        )
+    if args.endpoint > int(base["training"]["epochs"]):
+        raise CampaignError("extension endpoint exceeds training.epochs")
+
+    source_trials = [
+        _trial_by_number(args, staged, args.branch, number)
+        for number in range(staged["trials_per_branch"])
+    ]
+    prefix_records = _read_records(
+        args.output / "shared-prefix/validation-metrics.jsonl"
+    )
+    aggregation = aggregate_tail(
+        _records_through(prefix_records, args.endpoint),
+        staged["metric_aggregation"]["observations"],
+    )
+    directory = _extension_dir(args, args.branch, args.endpoint)
+    reference_path = directory / "control-reference.json"
+    payload = {
+        "schema_version": 1,
+        "branch_epoch": args.branch,
+        "source_screening_endpoint": screening_endpoint,
+        "extension_endpoint": args.endpoint,
+        "control_run": str((args.output / "shared-prefix").resolve()),
+        "aggregation": aggregation,
+        "metrics": aggregation["metrics"],
+        "source_trials": [trial.number for trial in source_trials],
+        "test_split_used": False,
+    }
+    payload = json.loads(json.dumps(payload, sort_keys=True))
+    directory.mkdir(parents=True, exist_ok=True)
+    if reference_path.is_file() and json.loads(reference_path.read_text()) != payload:
+        raise CampaignError(
+            "refusing to change frozen extension control: " + str(reference_path)
+        )
+    _atomic_json(reference_path, payload)
+    print(
+        f"branch={args.branch} extension_endpoint={args.endpoint} "
+        f"control_epochs={aggregation['contributing_epochs']} "
+        f"source_trials={len(source_trials)}"
+    )
+
+
+def _run_extension_unlocked(args, base, staged):
+    trial = _trial_by_number(args, staged, args.branch, args.trial)
+    directory = _extension_dir(args, args.branch, args.endpoint)
+    reference_path = directory / "control-reference.json"
+    if not reference_path.is_file():
+        raise CampaignError("extension control is missing; run prepare-extension")
+    reference = json.loads(reference_path.read_text())
+    if int(reference["source_screening_endpoint"]) != (
+        args.branch + staged["screening_epochs"]
+    ) or int(reference["extension_endpoint"]) != args.endpoint:
+        raise CampaignError("extension control does not match requested endpoints")
+
+    source_config = Path(trial.user_attrs["config_path"])
+    source_run = Path(trial.user_attrs["run_dir"])
+    relative_name = str(
+        directory.relative_to(args.output)
+        / "runs"
+        / f"trial_{args.trial:04d}"
+    )
+    run_dir = args.output / relative_name
+    config_path = directory / "configs" / f"trial_{args.trial:04d}.yaml"
+    bootstrap_path = directory / "metric-history" / f"trial_{args.trial:04d}.jsonl"
+    complete = run_dir / ".complete.json"
+    if complete.is_file():
+        print(
+            f"branch={args.branch} trial={args.trial} "
+            f"extension_endpoint={args.endpoint} already complete"
+        )
+        return
+
+    if config_path.is_file():
+        config = yaml.safe_load(config_path.read_text())
+        metadata = config.get("staged_metadata", {})
+        if (
+            int(config["training"]["stop_after_epoch"]) != args.endpoint
+            or int(metadata.get("source_screening_trial", -1)) != args.trial
+            or int(metadata.get("extension_endpoint", -1)) != args.endpoint
+        ):
+            raise CampaignError("saved extension configuration changed")
+    else:
+        config = yaml.safe_load(source_config.read_text())
+        config["experiment"]["name"] = relative_name
+        config["tracking"]["run_name"] = (
+            f"branch-e{args.branch}-trial-{args.trial:03d}-e{args.endpoint}"
+        )
+        config["training"]["stop_after_epoch"] = args.endpoint
+        config["training"]["checkpoint"]["milestone_epochs"] = []
+        config["staged_metadata"].update({
+            "screening_extension": True,
+            "source_screening_trial": args.trial,
+            "source_screening_endpoint": args.branch + staged["screening_epochs"],
+            "extension_endpoint": args.endpoint,
+            "control_metrics": reference["metrics"],
+        })
+    validate_config(config)
+
+    source_history = _candidate_metric_history(
+        args, staged, args.branch, source_run
+    )
+    _write_jsonl(bootstrap_path, source_history)
+    config["tracking"]["bootstrap_metrics_path"] = str(bootstrap_path.resolve())
+    _write_yaml(config_path, config)
+
+    own_latest = run_dir / "models/latest_checkpoint.pt"
+    checkpoint = (
+        own_latest
+        if own_latest.is_file()
+        else source_run / "models/latest_checkpoint.pt"
+    )
+    checkpoint_payload = _checkpoint(checkpoint)
+    checkpoint_epoch = int(checkpoint_payload["epoch"])
+    source_endpoint = args.branch + staged["screening_epochs"]
+    if own_latest.is_file():
+        if checkpoint_epoch < source_endpoint or checkpoint_epoch > args.endpoint:
+            raise CampaignError("extension checkpoint epoch is outside its phase")
+    elif checkpoint_epoch != source_endpoint:
+        raise CampaignError("source trial checkpoint is not at screening endpoint")
+    code = run_command(
+        _command(args, config_path, relative_name, resume=checkpoint),
+        run_dir,
+        poll=args.poll_interval,
+    )
+    if code != 0:
+        raise CampaignError(f"screening extension exited with status {code}")
+    _checkpoint(own_latest, args.endpoint)
+
+    extension_records = _read_records(run_dir / "validation-metrics.jsonl")
+    if not extension_records or int(extension_records[-1]["epoch"]) != args.endpoint:
+        raise CampaignError("screening extension has no endpoint validation metrics")
+    extension_history = [
+        {
+            **record,
+            "betti_active": 1.0,
+            "betti_activation_epoch": args.branch,
+        }
+        for record in extension_records
+    ]
+    stitched = _merge_epoch_records(source_history, extension_history)
+    _write_jsonl(run_dir / "stitched-validation-metrics.jsonl", stitched)
+    aggregation = aggregate_tail(
+        _records_through(stitched, args.endpoint),
+        staged["metric_aggregation"]["observations"],
+    )
+    deltas = _deltas(aggregation["metrics"], reference["metrics"])
+    source_manifest = source_run / "dataset-manifest.json"
+    extension_manifest = run_dir / "dataset-manifest.json"
+    if (
+        not source_manifest.is_file()
+        or not extension_manifest.is_file()
+        or _sha256(source_manifest) != _sha256(extension_manifest)
+    ):
+        raise CampaignError("extension dataset manifest differs from source trial")
+    completion = {
+        "completed_at": utc_now(),
+        "branch_epoch": args.branch,
+        "source_trial": args.trial,
+        "source_screening_endpoint": args.branch + staged["screening_epochs"],
+        "extension_endpoint": args.endpoint,
+        "aggregation": aggregation,
+        "metrics": aggregation["metrics"],
+        "control_metrics": reference["metrics"],
+        "control_deltas": deltas,
+        "parameters": dict(trial.params),
+        "run_dir": str(run_dir.resolve()),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
+    }
+    _atomic_json(complete, completion)
+    print(
+        f"branch={args.branch} trial={args.trial} "
+        f"extension_endpoint={args.endpoint} COMPLETE deltas={deltas}"
+    )
+
+
+def run_extension(args, base, staged):
+    _campaign_marker(args.output, args.initial_weights, args.config)
+    lock = (
+        _extension_dir(args, args.branch, args.endpoint)
+        / ".locks"
+        / f"trial_{args.trial:04d}.lock"
+    )
+    with AllocationLock(lock):
+        _run_extension_unlocked(args, base, staged)
+
+
+def summarize_extension(args, base, staged):
+    _campaign_marker(args.output, args.initial_weights, args.config)
+    directory = _extension_dir(args, args.branch, args.endpoint)
+    reference_path = directory / "control-reference.json"
+    if not reference_path.is_file():
+        raise CampaignError("extension control is missing")
+    reference = json.loads(reference_path.read_text())
+    rows = []
+    for number in range(staged["trials_per_branch"]):
+        complete = directory / "runs" / f"trial_{number:04d}" / ".complete.json"
+        if not complete.is_file():
+            rows.append({
+                "branch_epoch": args.branch,
+                "source_trial": number,
+                "extension_endpoint": args.endpoint,
+                "state": "INCOMPLETE",
+            })
+            continue
+        payload = json.loads(complete.read_text())
+        rows.append({
+            "branch_epoch": args.branch,
+            "source_trial": number,
+            "extension_endpoint": args.endpoint,
+            "state": "COMPLETE",
+            **payload["metrics"],
+            **payload["control_deltas"],
+            **payload["parameters"],
+            "run_dir": payload["run_dir"],
+        })
+    comparison = directory / "control-relative-comparison.csv"
+    _write_csv(comparison, rows)
+    complete_rows = [row for row in rows if row["state"] == "COMPLETE"]
+    print(
+        f"extension branch={args.branch} endpoint={args.endpoint} "
+        f"complete={len(complete_rows)}/{staged['trials_per_branch']} "
+        f"control_epochs={reference['aggregation']['contributing_epochs']}"
+    )
+    for row in complete_rows:
+        print(
+            "trial={:04d} d_node={:+.6f} d_edge={:+.6f} "
+            "d_beta0={:+.6f} d_beta1={:+.6f}".format(
+                int(row["source_trial"]),
+                float(row["delta_node_mAP"]),
+                float(row["delta_edge_mAP"]),
+                float(row["delta_beta0_error"]),
+                float(row["delta_beta1_error"]),
+            )
+        )
+    print("comparison=" + str(comparison))
+
+
 def _run_final_unlocked(args, base, staged):
     if args.branch not in staged["branch_epochs"]:
         raise CampaignError("invalid final branch")
@@ -1261,6 +1516,34 @@ def status(args, base, staged):
             f"running={counts.get('RUNNING', 0)} failed={counts.get('FAIL', 0)} "
             f"total={len(study.trials)}/{staged['trials_per_branch']}"
         )
+        extensions = directory / "extensions"
+        for extension in sorted(extensions.glob("endpoint_*")):
+            try:
+                endpoint = int(extension.name.removeprefix("endpoint_"))
+            except ValueError:
+                continue
+            complete_count = 0
+            progress = []
+            for number in range(staged["trials_per_branch"]):
+                run_dir = extension / "runs" / f"trial_{number:04d}"
+                completed = (run_dir / ".complete.json").is_file()
+                complete_count += int(completed)
+                epoch = None
+                metrics_path = run_dir / "validation-metrics.jsonl"
+                if metrics_path.is_file():
+                    try:
+                        records = _read_records(metrics_path)
+                        epoch = int(records[-1]["epoch"]) if records else None
+                    except (CampaignError, KeyError, TypeError, ValueError):
+                        epoch = "INVALID"
+                progress.append(
+                    f"{number}:{'C' if completed else epoch or '-'}"
+                )
+            print(
+                f"branch={branch} extension_endpoint={endpoint} "
+                f"complete={complete_count}/{staged['trials_per_branch']} "
+                f"trials={','.join(progress)}"
+            )
 
 
 def print_preflight(args, base, staged):
@@ -1298,12 +1581,17 @@ def print_preflight(args, base, staged):
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("mode", choices=("preflight", "prefix", "prepare", "screen", "summarize", "final", "test", "status"))
+    result.add_argument("mode", choices=(
+        "preflight", "prefix", "prepare", "screen", "summarize",
+        "prepare-extension", "extend", "summarize-extension",
+        "final", "test", "status",
+    ))
     result.add_argument("--config", type=Path, required=True)
     result.add_argument("--output", type=Path, required=True)
     result.add_argument("--initial-weights", type=Path, required=True)
     result.add_argument("--branch", type=int)
     result.add_argument("--trial", type=int)
+    result.add_argument("--endpoint", type=int)
     result.add_argument("--worker-trials", type=int, default=0)
     result.add_argument("--resume-running", action="store_true")
     result.add_argument("--poll-interval", type=float, default=2.0)
@@ -1317,10 +1605,17 @@ def main():
     args.initial_weights = args.initial_weights.expanduser().resolve()
     try:
         base, staged = load_staged(args.config)
-        if args.mode in {"screen", "final", "test"} and args.branch is None:
+        if args.mode in {
+            "screen", "prepare-extension", "extend", "summarize-extension",
+            "final", "test",
+        } and args.branch is None:
             raise CampaignError("--branch is required")
-        if args.mode in {"final", "test"} and args.trial is None:
+        if args.mode in {"extend", "final", "test"} and args.trial is None:
             raise CampaignError("--trial is required")
+        if args.mode in {
+            "prepare-extension", "extend", "summarize-extension",
+        } and args.endpoint is None:
+            raise CampaignError("--endpoint is required")
         if args.mode == "preflight":
             print_preflight(args, base, staged)
         elif args.mode == "prefix":
@@ -1331,6 +1626,12 @@ def main():
             run_screen_worker(args, base, staged)
         elif args.mode == "summarize":
             summarize(args, base, staged)
+        elif args.mode == "prepare-extension":
+            prepare_extension(args, base, staged)
+        elif args.mode == "extend":
+            run_extension(args, base, staged)
+        elif args.mode == "summarize-extension":
+            summarize_extension(args, base, staged)
         elif args.mode == "final":
             run_final(args, base, staged)
         elif args.mode == "test":

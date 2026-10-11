@@ -241,7 +241,10 @@ def main():
         tracker = build_tracker(
             config,
             run_dir,
-            resume=bool(args.resume),
+            # A training-state checkpoint may seed a new logical run (for
+            # example a finite screening extension).  Resume W&B only when
+            # this output directory already owns a persisted W&B run ID.
+            resume=bool(args.resume) and (run_dir / "wandb-run.json").is_file(),
             launch_metadata={
                 "initial_weights": args.initial_weights,
                 "resume_checkpoint": args.resume,

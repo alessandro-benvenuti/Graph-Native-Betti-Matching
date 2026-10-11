@@ -3,19 +3,21 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 prefix|status|summarize | prepare [BRANCH] | screen|resume BRANCH [WORKERS] | final|test BRANCH TRIAL" >&2
+  echo "Usage: $0 prefix|status|summarize | prepare [BRANCH] | screen|resume BRANCH [WORKERS] | extend BRANCH ENDPOINT [WORKERS] | extension-summary BRANCH ENDPOINT | final|test BRANCH TRIAL" >&2
   exit 2
 }
 
-[[ $# -ge 1 && $# -le 3 ]] || usage
+[[ $# -ge 1 && $# -le 4 ]] || usage
 action="$1"
 branch="${2:-}"
 value="${3:-}"
+extra="${4:-}"
 case "$action" in
-  prefix|status|summarize) [[ -z "$branch" && -z "$value" ]] || usage ;;
-  prepare) [[ -z "$value" && ( -z "$branch" || "$branch" =~ ^[0-9]+$ ) ]] || usage ;;
-  screen|resume) [[ "$branch" =~ ^[0-9]+$ ]] || usage ;;
-  final|test) [[ "$branch" =~ ^[0-9]+$ && "$value" =~ ^[0-9]+$ ]] || usage ;;
+  prefix|status|summarize) [[ -z "$branch" && -z "$value" && -z "$extra" ]] || usage ;;
+  prepare) [[ -z "$value" && -z "$extra" && ( -z "$branch" || "$branch" =~ ^[0-9]+$ ) ]] || usage ;;
+  screen|resume) [[ "$branch" =~ ^[0-9]+$ && -z "$extra" ]] || usage ;;
+  extend) [[ "$branch" =~ ^[0-9]+$ && "$value" =~ ^[0-9]+$ && ( -z "$extra" || "$extra" =~ ^[0-9]+$ ) ]] || usage ;;
+  extension-summary|final|test) [[ "$branch" =~ ^[0-9]+$ && "$value" =~ ^[0-9]+$ && -z "$extra" ]] || usage ;;
   *) usage ;;
 esac
 
@@ -66,11 +68,19 @@ case "$action" in
       --format="%.18i %.2t %.10M %.20R" || true
     exec "$python_bin" scripts/staged_betti_activation.py status "${common[@]}"
     ;;
+  extension-summary)
+    exec "$python_bin" scripts/staged_betti_activation.py summarize-extension \
+      "${common[@]}" --branch "$branch" --endpoint "$value"
+    ;;
 esac
 
 workers=1
 if [[ "$action" == "screen" || "$action" == "resume" ]]; then
   workers="${value:-4}"
+elif [[ "$action" == "extend" ]]; then
+  workers="${extra:-2}"
+fi
+if [[ "$action" == "screen" || "$action" == "resume" || "$action" == "extend" ]]; then
   (( workers >= 1 && workers <= 4 )) || { echo "WORKERS must be 1..4" >&2; exit 2; }
 fi
 
@@ -80,6 +90,7 @@ case "$action" in
   prefix) export GNBM_STAGED_ACTION=prefix ;;
   screen) export GNBM_STAGED_ACTION=screen ;;
   resume) export GNBM_STAGED_ACTION=screen GNBM_STAGED_RESUME=1 ;;
+  extend) export GNBM_STAGED_ACTION=extend GNBM_STAGED_ENDPOINT="$value" ;;
   final) export GNBM_STAGED_ACTION=final GNBM_STAGED_TRIAL="$value" ;;
   test) export GNBM_STAGED_ACTION=test GNBM_STAGED_TRIAL="$value" ;;
 esac
@@ -111,6 +122,11 @@ mkdir -p "$log_dir" "$GNBM_OUTPUT_DIR"
 array_args=()
 if [[ "$action" == "screen" || "$action" == "resume" ]]; then
   array_args=(--array="0-$((workers - 1))")
+elif [[ "$action" == "extend" ]]; then
+  "$python_bin" scripts/staged_betti_activation.py prepare-extension \
+    "${common[@]}" --branch "$branch" --endpoint "$value"
+  trial_count="$($python_bin -c 'import sys; from pathlib import Path; from scripts.staged_betti_activation import load_staged; print(load_staged(Path(sys.argv[1]))[1]["trials_per_branch"])' "$config")"
+  array_args=(--array="0-$((trial_count - 1))%$workers")
 fi
 default_qos="qos_gpu_a100-t3"
 default_walltime="20:00:00"
@@ -124,6 +140,7 @@ else
   case "$action" in
     prefix) default_segments=12 ;;
     screen|resume) default_segments=4 ;;
+    extend) default_segments=1 ;;
     final) default_segments=8 ;;
     test) default_segments=1 ;;
   esac

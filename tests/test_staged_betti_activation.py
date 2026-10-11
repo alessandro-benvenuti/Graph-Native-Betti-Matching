@@ -223,6 +223,53 @@ class StagedBettiIntegrationTests(unittest.TestCase):
             self.assertTrue(provenance["optimizer_restored"])
             self.assertTrue(provenance["scheduler_restored"])
 
+            # Finite extensions preserve the completed screening study and
+            # compare a resumed candidate with the matched prefix endpoint.
+            self.run_checked(self.command(
+                "prepare-extension", output, initial,
+                "--branch", "2", "--endpoint", "6",
+            ))
+            for trial_number in (0, 1):
+                self.run_checked(self.command(
+                    "extend", output, initial,
+                    "--branch", "2", "--endpoint", "6",
+                    "--trial", str(trial_number),
+                ))
+            self.run_checked(self.command(
+                "summarize-extension", output, initial,
+                "--branch", "2", "--endpoint", "6",
+            ))
+            extension = output / "screening/branch_0002/extensions/endpoint_0006"
+            extension_reference = json.loads(
+                (extension / "control-reference.json").read_text()
+            )
+            self.assertEqual(
+                extension_reference["aggregation"]["contributing_epochs"],
+                [5, 6],
+            )
+            extension_complete = json.loads(
+                (extension / "runs/trial_0000/.complete.json").read_text()
+            )
+            self.assertEqual(
+                extension_complete["aggregation"]["contributing_epochs"],
+                [5, 6],
+            )
+            extension_stitched = [
+                json.loads(line)
+                for line in (
+                    extension / "runs/trial_0000/stitched-validation-metrics.jsonl"
+                ).read_text().splitlines()
+            ]
+            self.assertEqual(
+                [record["epoch"] for record in extension_stitched],
+                [1, 2, 3, 4, 5, 6],
+            )
+            extension_comparison = (
+                extension / "control-relative-comparison.csv"
+            ).read_text()
+            self.assertIn("delta_node_mAP", extension_comparison)
+            self.assertIn("delta_beta1_error", extension_comparison)
+
             self.run_checked(self.command(
                 "final", output, initial, "--branch", "2", "--trial", "0"
             ))
