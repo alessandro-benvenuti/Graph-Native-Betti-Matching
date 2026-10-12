@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 prefix|status|summarize | prepare [BRANCH] | screen|resume BRANCH [WORKERS] | extend BRANCH ENDPOINT [WORKERS] | extension-summary BRANCH ENDPOINT | final|test BRANCH TRIAL" >&2
+  echo "Usage: $0 prefix|status|summarize | prepare [BRANCH] | screen|resume BRANCH [WORKERS] | extend BRANCH ENDPOINT [WORKERS] | extension-summary BRANCH ENDPOINT | expanded|expanded-resume BRANCH ENDPOINT [WORKERS] | expanded-summary BRANCH ENDPOINT | final|test BRANCH TRIAL" >&2
   exit 2
 }
 
@@ -16,8 +16,8 @@ case "$action" in
   prefix|status|summarize) [[ -z "$branch" && -z "$value" && -z "$extra" ]] || usage ;;
   prepare) [[ -z "$value" && -z "$extra" && ( -z "$branch" || "$branch" =~ ^[0-9]+$ ) ]] || usage ;;
   screen|resume) [[ "$branch" =~ ^[0-9]+$ && -z "$extra" ]] || usage ;;
-  extend) [[ "$branch" =~ ^[0-9]+$ && "$value" =~ ^[0-9]+$ && ( -z "$extra" || "$extra" =~ ^[0-9]+$ ) ]] || usage ;;
-  extension-summary|final|test) [[ "$branch" =~ ^[0-9]+$ && "$value" =~ ^[0-9]+$ && -z "$extra" ]] || usage ;;
+  extend|expanded|expanded-resume) [[ "$branch" =~ ^[0-9]+$ && "$value" =~ ^[0-9]+$ && ( -z "$extra" || "$extra" =~ ^[0-9]+$ ) ]] || usage ;;
+  extension-summary|expanded-summary|final|test) [[ "$branch" =~ ^[0-9]+$ && "$value" =~ ^[0-9]+$ && -z "$extra" ]] || usage ;;
   *) usage ;;
 esac
 
@@ -72,15 +72,19 @@ case "$action" in
     exec "$python_bin" scripts/staged_betti_activation.py summarize-extension \
       "${common[@]}" --branch "$branch" --endpoint "$value"
     ;;
+  expanded-summary)
+    exec "$python_bin" scripts/staged_betti_activation.py summarize-expanded \
+      "${common[@]}" --branch "$branch" --endpoint "$value"
+    ;;
 esac
 
 workers=1
 if [[ "$action" == "screen" || "$action" == "resume" ]]; then
   workers="${value:-4}"
-elif [[ "$action" == "extend" ]]; then
+elif [[ "$action" == "extend" || "$action" == "expanded" || "$action" == "expanded-resume" ]]; then
   workers="${extra:-2}"
 fi
-if [[ "$action" == "screen" || "$action" == "resume" || "$action" == "extend" ]]; then
+if [[ "$action" == "screen" || "$action" == "resume" || "$action" == "extend" || "$action" == "expanded" || "$action" == "expanded-resume" ]]; then
   (( workers >= 1 && workers <= 4 )) || { echo "WORKERS must be 1..4" >&2; exit 2; }
 fi
 
@@ -91,6 +95,8 @@ case "$action" in
   screen) export GNBM_STAGED_ACTION=screen ;;
   resume) export GNBM_STAGED_ACTION=screen GNBM_STAGED_RESUME=1 ;;
   extend) export GNBM_STAGED_ACTION=extend GNBM_STAGED_ENDPOINT="$value" ;;
+  expanded) export GNBM_STAGED_ACTION=expanded-screen GNBM_STAGED_ENDPOINT="$value" ;;
+  expanded-resume) export GNBM_STAGED_ACTION=expanded-screen GNBM_STAGED_ENDPOINT="$value" GNBM_STAGED_RESUME=1 ;;
   final) export GNBM_STAGED_ACTION=final GNBM_STAGED_TRIAL="$value" ;;
   test) export GNBM_STAGED_ACTION=test GNBM_STAGED_TRIAL="$value" ;;
 esac
@@ -120,13 +126,17 @@ export GNBM_STAGED_GLOBAL_BATCH_SIZE="$global_batch_size"
 log_dir="$WORK/logs/graph-native-betti-matching/a100"
 mkdir -p "$log_dir" "$GNBM_OUTPUT_DIR"
 array_args=()
-if [[ "$action" == "screen" || "$action" == "resume" ]]; then
+if [[ "$action" == "screen" || "$action" == "resume" || "$action" == "expanded" || "$action" == "expanded-resume" ]]; then
   array_args=(--array="0-$((workers - 1))")
 elif [[ "$action" == "extend" ]]; then
   "$python_bin" scripts/staged_betti_activation.py prepare-extension \
     "${common[@]}" --branch "$branch" --endpoint "$value"
   trial_count="$($python_bin -c 'import sys; from pathlib import Path; from scripts.staged_betti_activation import load_staged; print(load_staged(Path(sys.argv[1]))[1]["trials_per_branch"])' "$config")"
   array_args=(--array="0-$((trial_count - 1))%$workers")
+fi
+if [[ "$action" == "expanded" || "$action" == "expanded-resume" ]]; then
+  "$python_bin" scripts/staged_betti_activation.py prepare-expanded \
+    "${common[@]}" --branch "$branch" --endpoint "$value"
 fi
 default_qos="qos_gpu_a100-t3"
 default_walltime="20:00:00"
@@ -140,6 +150,7 @@ else
   case "$action" in
     prefix) default_segments=12 ;;
     screen|resume) default_segments=4 ;;
+    expanded|expanded-resume) default_segments=3 ;;
     extend) default_segments=1 ;;
     final) default_segments=8 ;;
     test) default_segments=1 ;;
@@ -161,8 +172,8 @@ for ((segment = 1; segment <= segments; segment++)); do
   # A successor screening segment must recover stale RUNNING trials before it
   # allocates WAITING/new trials.  Prefix and final actions discover their own
   # latest checkpoint and completion marker automatically.
-  if [[ "$action" == "screen" || "$action" == "resume" ]]; then
-    if (( segment > 1 )) || [[ "$action" == "resume" ]]; then
+  if [[ "$action" == "screen" || "$action" == "resume" || "$action" == "expanded" || "$action" == "expanded-resume" ]]; then
+    if (( segment > 1 )) || [[ "$action" == "resume" || "$action" == "expanded-resume" ]]; then
       export GNBM_STAGED_RESUME=1
     else
       export GNBM_STAGED_RESUME=0

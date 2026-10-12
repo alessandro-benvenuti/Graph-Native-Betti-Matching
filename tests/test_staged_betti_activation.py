@@ -270,6 +270,48 @@ class StagedBettiIntegrationTests(unittest.TestCase):
             self.assertIn("delta_node_mAP", extension_comparison)
             self.assertIn("delta_beta1_error", extension_comparison)
 
+            # A fresh stronger study keeps the original outcomes outside its
+            # incompatible categorical domain, then independently reruns the
+            # selected configurations from the common branch checkpoint.
+            self.run_checked(self.command(
+                "prepare-expanded", output, initial,
+                "--branch", "2", "--endpoint", "6",
+            ))
+            self.run_checked(self.command(
+                "expanded-screen", output, initial,
+                "--branch", "2", "--endpoint", "6",
+            ))
+            self.run_checked(self.command(
+                "summarize-expanded", output, initial,
+                "--branch", "2", "--endpoint", "6",
+            ))
+            expanded = (
+                output
+                / "screening/branch_0002/expanded-search/endpoint_0006"
+            )
+            expanded_study = optuna.load_study(
+                study_name="staged-betti-expanded-e0002-to-e0006",
+                storage=create_storage(optuna, expanded, "journal"),
+            )
+            self.assertEqual(len(expanded_study.trials), 2)
+            self.assertTrue(all(
+                trial.state.name == "COMPLETE"
+                for trial in expanded_study.trials
+            ))
+            self.assertEqual(
+                [
+                    trial.user_attrs.get("replicate_source_trial")
+                    for trial in expanded_study.trials
+                ],
+                [0, 1],
+            )
+            combined = (
+                expanded / "combined-control-relative-comparison.csv"
+            ).read_text()
+            self.assertIn("original", combined)
+            self.assertIn("stronger", combined)
+            self.assertIn("pareto", combined)
+
             self.run_checked(self.command(
                 "final", output, initial, "--branch", "2", "--trial", "0"
             ))

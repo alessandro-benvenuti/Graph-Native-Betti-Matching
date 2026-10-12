@@ -29,3 +29,15 @@ staged_betti:
     topology.betti_h1.weight: [0.003, 0.01]
     topology.betti_h1.false_positive_weight: [0.1, 0.25]
     betti_ramp_epochs: [10]
+  expanded_search:
+    # Eight independent epoch-300 -> 325 runs: exact stochastic replications
+    # of the two leading configurations, followed by six NSGA-II proposals
+    # restricted to a stronger topology domain.
+    endpoint: 325
+    additional_trials: 8
+    replicate_source_trials: [6, 7]
+    search_space:
+      topology.betti_h0.weight: [0.001, 0.003, 0.01, 0.03]
+      topology.betti_h1.weight: [0.01, 0.03]
+      topology.betti_h1.false_positive_weight: [0.05, 0.1, 0.25]
+      betti_ramp_epochs: [10]

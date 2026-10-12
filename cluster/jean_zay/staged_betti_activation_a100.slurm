@@ -50,6 +50,15 @@ case "$GNBM_STAGED_ACTION" in
       --branch "$GNBM_STAGED_BRANCH" --endpoint "$GNBM_STAGED_ENDPOINT" \
       --trial "$SLURM_ARRAY_TASK_ID"
     ;;
+  expanded-screen)
+    resume_args=()
+    if [[ "${GNBM_STAGED_RESUME:-0}" == "1" ]]; then
+      resume_args+=(--resume-running)
+    fi
+    exec "$python_bin" -u scripts/staged_betti_activation.py expanded-screen \
+      "${common[@]}" --branch "$GNBM_STAGED_BRANCH" \
+      --endpoint "$GNBM_STAGED_ENDPOINT" "${resume_args[@]}"
+    ;;
   final)
     exec "$python_bin" -u scripts/staged_betti_activation.py final "${common[@]}" \
       --branch "$GNBM_STAGED_BRANCH" --trial "$GNBM_STAGED_TRIAL"

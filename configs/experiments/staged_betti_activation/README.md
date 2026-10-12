@@ -184,6 +184,43 @@ The comparison is written below
 journal, control reference, metrics, checkpoints, and completion markers are
 never changed.
 
+After the eight extensions finish, launch the independent stronger search:
+
+```bash
+bash cluster/jean_zay/submit_staged_betti_activation.sh expanded 300 325 4
+```
+
+This creates a separate Optuna journal under
+`screening/branch_0300/expanded-search/endpoint_0325`. It keeps the first
+eight epoch-325 outcomes as immutable external comparison rows, independently
+replicates source trials 6 and 7 from the shared epoch-300 checkpoint, and
+lets NSGA-II propose six additional configurations. The stronger domain is H0
+`[0.001, 0.003, 0.01, 0.03]`, H1 `[0.01, 0.03]`, false-positive weight
+`[0.05, 0.1, 0.25]`, with a fixed ten-epoch ramp. The old observations are
+not inserted into the fresh Optuna journal because the original and stronger
+categorical domains intentionally differ; they are merged only for reporting
+and Pareto labelling.
+
+The launcher uses four array workers by default when `4` is passed, hence at
+most eight A100 GPUs (two per trial). It submits three resumable 20-hour
+segments because each worker may execute two trials. Rerun safely after an
+interruption with:
+
+```bash
+bash cluster/jean_zay/submit_staged_betti_activation.sh expanded-resume 300 325 4
+```
+
+Monitor with `status`; after all eight new trials complete, write the combined
+16-run table and Pareto labels with:
+
+```bash
+bash cluster/jean_zay/submit_staged_betti_activation.sh expanded-summary 300 325
+```
+
+Every new candidate starts from the same epoch-300 full-state checkpoint and
+has its own offline W&B run. The original study, its extensions, and their
+W&B histories remain unchanged.
+
 Before launching the search, profile the epoch-300 checkpoint with:
 
 ```bash

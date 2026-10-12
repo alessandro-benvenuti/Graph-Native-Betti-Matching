@@ -211,6 +211,35 @@ def load_staged(path: Path, environment=None):
         )
     if any(not isinstance(space[name], list) or not space[name] for name in expected):
         raise CampaignError("every staged search-space entry must have choices")
+    expanded = staged.get("expanded_search")
+    if expanded is not None:
+        if not isinstance(expanded, dict):
+            raise CampaignError("staged_betti.expanded_search must be a mapping")
+        endpoint = expanded.get("endpoint")
+        if isinstance(endpoint, bool) or not isinstance(endpoint, int):
+            raise CampaignError("expanded_search.endpoint must be an integer")
+        if endpoint > int(resolved["training"]["epochs"]):
+            raise CampaignError("expanded-search endpoint exceeds training.epochs")
+        additional = expanded.get("additional_trials")
+        if isinstance(additional, bool) or not isinstance(additional, int) or additional <= 0:
+            raise CampaignError("expanded_search.additional_trials must be positive")
+        replicates = expanded.get("replicate_source_trials", [])
+        if (
+            not isinstance(replicates, list)
+            or len(replicates) > additional
+            or any(isinstance(value, bool) or not isinstance(value, int) or value < 0
+                   for value in replicates)
+            or len(replicates) != len(set(replicates))
+        ):
+            raise CampaignError("expanded_search replicate trials are invalid")
+        expanded_space = expanded.get("search_space", {})
+        if set(expanded_space) != expected or any(
+            not isinstance(expanded_space[name], list) or not expanded_space[name]
+            for name in expected
+        ):
+            raise CampaignError(
+                "expanded_search.search_space must contain the four staged parameters"
+            )
     if resolved["model"]["matcher"]["type"] != "hungarian":
         raise CampaignError("staged Betti requires Hungarian matching")
     if resolved["loss"]["node"]["classification"]["name"] != "focal":
@@ -1231,6 +1260,434 @@ def summarize_extension(args, base, staged):
     print("comparison=" + str(comparison))
 
 
+def _expanded_settings(staged, branch: int, endpoint: int):
+    expanded = staged.get("expanded_search")
+    if not isinstance(expanded, dict):
+        raise CampaignError("configuration has no staged_betti.expanded_search")
+    if branch not in staged["branch_epochs"]:
+        raise CampaignError("expanded-search branch is not configured")
+    if int(expanded["endpoint"]) != endpoint:
+        raise CampaignError(
+            f"expanded search is frozen at endpoint {expanded['endpoint']}"
+        )
+    if endpoint <= branch + staged["screening_epochs"]:
+        raise CampaignError("expanded-search endpoint must follow initial screening")
+    for source in expanded["replicate_source_trials"]:
+        if source >= staged["trials_per_branch"]:
+            raise CampaignError(f"replicate source trial {source} is out of range")
+    return expanded
+
+
+def _expanded_dir(args, branch: int, endpoint: int) -> Path:
+    return (
+        _branch_dir(args.output, branch)
+        / "expanded-search"
+        / f"endpoint_{endpoint:04d}"
+    )
+
+
+def _expanded_study_name(branch: int, endpoint: int) -> str:
+    return f"staged-betti-expanded-e{branch:04d}-to-e{endpoint:04d}"
+
+
+def _expanded_study(optuna, directory, branch, endpoint, staged, expanded):
+    study = optuna.create_study(
+        study_name=_expanded_study_name(branch, endpoint),
+        storage=create_storage(optuna, directory, "journal"),
+        directions=[direction for _, direction in DELTA_OBJECTIVES],
+        sampler=_sampler(optuna, staged),
+        load_if_exists=True,
+    )
+    study.set_user_attr("objectives", list(DELTA_OBJECTIVES))
+    study.set_user_attr("branch_epoch", branch)
+    study.set_user_attr("endpoint", endpoint)
+    study.set_user_attr("requested_new_trials", expanded["additional_trials"])
+    study.set_user_attr("search_space", expanded["search_space"])
+    return study
+
+
+def prepare_expanded(args, base, staged):
+    """Create an immutable stronger study beside the original screening study."""
+
+    _campaign_marker(args.output, args.initial_weights, args.config)
+    expanded = _expanded_settings(staged, args.branch, args.endpoint)
+    source_directory = _extension_dir(args, args.branch, args.endpoint)
+    source_reference_path = source_directory / "control-reference.json"
+    if not source_reference_path.is_file():
+        raise CampaignError("run the original finite extension before expanded search")
+    source_reference = json.loads(source_reference_path.read_text())
+    branch_reference = json.loads(
+        (_branch_dir(args.output, args.branch) / "control-reference.json").read_text()
+    )
+    source_payloads = []
+    for number in range(staged["trials_per_branch"]):
+        path = source_directory / "runs" / f"trial_{number:04d}" / ".complete.json"
+        if not path.is_file():
+            raise CampaignError(f"source extension trial {number} is incomplete")
+        source_payloads.append(json.loads(path.read_text()))
+
+    directory = _expanded_dir(args, args.branch, args.endpoint)
+    directory.mkdir(parents=True, exist_ok=True)
+    frozen = {
+        "schema_version": 1,
+        "branch_epoch": args.branch,
+        "endpoint": args.endpoint,
+        "branch_checkpoint": branch_reference["branch_checkpoint"],
+        "branch_checkpoint_sha256": branch_reference["branch_checkpoint_sha256"],
+        "dataset_manifest_sha256": branch_reference["dataset_manifest_sha256"],
+        "control_run": source_reference["control_run"],
+        "aggregation": source_reference["aggregation"],
+        "metrics": source_reference["metrics"],
+        "source_extension": str(source_directory.resolve()),
+        "source_completion_sha256": [
+            _sha256(source_directory / "runs" / f"trial_{number:04d}" / ".complete.json")
+            for number in range(staged["trials_per_branch"])
+        ],
+        "additional_trials": expanded["additional_trials"],
+        "replicate_source_trials": expanded["replicate_source_trials"],
+        "search_space": expanded["search_space"],
+        "test_split_used": False,
+    }
+    frozen = json.loads(json.dumps(frozen, sort_keys=True))
+    reference_path = directory / "control-reference.json"
+    if reference_path.is_file() and json.loads(reference_path.read_text()) != frozen:
+        raise CampaignError("refusing to change frozen expanded search")
+    _atomic_json(reference_path, frozen)
+
+    optuna = _import_optuna()
+    study = _expanded_study(
+        optuna, directory, args.branch, args.endpoint, staged, expanded
+    )
+    if not study.user_attrs.get("replications_enqueued"):
+        existing_sources = [
+            trial.user_attrs.get("replicate_source_trial")
+            for trial in study.trials
+            if trial.user_attrs.get("expanded_trial_kind") == "independent_replication"
+        ]
+        if any(
+            trial.user_attrs.get("expanded_trial_kind") != "independent_replication"
+            for trial in study.trials
+        ) or len(existing_sources) != len(set(existing_sources)) or any(
+            source not in expanded["replicate_source_trials"]
+            for source in existing_sources
+        ):
+            raise CampaignError("expanded replication initialization is inconsistent")
+        for source in expanded["replicate_source_trials"]:
+            if source in existing_sources:
+                continue
+            params = dict(source_payloads[source]["parameters"])
+            for name, value in params.items():
+                if value not in expanded["search_space"][name]:
+                    raise CampaignError(
+                        f"source trial {source} parameter {name}={value} "
+                        "is outside expanded search space"
+                    )
+            study.enqueue_trial(params, user_attrs={
+                "expanded_trial_kind": "independent_replication",
+                "replicate_source_trial": source,
+            })
+        study.set_user_attr("replications_enqueued", True)
+    print(
+        f"expanded branch={args.branch} endpoint={args.endpoint} "
+        f"external={staged['trials_per_branch']} "
+        f"new={expanded['additional_trials']} "
+        f"replications={expanded['replicate_source_trials']}"
+    )
+
+
+def _expanded_trial_config(base, expanded, branch, endpoint, number, params, reference):
+    config = copy.deepcopy(base)
+    relative_name = (
+        f"screening/branch_{branch:04d}/expanded-search/endpoint_{endpoint:04d}"
+        f"/runs/trial_{number:04d}"
+    )
+    config["experiment"]["name"] = relative_name
+    config["tracking"]["run_name"] = (
+        f"branch-e{branch}-strong-trial-{number:03d}-e{endpoint}"
+    )
+    config["training"]["stop_after_epoch"] = endpoint
+    config["training"]["checkpoint"]["milestone_epochs"] = []
+    for name, value in params.items():
+        if name == "betti_ramp_epochs":
+            for topology_name in ("betti_h0", "betti_h1"):
+                deep_set(config, f"topology.{topology_name}.ramp_epochs", value)
+        else:
+            deep_set(config, name, value)
+    for topology_name in ("betti_h0", "betti_h1"):
+        config["topology"][topology_name]["warmup_epochs"] = 0
+        config["topology"][topology_name]["activation_epoch"] = branch
+    config["staged_metadata"] = {
+        "branch_epoch": branch,
+        "starting_checkpoint": reference["branch_checkpoint"],
+        "expanded_search": True,
+        "expanded_endpoint": endpoint,
+        "optuna_trial_number": number,
+        "control_metrics": reference["metrics"],
+        "resume_count": 0,
+    }
+    validate_config(config)
+    return config, relative_name
+
+
+def _execute_expanded_trial(args, base, staged, expanded, trial, reference, *, resuming):
+    directory = _expanded_dir(args, args.branch, args.endpoint)
+    run_dir = directory / "runs" / f"trial_{trial.number:04d}"
+    relative_name = str(run_dir.relative_to(args.output))
+    config_path = directory / "configs" / f"trial_{trial.number:04d}.yaml"
+    bootstrap_path = directory / "metric-history" / f"trial_{trial.number:04d}.jsonl"
+    if resuming:
+        if not config_path.is_file() or not run_dir.is_dir():
+            raise CampaignError(f"expanded trial {trial.number} is not resumable")
+        checkpoint = run_dir / "models/latest_checkpoint.pt"
+        _checkpoint(checkpoint)
+        resume_count = int(trial.user_attrs.get("resume_count", 0)) + 1
+        trial.set_user_attr("resume_count", resume_count)
+        config = yaml.safe_load(config_path.read_text())
+        config["staged_metadata"]["resume_count"] = resume_count
+    else:
+        params = {
+            name: trial.suggest_categorical(name, choices)
+            for name, choices in expanded["search_space"].items()
+        }
+        if run_dir.exists():
+            raise CampaignError("refusing to reuse expanded trial directory")
+        config, relative_name = _expanded_trial_config(
+            base, expanded, args.branch, args.endpoint, trial.number,
+            params, reference,
+        )
+        checkpoint = Path(reference["branch_checkpoint"])
+        trial.set_user_attr("run_dir", str(run_dir.resolve()))
+        trial.set_user_attr("config_path", str(config_path.resolve()))
+        trial.set_user_attr("branch_checkpoint", str(checkpoint.resolve()))
+        trial.set_user_attr("resume_count", 0)
+        if not trial.user_attrs.get("expanded_trial_kind"):
+            trial.set_user_attr("expanded_trial_kind", "strong_optuna_proposal")
+    _write_jsonl(bootstrap_path, _prefix_metric_history(args, args.branch))
+    config["tracking"]["bootstrap_metrics_path"] = str(bootstrap_path.resolve())
+    _write_yaml(config_path, config)
+    trial.set_user_attr("slurm_job_id", os.environ.get("SLURM_JOB_ID"))
+    trial.set_user_attr("started_at", utc_now())
+    started = time.monotonic()
+    code = run_command(
+        _command(args, config_path, relative_name, resume=checkpoint),
+        run_dir, poll=args.poll_interval,
+    )
+    if code != 0:
+        raise CampaignError(f"expanded training exited with status {code}")
+    records = _read_records(run_dir / "validation-metrics.jsonl")
+    aggregation = aggregate_tail(
+        records, staged["metric_aggregation"]["observations"]
+    )
+    if aggregation["final_epoch"] != args.endpoint:
+        raise CampaignError("expanded trial did not reach its endpoint")
+    stitched = _merge_epoch_records(
+        _prefix_metric_history(args, args.branch),
+        [
+            {**record, "betti_active": 1.0,
+             "betti_activation_epoch": args.branch}
+            for record in records
+        ],
+    )
+    _write_jsonl(run_dir / "stitched-validation-metrics.jsonl", stitched)
+    manifest = run_dir / "dataset-manifest.json"
+    if not manifest.is_file() or _sha256(manifest) != reference["dataset_manifest_sha256"]:
+        raise CampaignError("expanded trial dataset manifest differs from control")
+    _checkpoint(run_dir / "models/latest_checkpoint.pt", args.endpoint)
+    deltas = _deltas(aggregation["metrics"], reference["metrics"])
+    trial.set_user_attr("aggregation", aggregation)
+    trial.set_user_attr("absolute_metrics", aggregation["metrics"])
+    trial.set_user_attr("control_metrics", reference["metrics"])
+    trial.set_user_attr("control_deltas", deltas)
+    trial.set_user_attr("final_epoch", args.endpoint)
+    trial.set_user_attr("duration_seconds", time.monotonic() - started)
+    trial.set_user_attr("training_completed", True)
+    trial.set_user_attr("finished_at", utc_now())
+    return tuple(deltas[name] for name, _ in DELTA_OBJECTIVES)
+
+
+def _expanded_signature(params, names):
+    return tuple((name, params.get(name)) for name in sorted(names))
+
+
+def _allocate_expanded(optuna, study, expanded, lock, resume_running):
+    """Allocate exactly N distinct viable runs, excluding intentional replicas."""
+
+    with AllocationLock(lock):
+        generation = _worker_generation()
+        if resume_running:
+            running = [
+                trial for trial in study.get_trials(deepcopy=False)
+                if trial.state == optuna.trial.TrialState.RUNNING
+            ]
+            stale = [
+                trial for trial in running
+                if trial.user_attrs.get("worker_generation") != generation
+            ]
+            if stale:
+                frozen = min(stale, key=lambda item: item.number)
+                trial = optuna.trial.Trial(study, frozen._trial_id)
+                trial.set_user_attr("worker_generation", generation)
+                return trial, True
+            if running:
+                return None
+
+        maximum = int(expanded["additional_trials"])
+        names = expanded["search_space"].keys()
+        rejected = 0
+        while rejected < 100:
+            trials = study.get_trials(deepcopy=False)
+            viable = [
+                trial for trial in trials
+                if trial.state in {
+                    optuna.trial.TrialState.WAITING,
+                    optuna.trial.TrialState.RUNNING,
+                    optuna.trial.TrialState.COMPLETE,
+                }
+            ]
+            waiting = any(
+                trial.state == optuna.trial.TrialState.WAITING
+                for trial in viable
+            )
+            if not waiting and len(viable) >= maximum:
+                return None
+            trial = study.ask()
+            trial.set_user_attr("worker_generation", generation)
+            params = {
+                name: trial.suggest_categorical(name, choices)
+                for name, choices in expanded["search_space"].items()
+            }
+            if trial.user_attrs.get("expanded_trial_kind") == "independent_replication":
+                return trial, False
+            signature = _expanded_signature(params, names)
+            previous = {
+                _expanded_signature(other.params, names)
+                for other in viable
+                if other.params
+            }
+            if signature not in previous:
+                return trial, False
+            trial.set_user_attr("expanded_trial_kind", "duplicate_rejected")
+            trial.set_user_attr("duplicate_parameters", params)
+            study.tell(trial, state=optuna.trial.TrialState.PRUNED)
+            rejected += 1
+        raise CampaignError("expanded sampler produced 100 duplicate configurations")
+
+
+def run_expanded_worker(args, base, staged):
+    expanded = _expanded_settings(staged, args.branch, args.endpoint)
+    _campaign_marker(args.output, args.initial_weights, args.config)
+    directory = _expanded_dir(args, args.branch, args.endpoint)
+    reference_path = directory / "control-reference.json"
+    if not reference_path.is_file():
+        raise CampaignError("expanded search is not prepared")
+    reference = json.loads(reference_path.read_text())
+    optuna = _import_optuna()
+    study = _expanded_study(
+        optuna, directory, args.branch, args.endpoint, staged, expanded
+    )
+    attempts = 0
+    while args.worker_trials <= 0 or attempts < args.worker_trials:
+        allocation = _allocate_expanded(
+            optuna, study, expanded, directory / ".trial-allocation.lock",
+            args.resume_running,
+        )
+        if allocation is None:
+            break
+        trial, resuming = allocation
+        attempts += 1
+        try:
+            values = _execute_expanded_trial(
+                args, base, staged, expanded, trial, reference,
+                resuming=resuming,
+            )
+        except KeyboardInterrupt:
+            trial.set_user_attr("failure_reason", "interrupted by SIGTERM/SIGINT")
+            trial.set_user_attr("training_completed", False)
+            raise
+        except Exception as error:
+            trial.set_user_attr("failure_reason", f"{type(error).__name__}: {error}")
+            trial.set_user_attr("training_completed", False)
+            study.tell(trial, state=optuna.trial.TrialState.FAIL)
+            print(f"Expanded trial {trial.number} failed: {error}", file=sys.stderr)
+        else:
+            study.tell(trial, values=values)
+            _atomic_json(Path(trial.user_attrs["run_dir"]) / ".complete.json", {
+                "completed_at": utc_now(), "trial": trial.number,
+                "branch_epoch": args.branch, "epoch": args.endpoint,
+            })
+            print(f"Expanded trial {trial.number} COMPLETE deltas={values}")
+    print(f"expanded branch={args.branch} attempts={attempts} trials={len(study.trials)}")
+
+
+def summarize_expanded(args, base, staged):
+    expanded = _expanded_settings(staged, args.branch, args.endpoint)
+    _campaign_marker(args.output, args.initial_weights, args.config)
+    directory = _expanded_dir(args, args.branch, args.endpoint)
+    optuna = _import_optuna()
+    study = _expanded_study(
+        optuna, directory, args.branch, args.endpoint, staged, expanded
+    )
+    source_directory = _extension_dir(args, args.branch, args.endpoint)
+    rows = []
+    for number in range(staged["trials_per_branch"]):
+        complete = source_directory / "runs" / f"trial_{number:04d}" / ".complete.json"
+        if not complete.is_file():
+            raise CampaignError(f"source extension trial {number} is incomplete")
+        payload = json.loads(complete.read_text())
+        rows.append({
+            "cohort": "original",
+            "trial": number,
+            "source_trial": number,
+            "kind": "initial-epoch-325-extension",
+            "state": "COMPLETE",
+            "pareto": False,
+            **payload["metrics"],
+            **payload["control_deltas"],
+            **payload["parameters"],
+        })
+    for trial in sorted(study.trials, key=lambda item: item.number):
+        attrs = trial.user_attrs
+        row = {
+            "cohort": "stronger",
+            "trial": trial.number,
+            "source_trial": attrs.get("replicate_source_trial"),
+            "kind": attrs.get("expanded_trial_kind"),
+            "state": trial.state.name,
+            "pareto": False,
+            **attrs.get("absolute_metrics", {}),
+            **attrs.get("control_deltas", {}),
+            **trial.params,
+        }
+        rows.append(row)
+    complete = [
+        row for row in rows if row["state"] == "COMPLETE"
+        and all(row.get(name) is not None for name, _ in DELTA_OBJECTIVES)
+    ]
+    for row in complete:
+        row["pareto"] = not any(
+            _dominates(other, row) for other in complete if other is not row
+        )
+    comparison = directory / "combined-control-relative-comparison.csv"
+    _write_csv(comparison, rows)
+    new_complete = [row for row in complete if row["cohort"] == "stronger"]
+    print(
+        f"expanded branch={args.branch} endpoint={args.endpoint} "
+        f"new_complete={len(new_complete)}/{expanded['additional_trials']} "
+        f"combined_complete={len(complete)} pareto={sum(bool(row['pareto']) for row in complete)}"
+    )
+    for row in new_complete:
+        print(
+            "trial={:04d} kind={} d_node={:+.6f} d_edge={:+.6f} "
+            "d_beta0={:+.6f} d_beta1={:+.6f} pareto={}".format(
+                int(row["trial"]), row["kind"],
+                float(row["delta_node_mAP"]), float(row["delta_edge_mAP"]),
+                float(row["delta_beta0_error"]), float(row["delta_beta1_error"]),
+                row["pareto"],
+            )
+        )
+    print("comparison=" + str(comparison))
+
+
 def _run_final_unlocked(args, base, staged):
     if args.branch not in staged["branch_epochs"]:
         raise CampaignError("invalid final branch")
@@ -1544,6 +2001,46 @@ def status(args, base, staged):
                 f"complete={complete_count}/{staged['trials_per_branch']} "
                 f"trials={','.join(progress)}"
             )
+        expanded = staged.get("expanded_search")
+        if isinstance(expanded, dict):
+            endpoint = int(expanded["endpoint"])
+            expanded_directory = _expanded_dir(args, branch, endpoint)
+            if (expanded_directory / "study.journal").is_file():
+                expanded_study = _expanded_study(
+                    optuna, expanded_directory, branch, endpoint, staged, expanded
+                )
+                new_trials = list(expanded_study.trials)
+                counts = {}
+                progress = []
+                for trial in new_trials:
+                    counts[trial.state.name] = counts.get(trial.state.name, 0) + 1
+                    run_dir = trial.user_attrs.get("run_dir")
+                    latest_epoch = None
+                    if run_dir:
+                        metrics = Path(run_dir) / "validation-metrics.jsonl"
+                        if metrics.is_file():
+                            try:
+                                records = _read_records(metrics)
+                                latest_epoch = int(records[-1]["epoch"]) if records else None
+                            except (CampaignError, KeyError, TypeError, ValueError):
+                                latest_epoch = "INVALID"
+                    progress.append(
+                        f"{trial.number}:{trial.state.name[0]}:{latest_epoch or '-'}"
+                    )
+                viable_count = sum(
+                    counts.get(name, 0)
+                    for name in ("WAITING", "RUNNING", "COMPLETE")
+                )
+                print(
+                    f"branch={branch} expanded_endpoint={endpoint} "
+                    f"complete={counts.get('COMPLETE', 0)} "
+                    f"running={counts.get('RUNNING', 0)} "
+                    f"waiting={counts.get('WAITING', 0)} "
+                    f"failed={counts.get('FAIL', 0)} "
+                    f"pruned={counts.get('PRUNED', 0)} "
+                    f"viable={viable_count}/{expanded['additional_trials']} "
+                    f"trials={','.join(progress)}"
+                )
 
 
 def print_preflight(args, base, staged):
@@ -1556,6 +2053,15 @@ def print_preflight(args, base, staged):
     print("  branch epochs:", staged["branch_epochs"])
     print("  screening endpoints:", [value + staged["screening_epochs"] for value in staged["branch_epochs"]])
     print("  trials per branch:", staged["trials_per_branch"])
+    expanded = staged.get("expanded_search")
+    if isinstance(expanded, dict):
+        print(
+            "  expanded search: endpoint={} additional={} replications={}".format(
+                expanded["endpoint"], expanded["additional_trials"],
+                expanded["replicate_source_trials"],
+            )
+        )
+        print("  expanded search space:", expanded["search_space"])
     gpus = int(os.environ.get("GNBM_STAGED_GPUS", "1"))
     print(
         "  execution: gpus={} distributed={} per_gpu_batch={} global_batch={}".format(
@@ -1584,6 +2090,7 @@ def parser():
     result.add_argument("mode", choices=(
         "preflight", "prefix", "prepare", "screen", "summarize",
         "prepare-extension", "extend", "summarize-extension",
+        "prepare-expanded", "expanded-screen", "summarize-expanded",
         "final", "test", "status",
     ))
     result.add_argument("--config", type=Path, required=True)
@@ -1607,6 +2114,7 @@ def main():
         base, staged = load_staged(args.config)
         if args.mode in {
             "screen", "prepare-extension", "extend", "summarize-extension",
+            "prepare-expanded", "expanded-screen", "summarize-expanded",
             "final", "test",
         } and args.branch is None:
             raise CampaignError("--branch is required")
@@ -1614,6 +2122,7 @@ def main():
             raise CampaignError("--trial is required")
         if args.mode in {
             "prepare-extension", "extend", "summarize-extension",
+            "prepare-expanded", "expanded-screen", "summarize-expanded",
         } and args.endpoint is None:
             raise CampaignError("--endpoint is required")
         if args.mode == "preflight":
@@ -1632,6 +2141,15 @@ def main():
             run_extension(args, base, staged)
         elif args.mode == "summarize-extension":
             summarize_extension(args, base, staged)
+        elif args.mode == "prepare-expanded":
+            with AllocationLock(
+                _expanded_dir(args, args.branch, args.endpoint) / ".prepare.lock"
+            ):
+                prepare_expanded(args, base, staged)
+        elif args.mode == "expanded-screen":
+            run_expanded_worker(args, base, staged)
+        elif args.mode == "summarize-expanded":
+            summarize_expanded(args, base, staged)
         elif args.mode == "final":
             run_final(args, base, staged)
         elif args.mode == "test":
