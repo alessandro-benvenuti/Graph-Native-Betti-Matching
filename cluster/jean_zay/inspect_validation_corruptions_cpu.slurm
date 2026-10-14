@@ -8,7 +8,6 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --hint=nomultithread
 #SBATCH --time=04:00:00
-#SBATCH --mem=32G
 
 set -eo pipefail
 
