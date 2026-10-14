@@ -14,6 +14,10 @@ repo_dir="${GNBM_REPO_DIR:-$SLURM_SUBMIT_DIR}"
 source "$repo_dir/cluster/jean_zay/env_a100.sh"
 set -u
 export SYNTHETIC_MRI_DATASET="${SYNTHETIC_MRI_DATASET:-/lustre/fsn1/projects/rech/vnc/upz73jr/datasets/syntheticMRI/new_patches_boundary}"
+analysis_output="${GNBM_ANALYSIS_OUTPUT:?Set GNBM_ANALYSIS_OUTPUT to a new output directory}"
+# The inherited training config requires this variable during interpolation,
+# although this read-only analysis never writes training checkpoints there.
+export GNBM_OUTPUT_DIR="${GNBM_OUTPUT_DIR:-$analysis_output/config-runtime-unused}"
 checkpoint_root=/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-betti-staged-activation-ddp2-a100/shared-prefix/checkpoints
 args=()
 if [[ -n "${GNBM_ANALYSIS_MAX_SAMPLES:-}" ]]; then
@@ -37,7 +41,7 @@ python analyze_validation_predictions.py \
   --config "${GNBM_ANALYSIS_CONFIG:-configs/experiments/staged_betti_activation/shared_prefix.yaml}" \
   --dataset "${GNBM_ANALYSIS_DATASET:-synthetic_mri}" \
   --patch-index "$SYNTHETIC_MRI_DATASET/patch_index.csv" \
-  --output-dir "${GNBM_ANALYSIS_OUTPUT:?Set GNBM_ANALYSIS_OUTPUT to a new output directory}" \
+  --output-dir "$analysis_output" \
   --batch-size "${GNBM_ANALYSIS_BATCH_SIZE:-4}" \
   --workers 8 \
   --checkpoint "$checkpoint_root/epoch_0200.pt" \
