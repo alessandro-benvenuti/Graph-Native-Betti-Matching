@@ -83,3 +83,27 @@ this does not identify a unique causal edit.
 Use `ranked_cases.csv`, raw shards, and visual overlays to validate these candidate
 definitions before choosing corruption frequencies. The final test set remains
 untouched.
+
+## Detailed CPU-only inspection
+
+Once the full export is complete, inspect the spatial context, complete score
+distributions, subdivision lengths, and exact co-occurrences without rerunning
+the model:
+
+```bash
+export GNBM_REPO_DIR="$WORK/projects/Graph-Native-Betti-Matching"
+export GNBM_ANALYSIS_ROOT="$WORK/analysis/vascular-corruptions-full"
+export GNBM_DETAILED_ANALYSIS_OUTPUT="$GNBM_ANALYSIS_ROOT/detailed_summary"
+mkdir -p "$WORK/logs/graph-native-betti-matching"
+
+sbatch \
+  --output="$WORK/logs/graph-native-betti-matching/gnbm-corruption-inspect-%j.out" \
+  --error="$WORK/logs/graph-native-betti-matching/gnbm-corruption-inspect-%j.out" \
+  cluster/jean_zay/inspect_validation_corruptions_cpu.slurm
+```
+
+The job reads the existing raw shards on CPU and writes `detailed_summary.md`,
+`detailed_summary.json`, fine-bin `distribution_histograms.csv`, exact
+`subdivision_candidates.csv`, `cooccurrence_pairwise.csv`, and
+`cooccurrence_patterns.csv`. The edge distributions cover every candidate pair;
+they are not truncated at the edge-event export threshold.
