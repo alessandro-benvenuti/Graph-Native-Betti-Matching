@@ -107,3 +107,43 @@ The job reads the existing raw shards on CPU and writes `detailed_summary.md`,
 `subdivision_candidates.csv`, `cooccurrence_pairwise.csv`, and
 `cooccurrence_patterns.csv`. The edge distributions cover every candidate pair;
 they are not truncated at the edge-event export threshold.
+
+## Empirical corruption meta-distribution
+
+Build reusable joint patch profiles, mutually exclusive corruption events,
+retained-node/edge soft-confidence distributions, empirical samples, and
+held-out parametric fits from the same raw shards. Run a 100-patch-per-epoch CPU
+smoke test first:
+
+```bash
+export GNBM_REPO_DIR="$WORK/projects/Graph-Native-Betti-Matching"
+export GNBM_ANALYSIS_ROOT="$WORK/analysis/vascular-corruptions-full"
+export GNBM_CORRUPTION_MODEL_OUTPUT="$GNBM_ANALYSIS_ROOT/empirical-corruption-model-smoke"
+export GNBM_CORRUPTION_MODEL_MAX_RECORDS=100
+
+sbatch \
+  --output="$WORK/logs/graph-native-betti-matching/gnbm-corruption-model-%j.out" \
+  --error="$WORK/logs/graph-native-betti-matching/gnbm-corruption-model-%j.out" \
+  cluster/jean_zay/build_empirical_corruption_model_cpu.slurm
+```
+
+After inspecting `report.md` and `COMPLETED.json`, submit the full study to a
+new directory:
+
+```bash
+unset GNBM_CORRUPTION_MODEL_MAX_RECORDS
+export GNBM_CORRUPTION_MODEL_OUTPUT="$GNBM_ANALYSIS_ROOT/empirical_corruption_model"
+
+sbatch \
+  --output="$WORK/logs/graph-native-betti-matching/gnbm-corruption-model-%j.out" \
+  --error="$WORK/logs/graph-native-betti-matching/gnbm-corruption-model-%j.out" \
+  cluster/jean_zay/build_empirical_corruption_model_cpu.slurm
+```
+
+The study uses a deterministic patient-level 80/20 fit/holdout split. It writes
+`patch_profiles.csv.gz`, `corruption_events.csv.gz`,
+`correct_elements.csv.gz`, `empirical_samples.npz`, empirical and parametric
+JSON summaries, count/co-occurrence CSV tables, and `report.md`. Existing
+non-empty output directories are protected; set
+`GNBM_CORRUPTION_MODEL_REPLACE=1` only after inspecting an incomplete run that
+should be replaced.
