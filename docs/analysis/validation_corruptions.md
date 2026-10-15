@@ -147,3 +147,26 @@ JSON summaries, count/co-occurrence CSV tables, and `report.md`. Existing
 non-empty output directories are protected; set
 `GNBM_CORRUPTION_MODEL_REPLACE=1` only after inspecting an incomplete run that
 should be replaced.
+
+### Correcting fits from an existing study
+
+Refit version 2 maximizes the zero-truncated likelihood for hurdle Poisson and
+negative-binomial models. Attachment counts and cycle-edge counts use these
+discrete families as well. The report includes a discrete supremum CDF distance
+(the `KS` column), without assigning a continuous-KS p-value. All-zero and
+zero/one-only samples use explicit point-mass cases; impossible holdout values
+are recorded rather than given an arbitrary probability floor.
+
+Reuse the saved profiles and reservoirs without repeating extraction:
+
+```bash
+export GNBM_CORRUPTION_REFIT_SOURCE="$WORK/analysis/vascular-corruptions-full/empirical_corruption_model"
+export GNBM_CORRUPTION_MODEL_OUTPUT="$GNBM_CORRUPTION_REFIT_SOURCE/refit_v2"
+sbatch \
+  --output="$WORK/logs/graph-native-betti-matching/gnbm-corruption-model-%j.out" \
+  --error="$WORK/logs/graph-native-betti-matching/gnbm-corruption-model-%j.out" \
+  cluster/jean_zay/build_empirical_corruption_model_cpu.slurm
+```
+
+This writes `parametric_fits.json`, `report.md`, and `COMPLETED.json` to the new
+folder. Run `unset GNBM_CORRUPTION_REFIT_SOURCE` before a new extraction job.

@@ -42,6 +42,12 @@ echo "job=$SLURM_JOB_ID host=$(hostname)"
 echo "analysis_root=$analysis_root"
 echo "output_dir=$output_dir"
 
+if [[ -n "${GNBM_CORRUPTION_REFIT_SOURCE:-}" ]]; then
+  "$python_bin" -u scripts/refit_empirical_corruption_model.py \
+    --study-root "$GNBM_CORRUPTION_REFIT_SOURCE" --output-dir "$output_dir"
+  exit 0
+fi
+
 args=(
   --analysis-root "$analysis_root"
   --output-dir "$output_dir"

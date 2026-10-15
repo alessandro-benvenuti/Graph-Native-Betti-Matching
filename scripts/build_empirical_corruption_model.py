@@ -25,7 +25,7 @@ import warnings
 
 import numpy as np
 import torch
-from scipy import stats
+from scipy import optimize, stats
 
 try:
     from scripts.inspect_validation_corruptions import (
@@ -607,45 +607,125 @@ def _fit_continuous(train, test, support=None):
     return sorted(candidates, key=lambda item: (-item["heldout_mean_log_likelihood"], item["heldout_ks"]))
 
 
+DISCRETE_METRICS = {"incident_edge_count", "incident_cycle_edge_count"}
+
+
+def _count_values(values):
+    values = np.asarray(values, dtype=float)
+    if not np.all(np.isfinite(values)) or np.any(values < 0) or np.any(values != np.floor(values)):
+        raise ValueError("Count observations must be finite nonnegative integers")
+    return values.astype(np.int64)
+
+
+def _discrete_cdf_distance(values, cdf):
+    """Supremum CDF difference for integer support, including left limits.
+
+    This is a descriptive distance; no continuous-KS p-value is assigned.
+    """
+    values = np.sort(values)
+    points = np.unique(values)
+    grid = np.unique(np.concatenate((points, points - 1)))
+    empirical = np.searchsorted(values, grid, side="right") / len(values)
+    return float(np.max(np.abs(empirical - cdf(grid))))
+
+
 def _fit_counts(train, test):
-    train = np.asarray(train, dtype=np.int64)
-    test = np.asarray(test, dtype=np.int64)
+    train, test = _count_values(train), _count_values(test)
     if len(train) < 50 or len(test) < 20:
         return []
     presence = float((train > 0).mean())
     positives = train[train > 0]
-    if not len(positives):
-        return []
-    epsilon = 1e-12
     candidates = []
-    for family in ("hurdle_poisson", "hurdle_negative_binomial"):
-        if family == "hurdle_poisson":
-            mean = float(max(positives.mean(), epsilon))
-            parameters = {"presence_probability": presence, "positive_mean": mean}
-            base_pmf = lambda value: stats.poisson.pmf(value, mean)
-            normalizer = 1 - stats.poisson.pmf(0, mean)
-        else:
-            mean = float(positives.mean())
-            variance = float(positives.var())
-            if variance <= mean + 1e-8:
-                continue
-            n = mean * mean / (variance - mean)
-            probability = n / (n + mean)
-            parameters = {"presence_probability": presence, "n": n, "probability": probability}
-            base_pmf = lambda value: stats.nbinom.pmf(value, n, probability)
-            normalizer = 1 - stats.nbinom.pmf(0, n, probability)
-        probability_test = np.where(
-            test == 0,
-            1 - presence,
-            presence * base_pmf(test) / max(normalizer, epsilon),
-        )
-        mean_ll = float(np.log(np.maximum(probability_test, epsilon)).mean())
+
+    def add(family, parameters, positive_logpmf, positive_cdf, parameter_count):
+        def logpmf(values):
+            result = np.full(len(values), -np.inf)
+            zero = values == 0
+            if presence < 1:
+                result[zero] = np.log1p(-presence)
+            if presence > 0:
+                result[~zero] = np.log(presence) + positive_logpmf(values[~zero])
+            return result
+
+        def cdf(values):
+            values = np.asarray(values)
+            return np.where(values < 0, 0.0, 1 - presence + presence * positive_cdf(values))
+
+        train_ll = float(logpmf(train).sum())
+        test_ll = float(logpmf(test).mean())
+        # Impossible held-out observations are reported explicitly, not clipped
+        # to an arbitrary tiny probability or serialized as Infinity.
         candidates.append({
             "family": family,
-            "parameters": parameters,
-            "heldout_mean_log_likelihood": mean_ll,
+            "parameters": {"presence_probability": presence, **parameters},
+            "train_log_likelihood": train_ll,
+            "heldout_mean_log_likelihood": test_ll if np.isfinite(test_ll) else None,
+            "heldout_impossible_observations": int(np.isneginf(logpmf(test)).sum()),
+            "heldout_ks": _discrete_cdf_distance(test, cdf),
+            "cdf_distance_kind": "discrete_supremum_no_p_value",
+            "aic": 2 * parameter_count - 2 * train_ll,
+            "bic": parameter_count * math.log(len(train)) - 2 * train_ll,
         })
-    return sorted(candidates, key=lambda item: -item["heldout_mean_log_likelihood"])
+
+    if not len(positives):
+        add("point_mass_zero", {}, lambda x: np.full(len(x), -np.inf),
+            lambda x: np.zeros_like(x, dtype=float), 0)
+        return candidates
+    if np.all(positives == 1):
+        add("hurdle_point_mass_one", {},
+            lambda x: np.where(x == 1, 0.0, -np.inf),
+            lambda x: (np.asarray(x) >= 1).astype(float), 1)
+        return candidates
+
+    positive_mean = float(positives.mean())
+    # E[X | X > 0] = lambda / (1 - exp(-lambda)).
+    rate = float(optimize.brentq(
+        lambda value: value / -np.expm1(-value) - positive_mean,
+        1e-10, max(2.0, positive_mean * 2),
+    ))
+    log_normalizer = float(np.log(-np.expm1(-rate)))
+    add("hurdle_poisson", {"rate": rate},
+        lambda x: stats.poisson.logpmf(x, rate) - log_normalizer,
+        lambda x: np.where(x < 1, 0.0,
+                           np.clip(1 - stats.poisson.sf(x, rate) / -np.expm1(-rate), 0, 1)), 2)
+
+    # Maximize the *zero-truncated* NB likelihood. Moment estimates for the
+    # positive sample are not estimates for the untruncated NB parameters.
+    support, frequencies = np.unique(positives, return_counts=True)
+
+    def nb_parameters(theta):
+        n, mean = np.exp(theta)
+        probability = n / (n + mean)
+        log_z = np.log(-np.expm1(n * np.log(probability)))
+        return n, probability, log_z
+
+    def objective(theta):
+        n, probability, log_z = nb_parameters(theta)
+        result = -float(np.dot(frequencies, stats.nbinom.logpmf(support, n, probability) - log_z))
+        return result if np.isfinite(result) else 1e100
+
+    solutions = [optimize.minimize(
+        objective, np.log([initial_n, max(rate, 1e-5)]), method="L-BFGS-B",
+        bounds=[(math.log(1e-4), math.log(1e5)), (math.log(1e-6), math.log(1e5))],
+    ) for initial_n in (0.5, 5.0, 100.0)]
+    converged = [solution for solution in solutions if solution.success and np.isfinite(solution.fun)]
+    if converged:
+        solution = min(converged, key=lambda item: item.fun)
+        n, probability, log_z = nb_parameters(solution.x)
+        add("hurdle_negative_binomial", {"n": float(n), "probability": float(probability)},
+            lambda x: stats.nbinom.logpmf(x, n, probability) - log_z,
+            lambda x: np.where(x < 1, 0.0, np.clip(
+                1 - stats.nbinom.sf(x, n, probability) / np.exp(log_z), 0, 1)), 3)
+    return sorted(candidates, key=lambda item: (
+        -(item["heldout_mean_log_likelihood"] if item["heldout_mean_log_likelihood"] is not None else -math.inf),
+        item["heldout_ks"],
+    ))
+
+
+def _fit_metric(train, test, population, metric, threshold):
+    if metric in DISCRETE_METRICS or metric == "count":
+        return _fit_counts(train, test)
+    return _fit_continuous(train, test, _fit_support(population, metric, threshold))
 
 
 def _write_csv(path, rows):
@@ -781,6 +861,10 @@ def _fit_support(population, metric, threshold):
     return None
 
 
+def _format_fit_score(value):
+    return "impossible held-out observations" if value is None else f"{value:.4f}"
+
+
 def _markdown(profiles, occurrence, patterns, empirical, fits, primary_epoch):
     lines = [
         "# Empirical corruption meta-distribution", "",
@@ -819,7 +903,7 @@ def _markdown(profiles, occurrence, patterns, empirical, fits, primary_epoch):
             f"{item['count']:,} | {item['mean']:.4f} | {item['q50']:.4f} | {item['q10']:.4f} | {item['q90']:.4f} |"
         )
     lines.extend(["", "## Parametric-fit diagnostics", "",
-                  "The winning family below is selected by held-out mean log likelihood. A poor KS statistic supports retaining empirical sampling.", "",
+                  "The winning family below is selected by held-out mean log likelihood. KS is a descriptive supremum CDF distance, with no p-value for discrete counts. Large distances support retaining empirical sampling.", "",
                   "| Epoch | Population | Metric | Winner | Held-out mean log likelihood | KS |",
                   "|---:|---|---|---|---:|---:|"])
     for item in fits:
@@ -828,7 +912,7 @@ def _markdown(profiles, occurrence, patterns, empirical, fits, primary_epoch):
         winner = item["candidates"][0]
         lines.append(
             f"| {item['epoch']} | {item['population'].replace('_', ' ')} | {item['metric'].replace('_', ' ')} | "
-            f"{winner['family']} | {winner['heldout_mean_log_likelihood']:.4f} | "
+            f"{winner['family']} | {_format_fit_score(winner['heldout_mean_log_likelihood'])} | "
             f"{winner.get('heldout_ks', float('nan')):.4f} |"
         )
     lines.extend(["", "Machine-readable empirical samples, full fit parameters, count correlations and event tables accompany this report.", ""])
@@ -970,9 +1054,9 @@ def main():
     for (epoch, population, metric), splits in sorted(grouped.items()):
         if "fit" not in splits or "holdout" not in splits:
             continue
-        candidates = _fit_continuous(
+        candidates = _fit_metric(
             splits["fit"].values, splits["holdout"].values,
-            _fit_support(population, metric, args.threshold),
+            population, metric, args.threshold,
         )
         fits.append({"epoch": epoch, "population": population, "metric": metric, "candidates": candidates})
     for epoch in sorted({int(row["epoch"]) for row in profiles}):
