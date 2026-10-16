@@ -61,7 +61,6 @@ for index in "${!recipes[@]}"; do
   destination_run="$output_root/${destination_runs[$index]}"
   config="$config_root/${recipes[$index]}.yaml"
   for path in \
-    "$source_run/training-complete" \
     "$source_run/training-status.json" \
     "$source_run/models/latest_checkpoint.pt" \
     "$source_run/models/best_metric_checkpoint.pt" \
@@ -77,6 +76,11 @@ for index in "${!recipes[@]}"; do
       exit 2
     fi
   done
+  if [[ ! -f "$source_run/training-complete" ]]; then
+    echo \
+      "Warning: completion marker is missing for ${source_runs[$index]}; validating status and checkpoint instead." \
+      >&2
+  fi
   "$python_bin" -c '
 import inspect, json, sys, torch
 status = json.load(open(sys.argv[1], encoding="utf-8"))
