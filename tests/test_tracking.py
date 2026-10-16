@@ -60,6 +60,18 @@ def _config():
 
 
 class WandbTrackingTests(unittest.TestCase):
+    def test_canonical_history_bootstrap_fails_if_configured_file_is_missing(self):
+        class Tracker:
+            def replay_history(self, payload):
+                raise AssertionError("no history should be replayed")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(FileNotFoundError, "bootstrap history"):
+                _bootstrap_tracker_history(
+                    Tracker(), root / "missing.jsonl", root / ".complete"
+                )
+
     def test_canonical_history_bootstrap_replays_each_row_once(self):
         class Tracker:
             def __init__(self):

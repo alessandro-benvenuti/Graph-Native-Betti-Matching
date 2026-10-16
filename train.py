@@ -134,8 +134,12 @@ def _bootstrap_tracker_metrics(tracker, history_path: Path, marker_path: Path):
 def _bootstrap_tracker_history(tracker, history_path: Path, marker_path: Path):
     """Replay a complete canonical W&B history once into a continuation."""
 
-    if tracker is None or not history_path.is_file() or marker_path.is_file():
+    if tracker is None or marker_path.is_file():
         return 0
+    if not history_path.is_file():
+        raise FileNotFoundError(
+            f"configured canonical W&B bootstrap history is missing: {history_path}"
+        )
     if not hasattr(tracker, "replay_history"):
         raise TypeError("tracker does not support canonical history replay")
     count = 0
