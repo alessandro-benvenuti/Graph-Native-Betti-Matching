@@ -25,6 +25,6 @@ evaluation:
   interval_epochs: 5
 
 tracking:
-  bootstrap_metrics_path: "${GNBM_EXTENSION_SOURCE_RUN}/validation-metrics.jsonl"
+  bootstrap_history_path: "${GNBM_EXTENSION_SOURCE_RUN}/canonical-wandb-history.jsonl"
   tags: [gnbm, boundary-data, mri-finetune, epoch-500-extension, scheduler-restart, ddp]
 

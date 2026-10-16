@@ -84,6 +84,15 @@ class WandbTracker:
         )
         self.run.log(payload)
 
+    def replay_history(self, payload):
+        """Replay one already-canonical W&B history row unchanged."""
+
+        self.run.log({
+            key: value
+            for key, value in payload.items()
+            if isinstance(value, (int, float))
+        })
+
     def log_selection(self, record):
         self.run.summary["checkpoints/" + record["metric"]] = {
             key: record[key]

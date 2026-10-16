@@ -24,3 +24,22 @@ bash cluster/jean_zay/submit_boundary_gamma_extension_750.sh
 
 Set `GNBM_EXTENSION_DRY_RUN=1` to validate and print the plan without creating
 directories or submitting jobs.
+
+Each new offline W&B run is seeded from the source run's validated canonical
+epoch-1-to-500 history. After all three continuations finish, first reconstruct
+and validate the complete histories locally, then upload them:
+
+```bash
+python cluster/jean_zay/rebuild_wandb_extension.py \
+  "$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-a100" \
+  --source-root "$SCRATCH/checkpoints/gnbm-boundary-gamma-sweep-500-a100"
+
+python cluster/jean_zay/rebuild_wandb_extension.py \
+  "$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-a100" \
+  --source-root "$SCRATCH/checkpoints/gnbm-boundary-gamma-sweep-500-a100" \
+  --upload
+```
+
+Do not use raw `wandb sync` for the final reported runs. The reconstruction
+rejects incomplete epochs from interrupted Slurm segments and verifies that
+the uploaded `focal-loss` histories contain every epoch without gaps.

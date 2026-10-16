@@ -324,6 +324,32 @@ Set `GNBM_EXTENSION_SOURCE_ROOT`, `GNBM_EXTENSION_OUTPUT_DIR`,
 `GNBM_EXTENSION_WANDB_GROUP` before submission to override the corresponding
 defaults.
 
+The source campaign's `canonical-wandb-history.jsonl` files are required. Each
+continuation replays the complete epoch-1-to-500 canonical history into its new
+offline W&B run before logging epoch 501. Once all continuations are terminal,
+build and inspect gap-free histories without network writes:
+
+```bash
+python cluster/jean_zay/rebuild_wandb_extension.py \
+  "$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-a100" \
+  --source-root "$SCRATCH/checkpoints/gnbm-boundary-gamma-sweep-500-a100"
+```
+
+Only after that succeeds, upload and verify the three canonical runs in the
+`focal-loss` project:
+
+```bash
+python cluster/jean_zay/rebuild_wandb_extension.py \
+  "$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-a100" \
+  --source-root "$SCRATCH/checkpoints/gnbm-boundary-gamma-sweep-500-a100" \
+  --upload
+```
+
+Use this reconstruction instead of raw `wandb sync` for final reporting. It
+keeps the valid source prefix, selects only complete continuation epochs from
+all timeout/resume transactions, and rejects local or cloud histories with
+missing epochs.
+
 ### Development-QoS batch-size benchmark
 
 Before committing the full boundary-data sweep to a larger global batch, run

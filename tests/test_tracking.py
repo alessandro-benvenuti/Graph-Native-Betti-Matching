@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from training.tracking import build_tracker
-from train import _bootstrap_tracker_metrics
+from train import _bootstrap_tracker_history, _bootstrap_tracker_metrics
 
 
 class _FakeRun:
@@ -60,6 +60,45 @@ def _config():
 
 
 class WandbTrackingTests(unittest.TestCase):
+    def test_canonical_history_bootstrap_replays_each_row_once(self):
+        class Tracker:
+            def __init__(self):
+                self.records = []
+
+            def replay_history(self, payload):
+                self.records.append(payload)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            history = root / "canonical.jsonl"
+            marker = root / ".complete"
+            rows = [
+                {
+                    "epoch": 1,
+                    "train/epoch": 1,
+                    "train/total": 2.0,
+                    "performance/epoch": 1,
+                },
+                {
+                    "epoch": 2,
+                    "train/epoch": 2,
+                    "train/total": 1.5,
+                    "performance/epoch": 2,
+                },
+            ]
+            history.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            tracker = Tracker()
+            self.assertEqual(
+                _bootstrap_tracker_history(tracker, history, marker), 2
+            )
+            self.assertEqual(
+                _bootstrap_tracker_history(tracker, history, marker), 0
+            )
+            self.assertEqual(tracker.records, rows)
+
     def test_bootstrap_replays_map_mar_and_activation_phase_once(self):
         class Tracker:
             def __init__(self):
@@ -148,6 +187,12 @@ class WandbTrackingTests(unittest.TestCase):
                 iteration=8,
                 epoch=2,
             )
+            tracker.replay_history({
+                "epoch": 1,
+                "train/epoch": 1,
+                "train/total": 2.0,
+                "note": "ignored",
+            })
             tracker.finish(exit_code=0)
             metadata = json.loads(
                 (Path(directory) / "wandb-run.json").read_text(encoding="utf-8")
@@ -161,12 +206,14 @@ class WandbTrackingTests(unittest.TestCase):
         self.assertEqual(init["config"]["launch"]["slurm_job_id"], "42")
         self.assertIsNone(init["id"])
         self.assertIsNone(init["resume"])
-        self.assertEqual(len(fake_run.logged), 3)
+        self.assertEqual(len(fake_run.logged), 4)
         self.assertEqual(fake_run.logged[0]["train/iteration"], 7)
         self.assertEqual(fake_run.logged[0]["train/total"], 1.5)
         self.assertEqual(fake_run.logged[1]["validation/epoch"], 2)
         self.assertEqual(fake_run.logged[2]["metrics/epoch"], 2)
         self.assertEqual(fake_run.logged[2]["metrics/edge_mAP"], 0.25)
+        self.assertEqual(fake_run.logged[3]["epoch"], 1)
+        self.assertNotIn("note", fake_run.logged[3])
         self.assertEqual(fake_run.exit_codes, [0])
         self.assertEqual(metadata["id"], "run-123")
 

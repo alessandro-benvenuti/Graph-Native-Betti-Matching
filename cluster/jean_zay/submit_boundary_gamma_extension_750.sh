@@ -70,7 +70,9 @@ for index in "${!recipes[@]}"; do
     "$source_run/best-node-f1.json" \
     "$source_run/best-edge-f1.json" \
     "$source_run/performance.jsonl" \
-    "$source_run/validation-metrics.jsonl"; do
+    "$source_run/validation-metrics.jsonl" \
+    "$source_run/canonical-wandb-history.jsonl" \
+    "$source_run/canonical-wandb-manifest.json"; do
     if [[ ! -s "$path" ]]; then
       echo "Missing or empty source artifact: $path" >&2
       exit 2
@@ -88,13 +90,33 @@ options = {"map_location": "cpu"}
 if "weights_only" in inspect.signature(torch.load).parameters:
     options["weights_only"] = False
 checkpoint = torch.load(sys.argv[2], **options)
+history = [
+    json.loads(line)
+    for line in open(sys.argv[3], encoding="utf-8")
+    if line.strip()
+]
 if status.get("reason") != "max_epochs" or int(status.get("epoch", -1)) != 500:
     raise SystemExit("source run is not a completed 500-epoch run: " + repr(status))
 if int(checkpoint.get("epoch", -1)) != 500:
     raise SystemExit("latest checkpoint is not epoch 500")
 if int((checkpoint.get("trainer_state") or {}).get("world_size", -1)) != 2:
     raise SystemExit("source checkpoint was not trained with world size 2")
-' "$source_run/training-status.json" "$source_run/models/latest_checkpoint.pt"
+iteration = int(checkpoint.get("iteration", checkpoint.get("global_step", -1)))
+if iteration <= 0 or iteration % 500:
+    raise SystemExit("source checkpoint has an invalid iteration count")
+iterations_per_epoch = iteration // 500
+epochs = [int(row.get("epoch", -1)) for row in history]
+if epochs != list(range(1, 501)):
+    raise SystemExit("canonical W&B history is not contiguous for epochs 1..500")
+for row in history:
+    epoch = int(row["epoch"])
+    for key in ("train/epoch", "performance/epoch"):
+        if int(row.get(key, -1)) != epoch:
+            raise SystemExit(f"canonical W&B history has invalid {key} at epoch {epoch}")
+    if int(row.get("train/iteration", -1)) != epoch * iterations_per_epoch:
+        raise SystemExit(f"canonical W&B history has invalid iteration at epoch {epoch}")
+' "$source_run/training-status.json" "$source_run/models/latest_checkpoint.pt" \
+  "$source_run/canonical-wandb-history.jsonl"
   if [[ -e "$destination_run" ]]; then
     echo "Destination already exists; refusing to overwrite: $destination_run" >&2
     exit 2

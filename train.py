@@ -131,6 +131,24 @@ def _bootstrap_tracker_metrics(tracker, history_path: Path, marker_path: Path):
     return count
 
 
+def _bootstrap_tracker_history(tracker, history_path: Path, marker_path: Path):
+    """Replay a complete canonical W&B history once into a continuation."""
+
+    if tracker is None or not history_path.is_file() or marker_path.is_file():
+        return 0
+    if not hasattr(tracker, "replay_history"):
+        raise TypeError("tracker does not support canonical history replay")
+    count = 0
+    with history_path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            tracker.replay_history(json.loads(line))
+            count += 1
+    marker_path.write_text("complete\n", encoding="utf-8")
+    return count
+
+
 def main():
     args = _parser().parse_args()
     config = _apply_operational_overrides(load_config(args.config), args)
@@ -245,8 +263,11 @@ def main():
     tracker = None
     if rank == 0:
         run_dir.mkdir(parents=True, exist_ok=True)
+        configured_history_bootstrap = config["tracking"].get(
+            "bootstrap_history_path"
+        )
         configured_bootstrap = config["tracking"].get("bootstrap_metrics_path")
-        bootstrap_path = (
+        metric_bootstrap_path = (
             Path(configured_bootstrap)
             if configured_bootstrap
             else run_dir / "wandb-metric-bootstrap.jsonl"
@@ -289,7 +310,18 @@ def main():
                 ),
             },
         )
-        _bootstrap_tracker_metrics(tracker, bootstrap_path, bootstrap_marker)
+        if configured_history_bootstrap:
+            _bootstrap_tracker_history(
+                tracker,
+                Path(configured_history_bootstrap),
+                bootstrap_marker,
+            )
+        else:
+            _bootstrap_tracker_metrics(
+                tracker,
+                metric_bootstrap_path,
+                bootstrap_marker,
+            )
     barrier()
     try:
         Trainer(
