@@ -28,6 +28,7 @@ from training import (
     build_criterion,
     build_optimizer,
     build_scheduler,
+    reset_optimizer_learning_rate,
 )
 from training.checkpoint import load_training_checkpoint
 from training.distributed import (
@@ -49,6 +50,24 @@ def _parser():
     parser.add_argument("--run-name", help="override experiment.name")
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--workers", type=int)
+    parser.add_argument(
+        "--reset-scheduler-on-resume",
+        action="store_true",
+        help="restore model/optimizer state but start the configured scheduler anew",
+    )
+    parser.add_argument(
+        "--reset-early-stopping-on-resume",
+        action="store_true",
+        help="discard only the checkpoint's early-stopping clock",
+    )
+    parser.add_argument(
+        "--allow-world-size-change-on-resume",
+        action="store_true",
+        help=(
+            "permit an explicit DDP world-size migration and start fresh RNG "
+            "streams while restoring model and optimizer state"
+        ),
+    )
     parser.add_argument(
         "--distributed", action="store_true", help="enable torchrun/DDP execution"
     )
@@ -168,6 +187,13 @@ def main():
 
     if args.resume and args.initial_weights:
         raise ValueError("--resume and --initial-weights are mutually exclusive")
+    resume_only_options = (
+        args.reset_scheduler_on_resume
+        or args.reset_early_stopping_on_resume
+        or args.allow_world_size_change_on_resume
+    )
+    if resume_only_options and not args.resume:
+        raise ValueError("resume reset options require --resume")
     start_epoch = int(config["training"]["start_epoch"])
     start_iteration = 0
     trainer_state = {}
@@ -178,15 +204,21 @@ def main():
             args.resume,
             raw_model,
             optimizer,
-            scheduler,
+            None if args.reset_scheduler_on_resume else scheduler,
             rank=rank,
             loader_generator=getattr(train_loader, "generator", None),
+            restore_rng_state=not args.allow_world_size_change_on_resume,
             return_trainer_state=True,
         )
+        if args.reset_scheduler_on_resume:
+            reset_optimizer_learning_rate(config, optimizer)
+        if args.reset_early_stopping_on_resume:
+            trainer_state.pop("early_stopping", None)
         checkpoint_world_size = trainer_state.get("world_size")
         if (
             checkpoint_world_size is not None
             and int(checkpoint_world_size) != world_size
+            and not args.allow_world_size_change_on_resume
         ):
             raise ValueError(
                 "resume requires the original world size: checkpoint={} current={}".format(
@@ -250,6 +282,11 @@ def main():
                 "resume_checkpoint": args.resume,
                 "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
                 "world_size": world_size,
+                "reset_scheduler_on_resume": args.reset_scheduler_on_resume,
+                "reset_early_stopping_on_resume": args.reset_early_stopping_on_resume,
+                "allow_world_size_change_on_resume": (
+                    args.allow_world_size_change_on_resume
+                ),
             },
         )
         _bootstrap_tracker_metrics(tracker, bootstrap_path, bootstrap_marker)

@@ -34,6 +34,15 @@ fi
 if [[ -n "${GNBM_WORKERS:-}" ]]; then
   args+=(--workers "$GNBM_WORKERS")
 fi
+if [[ "${GNBM_RESET_SCHEDULER_ON_RESUME:-0}" == "1" ]]; then
+  args+=(--reset-scheduler-on-resume)
+fi
+if [[ "${GNBM_RESET_EARLY_STOPPING_ON_RESUME:-0}" == "1" ]]; then
+  args+=(--reset-early-stopping-on-resume)
+fi
+if [[ "${GNBM_ALLOW_WORLD_SIZE_CHANGE_ON_RESUME:-0}" == "1" ]]; then
+  args+=(--allow-world-size-change-on-resume)
+fi
 
 latest_checkpoint="$GNBM_OUTPUT_DIR/$GNBM_RUN_NAME/models/latest_checkpoint.pt"
 if [[ -n "${GNBM_RESUME_CHECKPOINT:-}" ]]; then

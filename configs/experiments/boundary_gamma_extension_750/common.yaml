@@ -1,0 +1,30 @@
+# Shared 500->750 continuation settings.
+training:
+  epochs: 750
+  warmup_epochs: 0
+  optimizer:
+    # A conservative tail LR; AdamW moments are retained from epoch 500.
+    base_lr: 1.0e-5
+  scheduler:
+    # The absolute epoch counter remains 501..750, but the deliberately reset
+    # polynomial schedule spans only this 250-epoch continuation.
+    duration_epochs: 250
+  early_stopping:
+    enabled: true
+    monitor: edge_mAP
+    mode: max
+    patience_epochs: 50
+    min_epochs: 0
+    min_delta: 0.0
+  checkpoint:
+    policy: best_only
+    interval_epochs: 750
+    latest_interval_epochs: 2
+
+evaluation:
+  interval_epochs: 5
+
+tracking:
+  bootstrap_metrics_path: "${GNBM_EXTENSION_SOURCE_RUN}/validation-metrics.jsonl"
+  tags: [gnbm, boundary-data, mri-finetune, epoch-500-extension, scheduler-restart, ddp]
+

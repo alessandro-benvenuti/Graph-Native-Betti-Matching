@@ -20,7 +20,11 @@ from training.checkpoint import (
 )
 from training.engine import Trainer, train_step
 from training.losses import GraphCriterion
-from training.optim import build_optimizer, build_scheduler
+from training.optim import (
+    build_optimizer,
+    build_scheduler,
+    reset_optimizer_learning_rate,
+)
 
 
 def _config():
@@ -88,6 +92,59 @@ class RecordingTracker:
 
 
 class TrainingTests(unittest.TestCase):
+    def test_scheduler_can_use_a_fresh_continuation_duration(self):
+        config = _config()
+        config["training"]["epochs"] = 750
+        config["training"]["warmup_epochs"] = 0
+        config["training"]["optimizer"]["base_lr"] = 1.0e-5
+        config["training"]["scheduler"]["duration_epochs"] = 250
+        model = TinyGraphModel()
+        optimizer = build_optimizer(config, model)
+        scheduler = build_scheduler(config, optimizer, iterations_per_epoch=1)
+
+        for _ in range(250):
+            optimizer.step()
+            scheduler.step()
+
+        self.assertEqual(scheduler.last_epoch, 250)
+        self.assertEqual(optimizer.param_groups[0]["lr"], 0.0)
+
+    def test_optimizer_lr_can_be_rebased_after_loading_moments(self):
+        source_config = _config()
+        source_model = TinyGraphModel()
+        source_optimizer = build_optimizer(source_config, source_model)
+        sum(parameter.sum() for parameter in source_model.parameters()).backward()
+        source_optimizer.step()
+        source_optimizer.param_groups[0]["lr"] = 0.0
+        source_optimizer.param_groups[0]["initial_lr"] = float(
+            source_config["training"]["optimizer"]["base_lr"]
+        )
+
+        continuation_config = _config()
+        continuation_config["training"]["optimizer"]["base_lr"] = 1.0e-5
+        continuation_model = TinyGraphModel()
+        continuation_optimizer = build_optimizer(
+            continuation_config, continuation_model
+        )
+        continuation_optimizer.load_state_dict(source_optimizer.state_dict())
+        source_moments = [
+            state["exp_avg"].clone()
+            for state in source_optimizer.state.values()
+        ]
+        reset_optimizer_learning_rate(
+            continuation_config, continuation_optimizer
+        )
+
+        group = continuation_optimizer.param_groups[0]
+        self.assertEqual(group["lr"], 1.0e-5)
+        self.assertEqual(group["initial_lr"], 1.0e-5)
+        restored_moments = [
+            state["exp_avg"] for state in continuation_optimizer.state.values()
+        ]
+        self.assertEqual(len(source_moments), len(restored_moments))
+        for source, restored in zip(source_moments, restored_moments):
+            self.assertTrue(torch.equal(source, restored))
+
     def test_runtime_state_files_and_checkpoint_aliases_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

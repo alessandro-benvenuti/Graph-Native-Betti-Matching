@@ -27,7 +27,14 @@ def build_scheduler(config: Mapping, optimizer, iterations_per_epoch: int):
     if settings["name"] != "polynomial":
         raise ValueError("only the polynomial scheduler is supported")
     warmup_iterations = float(config["training"]["warmup_epochs"]) * iterations_per_epoch
-    training_iterations = int(config["training"]["epochs"]) * iterations_per_epoch
+    # A continuation may deliberately use a fresh schedule shorter than the
+    # absolute training epoch counter (for example epochs 501--750 with a
+    # 250-epoch tail schedule).  The option is part of the resolved scientific
+    # configuration, so interruption resumes rebuild the same LambdaLR closure.
+    duration_epochs = int(
+        settings.get("duration_epochs", config["training"]["epochs"])
+    )
+    training_iterations = duration_epochs * iterations_per_epoch
     initial_ratio = float(settings["warmup_lr"]) / float(
         config["training"]["optimizer"]["base_lr"]
     )
@@ -42,4 +49,18 @@ def build_scheduler(config: Mapping, optimizer, iterations_per_epoch: int):
     return torch.optim.lr_scheduler.LambdaLR(optimizer, multiplier)
 
 
-__all__ = ["build_optimizer", "build_scheduler"]
+def reset_optimizer_learning_rate(config: Mapping, optimizer):
+    """Apply the configured base LR after restoring AdamW moments.
+
+    ``Optimizer.load_state_dict`` restores the exhausted source-run learning
+    rate.  A deliberate continuation-schedule restart keeps the moment tensors
+    while rebasing every parameter group to the new configured base LR.
+    """
+
+    base_lr = float(config["training"]["optimizer"]["base_lr"])
+    for group in optimizer.param_groups:
+        group["lr"] = base_lr
+        group["initial_lr"] = base_lr
+
+
+__all__ = ["build_optimizer", "build_scheduler", "reset_optimizer_learning_rate"]

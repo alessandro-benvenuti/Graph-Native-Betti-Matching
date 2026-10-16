@@ -449,6 +449,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ConfigError("training.optimizer.name must be adamw")
     if not isinstance(scheduler, Mapping) or scheduler.get("name") != "polynomial":
         raise ConfigError("training.scheduler.name must be polynomial")
+    if scheduler.get("duration_epochs") is not None:
+        _positive_int(
+            scheduler.get("duration_epochs"),
+            "training.scheduler.duration_epochs",
+        )
     checkpoint = training.get("checkpoint")
     if not isinstance(checkpoint, Mapping):
         raise ConfigError("training.checkpoint must be a mapping")

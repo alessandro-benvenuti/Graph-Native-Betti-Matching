@@ -119,6 +119,7 @@ def load_training_checkpoint(
     scaler=None,
     rank: int = 0,
     loader_generator=None,
+    restore_rng_state: bool = True,
     return_trainer_state: bool = False,
 ):
     options = {"map_location": "cpu"}
@@ -141,7 +142,7 @@ def load_training_checkpoint(
             raise ValueError("checkpoint has no AMP scaler state")
         scaler.load_state_dict(checkpoint["scaler"])
     runtime_states = checkpoint.get("runtime_states")
-    if runtime_states:
+    if runtime_states and restore_rng_state:
         selected = runtime_states[min(int(rank), len(runtime_states) - 1)]
         restore_runtime_state(selected, loader_generator)
     result = (

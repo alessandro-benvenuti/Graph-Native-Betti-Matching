@@ -1,0 +1,10 @@
+defaults:
+  - ../boundary_gamma_sweep_500/finetune_node_edge_focal_g05.yaml
+  - common.yaml
+
+experiment:
+  name: finetune_boundary_mri750_node_edge_focal_g05_tail250_seed364505
+
+tracking:
+  tags: [gnbm, boundary-data, mri-finetune, node-focal, edge-focal-mm, gamma-0.5, epoch-500-extension, scheduler-restart, ddp]
+

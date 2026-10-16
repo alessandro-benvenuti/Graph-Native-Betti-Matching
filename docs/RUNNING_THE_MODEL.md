@@ -283,6 +283,47 @@ the ten-minute NCCL watchdog failures caused by long rank-0-only evaluation.
 The A100 environment also gives ordinary distributed collectives a two-hour
 safety timeout for large checkpoint writes.
 
+### Epoch-500 continuation to epoch 750
+
+The selected baseline, node-focal, and node-plus-edge-focal gamma-0.5 runs can
+be continued from their completed epoch-500 checkpoints with:
+
+```bash
+cd "$WORK/projects/Graph-Native-Betti-Matching"
+source cluster/jean_zay/env_a100.sh
+export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches_boundary"
+
+# Validate the checkpoints, dataset, and resolved configurations without
+# creating output directories or submitting jobs.
+GNBM_EXTENSION_DRY_RUN=1 \
+  bash cluster/jean_zay/submit_boundary_gamma_extension_750.sh
+
+# Submit the three continuation chains.
+bash cluster/jean_zay/submit_boundary_gamma_extension_750.sh
+```
+
+The launcher reads the original runs from
+`$SCRATCH/checkpoints/gnbm-boundary-gamma-sweep-500-a100` and writes separate
+runs below
+`$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-a100`; it never changes
+the epoch-500 runs. It retains model weights and AdamW moments, starts a fresh
+polynomial tail at `1e-5` that reaches zero after 250 additional epochs, and
+resets the 50-epoch edge-mAP patience clock. Existing best edge-mAP, node-F1,
+and edge-F1 checkpoints are seeded into each continuation and can only be
+replaced by a genuine improvement.
+
+The first segment explicitly migrates the checkpoint from two to four A100s.
+It starts fresh per-rank random-number streams because a two-rank RNG state
+cannot be mapped exactly to four ranks. Batch 8 per GPU keeps global batch 32,
+so no learning-rate scaling is applied. Later segments resume normally with
+four A100s. Six chained 20-hour segments provide a safety margin; surplus jobs
+exit when they see `training-complete`.
+
+Set `GNBM_EXTENSION_SOURCE_ROOT`, `GNBM_EXTENSION_OUTPUT_DIR`,
+`GNBM_EXTENSION_SEGMENTS`, `GNBM_EXTENSION_WANDB_PROJECT`, or
+`GNBM_EXTENSION_WANDB_GROUP` before submission to override the corresponding
+defaults.
+
 ### Development-QoS batch-size benchmark
 
 Before committing the full boundary-data sweep to a larger global batch, run
