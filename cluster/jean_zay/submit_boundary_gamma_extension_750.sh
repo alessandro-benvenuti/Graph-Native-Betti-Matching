@@ -69,6 +69,10 @@ if [[ ! "$segments" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
+# Config validation expands experiment.output_dir from this variable, including
+# during a dry run before the destination directories are created.
+export GNBM_OUTPUT_DIR="$output_root"
+
 config_root="configs/experiments/boundary_gamma_extension_750"
 recipes=(baseline node_focal node_edge_focal_g05)
 source_runs=(
@@ -221,7 +225,6 @@ path.write_text(json.dumps({
 ' "$source_run" "$destination_run" "$hardware" "$continuation_gpus"
 }
 
-export GNBM_OUTPUT_DIR="$output_root"
 if [[ "$hardware" == "h100" ]]; then
   export GNBM_VENV="$venv_dir"
 fi
