@@ -29,9 +29,41 @@ if [[ "$dry_run" != "0" && "$dry_run" != "1" ]]; then
   exit 2
 fi
 
+hardware="${GNBM_EXTENSION_HARDWARE:-a100}"
+case "$hardware" in
+  a100)
+    continuation_gpus=4
+    batch_per_gpu=8
+    default_output_root="$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-a100"
+    venv_dir="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}"
+    python_bin="$venv_dir/bin/python"
+    submit_helper="$repo_dir/cluster/jean_zay/submit_train_a100.sh"
+    qos=qos_gpu_a100-t3
+    default_walltime=20:00:00
+    default_segments=6
+    default_group=boundary-gamma-extension-750-seed364505
+    ;;
+  h100)
+    continuation_gpus=2
+    batch_per_gpu=16
+    default_output_root="$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-h100"
+    venv_dir="${GNBM_H100_VENV:-$WORK/venvs/vascular-graph-extraction-h100-torch231}"
+    python_bin="$venv_dir/bin/python"
+    submit_helper="$repo_dir/cluster/jean_zay/submit_train.sh"
+    qos=qos_gpu_h100-t3
+    default_walltime=06:00:00
+    default_segments=8
+    default_group=boundary-gamma-extension-750-h100-seed364505
+    ;;
+  *)
+    echo "GNBM_EXTENSION_HARDWARE must be a100 or h100." >&2
+    exit 2
+    ;;
+esac
+
 source_root="${GNBM_EXTENSION_SOURCE_ROOT:-$SCRATCH/checkpoints/gnbm-boundary-gamma-sweep-500-a100}"
-output_root="${GNBM_EXTENSION_OUTPUT_DIR:-$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-a100}"
-segments="${GNBM_EXTENSION_SEGMENTS:-6}"
+output_root="${GNBM_EXTENSION_OUTPUT_DIR:-$default_output_root}"
+segments="${GNBM_EXTENSION_SEGMENTS:-$default_segments}"
 if [[ ! "$segments" =~ ^[1-9][0-9]*$ ]]; then
   echo "GNBM_EXTENSION_SEGMENTS must be a positive integer." >&2
   exit 2
@@ -50,9 +82,8 @@ destination_runs=(
   finetune_boundary_mri750_node_edge_focal_g05_tail250_seed364505
 )
 
-python_bin="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}/bin/python"
 if [[ ! -x "$python_bin" ]]; then
-  echo "A100 Python environment is missing: $python_bin" >&2
+  echo "The $hardware Python environment is missing: $python_bin" >&2
   exit 2
 fi
 
@@ -132,10 +163,10 @@ done
 
 echo "Source:      $source_root"
 echo "Destination: $output_root"
-echo "GPUs/run:    4 A100s (batch 8/GPU, global batch 32)"
+echo "Hardware:    $continuation_gpus ${hardware^^}(s) (batch $batch_per_gpu/GPU, global batch 32)"
 echo "Schedule:    epoch 500 -> at most 750, fresh polynomial LR 1e-5 -> 0"
 echo "Stopping:    reset edge-mAP patience, 50 epochs"
-echo "Segments:    $segments x 20h per recipe"
+echo "Segments:    $segments x $default_walltime per recipe"
 
 if [[ "$dry_run" == "1" ]]; then
   echo "Dry run passed; no directories or jobs were created."
@@ -183,21 +214,25 @@ path.write_text(json.dumps({
     "scheduler_duration_epochs": 250,
     "early_stopping_reset": True,
     "source_world_size": 2,
-    "continuation_world_size": 4,
+    "continuation_world_size": int(sys.argv[4]),
+    "continuation_hardware": sys.argv[3],
     "global_batch_size": 32,
 }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-' "$source_run" "$destination_run"
+' "$source_run" "$destination_run" "$hardware" "$continuation_gpus"
 }
 
 export GNBM_OUTPUT_DIR="$output_root"
-export GNBM_GPUS=4
-export GNBM_BATCH_SIZE=8
-export GNBM_QOS=qos_gpu_a100-t3
-export GNBM_WALLTIME=20:00:00
+if [[ "$hardware" == "h100" ]]; then
+  export GNBM_VENV="$venv_dir"
+fi
+export GNBM_GPUS="$continuation_gpus"
+export GNBM_BATCH_SIZE="$batch_per_gpu"
+export GNBM_QOS="$qos"
+export GNBM_WALLTIME="${GNBM_EXTENSION_WALLTIME:-$default_walltime}"
 export GNBM_SKIP_PREFLIGHT=1
 export WANDB_MODE=offline
 export WANDB_PROJECT="${GNBM_EXTENSION_WANDB_PROJECT:-focal-loss}"
-export WANDB_RUN_GROUP="${GNBM_EXTENSION_WANDB_GROUP:-boundary-gamma-extension-750-seed364505}"
+export WANDB_RUN_GROUP="${GNBM_EXTENSION_WANDB_GROUP:-$default_group}"
 unset GNBM_INITIAL_WEIGHTS
 
 printf '%-24s %-28s\n' RECIPE JOB_CHAIN
@@ -220,7 +255,11 @@ for index in "${!recipes[@]}"; do
       unset GNBM_AUTO_RESUME GNBM_DEPENDENCY GNBM_ALLOW_PENDING_RESUME
       export GNBM_RESET_SCHEDULER_ON_RESUME=1
       export GNBM_RESET_EARLY_STOPPING_ON_RESUME=1
-      export GNBM_ALLOW_WORLD_SIZE_CHANGE_ON_RESUME=1
+      if (( continuation_gpus != 2 )); then
+        export GNBM_ALLOW_WORLD_SIZE_CHANGE_ON_RESUME=1
+      else
+        unset GNBM_ALLOW_WORLD_SIZE_CHANGE_ON_RESUME
+      fi
     else
       export GNBM_RESUME_CHECKPOINT="$destination_run/models/latest_checkpoint.pt"
       export GNBM_ALLOW_PENDING_RESUME=1
@@ -230,7 +269,7 @@ for index in "${!recipes[@]}"; do
       unset GNBM_RESET_EARLY_STOPPING_ON_RESUME
       unset GNBM_ALLOW_WORLD_SIZE_CHANGE_ON_RESUME
     fi
-    submission="$(bash "$repo_dir/cluster/jean_zay/submit_train_a100.sh" \
+    submission="$(bash "$submit_helper" \
       "$config" "$destination_name")"
     job_id="$(printf '%s\n' "$submission" | sed -n 's/^Submitted batch job //p' | head -n 1)"
     if [[ -z "$job_id" ]]; then
@@ -245,5 +284,5 @@ for index in "${!recipes[@]}"; do
 done
 
 echo "Queue: squeue -u $USER --format='%.18i %.55j %.2t %.10M %.30R'"
-echo "Logs:  $WORK/logs/graph-native-betti-matching/a100"
+echo "Logs:  $WORK/logs/graph-native-betti-matching"
 echo "The first segment resets the scheduler and patience; later segments strictly resume the extension state."

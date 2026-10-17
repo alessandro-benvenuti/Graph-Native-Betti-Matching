@@ -26,11 +26,25 @@ args=(
   --device cuda
 )
 
+completion_marker="$GNBM_OUTPUT_DIR/$GNBM_RUN_NAME/training-complete"
+if [[ -f "$completion_marker" ]]; then
+  echo "Training is already complete: $completion_marker"
+  exit 0
+fi
 if [[ -n "${GNBM_BATCH_SIZE:-}" ]]; then
   args+=(--batch-size "$GNBM_BATCH_SIZE")
 fi
 if [[ -n "${GNBM_WORKERS:-}" ]]; then
   args+=(--workers "$GNBM_WORKERS")
+fi
+if [[ "${GNBM_RESET_SCHEDULER_ON_RESUME:-0}" == "1" ]]; then
+  args+=(--reset-scheduler-on-resume)
+fi
+if [[ "${GNBM_RESET_EARLY_STOPPING_ON_RESUME:-0}" == "1" ]]; then
+  args+=(--reset-early-stopping-on-resume)
+fi
+if [[ "${GNBM_ALLOW_WORLD_SIZE_CHANGE_ON_RESUME:-0}" == "1" ]]; then
+  args+=(--allow-world-size-change-on-resume)
 fi
 
 latest_checkpoint="$GNBM_OUTPUT_DIR/$GNBM_RUN_NAME/models/latest_checkpoint.pt"
@@ -79,3 +93,8 @@ else
     --nproc_per_node="$gpus" \
     train.py --distributed "${args[@]}"
 fi
+
+# Slurm timeouts never reach this marker. Successful maximum-epoch, early-stop,
+# or configured execution-stop exits do, allowing surplus chained jobs to quit.
+touch "$completion_marker"
+echo "Training complete: $completion_marker"

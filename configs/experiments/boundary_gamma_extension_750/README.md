@@ -25,6 +25,11 @@ bash cluster/jean_zay/submit_boundary_gamma_extension_750.sh
 Set `GNBM_EXTENSION_DRY_RUN=1` to validate and print the plan without creating
 directories or submitting jobs.
 
+For the deadline fallback on two H100s, use `GNBM_EXTENSION_HARDWARE=h100`.
+This selects batch 16 per GPU, keeping global batch 32 and world size 2,
+uses a separate `gnbm-boundary-gamma-extension-750-h100` output root, and
+submits eight six-hour segments per recipe.
+
 Each new offline W&B run is seeded from the source run's validated canonical
 epoch-1-to-500 history. After all three continuations finish, first reconstruct
 and validate the complete histories locally, then upload them:

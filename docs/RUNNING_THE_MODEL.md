@@ -350,6 +350,14 @@ keeps the valid source prefix, selects only complete continuation epochs from
 all timeout/resume transactions, and rejects local or cloud histories with
 missing epochs.
 
+For an urgent H100 fallback, source `env_h100.sh` and set
+`GNBM_EXTENSION_HARDWARE=h100` for both dry-run and submission. The launcher
+then uses two H100s with batch 16 per GPU, preserving world size 2 and global
+batch 32, and writes to the separate
+`$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-h100` root. Its default
+chain is eight six-hour production-QoS segments per recipe; it never uses the
+development QoS.
+
 ### Development-QoS batch-size benchmark
 
 Before committing the full boundary-data sweep to a larger global batch, run
