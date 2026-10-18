@@ -256,6 +256,7 @@ def compare_predictions(
     *,
     graph_reader=read_vtp_graph,
     max_node_distance: float = 0.1,
+    require_gt_loops: bool = True,
 ):
     if max_node_distance < 0:
         raise ValueError("max_node_distance must be non-negative")
@@ -280,7 +281,7 @@ def compare_predictions(
     for sample_id in predictions["control"]:
         gt_nodes, gt_edges = graph_reader(dataset_by_id[sample_id].graph)
         _, target_beta1 = graph_betti_numbers(len(gt_nodes), gt_edges)
-        if target_beta1 <= 0:
+        if require_gt_loops and target_beta1 <= 0:
             raise ValueError(f"Prediction subset contains non-loop GT patch {sample_id}")
         method_results = {
             method: spatial_cycle_result(

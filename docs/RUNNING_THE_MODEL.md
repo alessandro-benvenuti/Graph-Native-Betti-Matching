@@ -841,6 +841,42 @@ remain the basis-invariant results. Detailed outputs are written under
 predictions, and jointly inexact predictions. Override the normalized-coordinate
 matching gate with `GNBM_LOOP_MAX_NODE_DISTANCE` (default `0.1`).
 
+For the staged epoch-400 control and the completed O07/S07 promotions, reuse
+the same spatial cycle matcher with:
+
+```bash
+export GNBM_OUTPUT_DIR="/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-betti-staged-activation-ddp2-a100"
+export SYNTHETIC_MRI_DATASET="/lustre/fsn1/projects/rech/vnc/upz73jr/datasets/syntheticMRI/new_patches_boundary"
+bash cluster/jean_zay/submit_staged_betti_loop_audit.sh
+```
+
+The default evaluates every GT-loop validation patch once per model, using one
+A100 with a four-hour limit. The job verifies all checkpoint epochs, uses the
+saved hard-inference thresholds consistently, and disables BN recalibration to
+match the training validation protocol. Reports under
+`$GNBM_OUTPUT_DIR/loop-audit-e0400-gt-loops` include `report.md`, `summary.json`,
+paired per-patch reports in `comparison/O07` and `comparison/S07`, and inference
+exports for all three models. Shared rank/recall measures genuine GT-cycle
+recovery; false rank measures incorrect cycles. Per-patch rank gains and losses
+are reported separately to expose regressions hidden by net changes. These
+are ranks of cycle spaces after spatial node matching, not named loop identities.
+
+To additionally measure false-loop suppression on GT-nonloop patches, evaluate
+the entire validation split (more inference and disk space):
+
+```bash
+bash cluster/jean_zay/submit_staged_betti_loop_audit.sh all-validation
+```
+
+This writes a separate output directory and reports all-validation, GT-loop,
+and GT-nonloop cohorts. Both scopes use validation only. Override the wall time
+with `GNBM_LOOP_WALLTIME` or the QoS with `GNBM_LOOP_QOS`. After a timeout, repeat
+the same command: completed model exports are reused, while incomplete inference
+is rerun. Frozen input metadata prevents reusing exports with changed checkpoints,
+configs, thresholds, or settings. If one model's inference alone exceeds the time
+limit, request a longer allocation. The report remains relative to GT annotations
+and the default spatial matching distance of 0.1.
+
 Render a small, deliberately qualitative 3D gallery after inference with:
 
 ```bash
