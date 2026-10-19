@@ -141,6 +141,21 @@ SCRIPT = r"""
 
   await addPredictionLoopOverlay();
 
+  const paperSceneStyle = {
+    paper_bgcolor: 'rgba(255,255,255,0.5)',
+    plot_bgcolor: 'rgba(255,255,255,0.5)'
+  };
+  for (const axis of ['xaxis', 'yaxis', 'zaxis']) {
+    paperSceneStyle[`scene.${axis}.showline`] = true;
+    paperSceneStyle[`scene.${axis}.linecolor`] = '#000000';
+    paperSceneStyle[`scene.${axis}.linewidth`] = 3;
+    paperSceneStyle[`scene.${axis}.zerolinecolor`] = '#000000';
+    paperSceneStyle[`scene.${axis}.gridcolor`] = 'rgba(0,0,0,0.24)';
+    paperSceneStyle[`scene.${axis}.showbackground`] = true;
+    paperSceneStyle[`scene.${axis}.backgroundcolor`] = 'rgba(229,236,246,0.5)';
+  }
+  await Plotly.relayout(gd, paperSceneStyle);
+
   const updateMriLabel = () => {
     const shown = mriIndices().some(index => {
       const visible = gd.data[index].visible;

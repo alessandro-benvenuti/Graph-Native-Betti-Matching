@@ -19,6 +19,9 @@ class GraphVisualizationEnhancementTests(unittest.TestCase):
         self.assertIn("name: 'Predicted loop edges'", enhanced)
         self.assertIn("line: {color: '#ff3300', width: group.width}", enhanced)
         self.assertIn("width: Number(trace.line?.width ?? 3)", enhanced)
+        self.assertIn("linecolor`] = '#000000'", enhanced)
+        self.assertIn("backgroundcolor`] = 'rgba(229,236,246,0.5)'", enhanced)
+        self.assertIn("paper_bgcolor: 'rgba(255,255,255,0.5)'", enhanced)
         self.assertIn("trace.name?.startsWith('Ground truth ')", enhanced)
         self.assertEqual(enhance_html(enhanced), enhanced)
 
