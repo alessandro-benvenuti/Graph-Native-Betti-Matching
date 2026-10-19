@@ -141,32 +141,17 @@ SCRIPT = r"""
 
   await addPredictionLoopOverlay();
 
-  const sceneLayout = gd.layout.scene || {};
-  const fullSceneLayout = gd._fullLayout?.scene || {};
-  const axisRange = axis => (
-    sceneLayout[axis]?.range || fullSceneLayout[axis]?.range || [0, 1]
-  ).map(Number);
-  const [x0, x1] = axisRange('xaxis');
-  const [y0, y1] = axisRange('yaxis');
-  const [z0, z1] = axisRange('zaxis');
-  await Plotly.addTraces(gd, {
-    type: 'scatter3d', mode: 'lines',
-    x: [x0, x1, null, x0, x0, null, x0, x0],
-    y: [y0, y0, null, y0, y1, null, y0, y0],
-    z: [z0, z0, null, z0, z0, null, z0, z1],
-    line: {color: '#000000', width: 3},
-    name: 'Background axes', showlegend: false,
-    hoverinfo: 'skip', visible: true
-  });
-
   const paperSceneStyle = {
-    paper_bgcolor: '#cce6ff',
-    plot_bgcolor: '#cce6ff'
+    paper_bgcolor: '#ffffff',
+    plot_bgcolor: '#ffffff'
   };
   for (const axis of ['xaxis', 'yaxis', 'zaxis']) {
-    paperSceneStyle[`scene.${axis}.zeroline`] = false;
+    paperSceneStyle[`scene.${axis}.zeroline`] = true;
+    paperSceneStyle[`scene.${axis}.zerolinecolor`] = '#000000';
+    paperSceneStyle[`scene.${axis}.zerolinewidth`] = 2;
+    paperSceneStyle[`scene.${axis}.showgrid`] = false;
     paperSceneStyle[`scene.${axis}.showbackground`] = true;
-    paperSceneStyle[`scene.${axis}.backgroundcolor`] = '#cce6ff';
+    paperSceneStyle[`scene.${axis}.backgroundcolor`] = '#e6f3ff';
   }
   await Plotly.relayout(gd, paperSceneStyle);
 
