@@ -174,9 +174,21 @@ SCRIPT = r"""
     }
   };
 
+  const placeOpaqueNodesAboveEdges = async () => {
+    const indices = gd.data
+      .map((trace, index) => (
+        trace.type === 'scatter3d' && trace.mode === 'markers' ? index : -1
+      ))
+      .filter(index => index >= 0);
+    if (!indices.length) return;
+    await Plotly.restyle(gd, {'marker.opacity': 1}, indices);
+    Plotly.moveTraces(gd, indices);
+  };
+
   await quadruplePredictionEdgeWidths();
   await quadruplePredictionNodeSizes();
   await addPredictionLoopOverlay();
+  await placeOpaqueNodesAboveEdges();
   await Plotly.relayout(gd, {'scene.camera': defaultCamera});
   cameraField.value = JSON.stringify(defaultCamera);
 
