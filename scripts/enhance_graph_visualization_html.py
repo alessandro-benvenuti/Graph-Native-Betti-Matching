@@ -73,7 +73,11 @@ SCRIPT = r"""
         for (let index = 0; index + 1 < trace.x.length; index += 3) {
           const left = [trace.x[index], trace.y[index], trace.z[index]];
           const right = [trace.x[index + 1], trace.y[index + 1], trace.z[index + 1]];
-          edges.push({left: vertex(left), right: vertex(right), leftPoint: left, rightPoint: right});
+          edges.push({
+            left: vertex(left), right: vertex(right),
+            leftPoint: left, rightPoint: right,
+            width: Number(trace.line?.width ?? 3)
+          });
         }
       });
     return {vertexCount: vertices.length, edges};
@@ -112,20 +116,27 @@ SCRIPT = r"""
     const graph = predictionGraph();
     const loopIndices = cycleEdgeIndices(graph);
     if (!loopIndices.length) return;
-    const x = [], y = [], z = [];
+    const groups = new Map();
     loopIndices.forEach(index => {
       const edge = graph.edges[index];
-      x.push(edge.leftPoint[0], edge.rightPoint[0], null);
-      y.push(edge.leftPoint[1], edge.rightPoint[1], null);
-      z.push(edge.leftPoint[2], edge.rightPoint[2], null);
+      if (!groups.has(edge.width)) {
+        groups.set(edge.width, {width: edge.width, x: [], y: [], z: []});
+      }
+      const group = groups.get(edge.width);
+      group.x.push(edge.leftPoint[0], edge.rightPoint[0], null);
+      group.y.push(edge.leftPoint[1], edge.rightPoint[1], null);
+      group.z.push(edge.leftPoint[2], edge.rightPoint[2], null);
     });
-    await Plotly.addTraces(gd, {
-      type: 'scatter3d', mode: 'lines', x, y, z,
-      line: {color: '#d62728', width: 9},
+    const traces = Array.from(groups.values()).map((group, index) => ({
+      type: 'scatter3d', mode: 'lines',
+      x: group.x, y: group.y, z: group.z,
+      line: {color: '#ff3300', width: group.width},
       name: 'Predicted loop edges', legendgroup: 'Prediction',
+      showlegend: index === 0,
       hovertemplate: 'Predicted edge belonging to a cycle<extra></extra>',
       visible: true
-    });
+    }));
+    await Plotly.addTraces(gd, traces);
   };
 
   await addPredictionLoopOverlay();
