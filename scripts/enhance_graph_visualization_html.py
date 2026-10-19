@@ -159,7 +159,23 @@ SCRIPT = r"""
     }
   };
 
+  const quadruplePredictionNodeSizes = async () => {
+    const indices = gd.data
+      .map((trace, index) => trace.name === 'Prediction nodes' ? index : -1)
+      .filter(index => index >= 0);
+    for (const index of indices) {
+      const size = gd.data[index].marker?.size ?? 5;
+      if (Array.isArray(size) || ArrayBuffer.isView(size)) {
+        const scaled = Array.from(size, value => Number(value) * 4);
+        await Plotly.restyle(gd, {'marker.size': [scaled]}, [index]);
+      } else {
+        await Plotly.restyle(gd, {'marker.size': Number(size) * 4}, [index]);
+      }
+    }
+  };
+
   await quadruplePredictionEdgeWidths();
+  await quadruplePredictionNodeSizes();
   await addPredictionLoopOverlay();
   await Plotly.relayout(gd, {'scene.camera': defaultCamera});
   cameraField.value = JSON.stringify(defaultCamera);
