@@ -178,6 +178,12 @@ SCRIPT = r"""
   };
 
   const configureGroundTruthOnly = async () => {
+    const predictionEdgeWidth = Math.max(
+      12,
+      ...gd.data
+        .filter(trace => trace.name === 'Prediction edges')
+        .map(trace => Number(trace.line?.width ?? 3) * 4)
+    );
     const hidden = gd.data
       .map((trace, index) => (
         trace.name === 'MRI slices' ||
@@ -191,9 +197,9 @@ SCRIPT = r"""
       .map((trace, index) => trace.name === 'Ground truth edges' ? index : -1)
       .filter(index => index >= 0);
     for (const index of edges) {
-      const width = Number(gd.data[index].line?.width ?? 3);
       await Plotly.restyle(gd, {
-        visible: true, 'line.color': '#00cc00', 'line.width': width * 4
+        visible: true, 'line.color': '#33cc33',
+        'line.width': predictionEdgeWidth
       }, [index]);
     }
 
@@ -203,7 +209,7 @@ SCRIPT = r"""
     for (const index of nodes) {
       const size = Number(gd.data[index].marker?.size ?? 5);
       await Plotly.restyle(gd, {
-        visible: true, 'marker.color': '#00cc00',
+        visible: true, 'marker.color': '#33cc33',
         'marker.size': size * 4, 'marker.opacity': 1
       }, [index]);
     }
