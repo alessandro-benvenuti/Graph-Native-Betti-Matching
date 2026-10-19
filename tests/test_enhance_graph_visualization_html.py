@@ -13,6 +13,9 @@ class GraphVisualizationEnhancementTests(unittest.TestCase):
         self.assertIn("MRI slices", enhanced)
         self.assertIn("Plotly.downloadImage", enhanced)
         self.assertIn("clean['showlegend'] = false", enhanced)
+        self.assertIn("'marker.showscale': false", enhanced)
+        self.assertIn("clean['scene.domain.x'] = [0, 1]", enhanced)
+        self.assertIn("clean[`margin.${side}`] = 0", enhanced)
         self.assertEqual(enhance_html(enhanced), enhanced)
 
     def test_file_update_is_idempotent(self):
@@ -21,6 +24,14 @@ class GraphVisualizationEnhancementTests(unittest.TestCase):
             path.write_text("<html><head></head><body></body></html>")
             self.assertTrue(enhance_file(path))
             self.assertFalse(enhance_file(path))
+
+    def test_refreshes_existing_controls_script(self):
+        original = '<html><head></head><body><div class="plotly-graph-div"></div></body></html>'
+        enhanced = enhance_html(original)
+        stale = enhanced.replace("clean['scene.domain.x'] = [0, 1];", "// stale script")
+        refreshed = enhance_html(stale)
+        self.assertIn("clean['scene.domain.x'] = [0, 1]", refreshed)
+        self.assertNotIn("// stale script", refreshed)
 
 
 if __name__ == "__main__":

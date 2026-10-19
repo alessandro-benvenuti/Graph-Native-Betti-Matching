@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 
@@ -124,6 +125,14 @@ SCRIPT = r"""
     const clean = {};
     restore['showlegend'] = gd.layout.showlegend ?? null;
     clean['showlegend'] = false;
+    for (const side of ['l', 'r', 'b', 't', 'pad']) {
+      restore[`margin.${side}`] = gd.layout.margin?.[side] ?? null;
+      clean[`margin.${side}`] = 0;
+    }
+    restore['scene.domain.x'] = scene.domain?.x ?? null;
+    restore['scene.domain.y'] = scene.domain?.y ?? null;
+    clean['scene.domain.x'] = [0, 1];
+    clean['scene.domain.y'] = [0, 1];
     axes.forEach(axis => {
       const settings = scene[axis] || {};
       restore[`scene.${axis}.showticklabels`] = settings.showticklabels ?? null;
@@ -131,7 +140,16 @@ SCRIPT = r"""
       clean[`scene.${axis}.showticklabels`] = false;
       clean[`scene.${axis}.title.text`] = '';
     });
+    const confidenceTraces = gd.data
+      .map((trace, index) => trace.marker?.colorbar?.title ? index : -1)
+      .filter(index => index >= 0);
+    const confidenceShowscale = confidenceTraces.map(
+      index => gd.data[index].marker.showscale ?? null
+    );
     try {
+      if (confidenceTraces.length) {
+        await Plotly.restyle(gd, {'marker.showscale': false}, confidenceTraces);
+      }
       await Plotly.relayout(gd, clean);
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const parts = location.pathname.split('/').filter(Boolean);
@@ -141,11 +159,16 @@ SCRIPT = r"""
         format: 'png', width: 1800, height: 1400, scale: 2,
         filename: `${source}-${model}-clean`
       });
-      setStatus('Clean PNG saved without axis numbers or legend.');
+      setStatus('Clean PNG saved full-frame without labels or legends.');
     } catch (error) {
       setStatus(`Screenshot failed: ${error.message}`);
     } finally {
       await Plotly.relayout(gd, restore);
+      if (confidenceTraces.length) {
+        await Plotly.restyle(
+          gd, {'marker.showscale': confidenceShowscale}, confidenceTraces
+        );
+      }
       screenshot.disabled = false;
     }
   });
@@ -156,7 +179,16 @@ SCRIPT = r"""
 
 def enhance_html(text: str) -> str:
     if f'id="{MARKER}"' in text:
-        return text
+        updated, replacements = re.subn(
+            r'<script id="gnbm-paper-controls-script">.*?</script>',
+            SCRIPT.strip(),
+            text,
+            count=1,
+            flags=re.DOTALL,
+        )
+        if replacements != 1:
+            raise ValueError("Existing paper controls have no replaceable script")
+        return updated
     if "</head>" not in text or "<body>" not in text or "</body>" not in text:
         raise ValueError("Expected a complete HTML document")
     text = text.replace("</head>", STYLE + "</head>", 1)
