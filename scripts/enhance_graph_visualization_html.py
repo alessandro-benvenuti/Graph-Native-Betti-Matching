@@ -149,17 +149,17 @@ SCRIPT = r"""
     await Plotly.addTraces(gd, traces);
   };
 
-  const doublePredictionEdgeWidths = async () => {
+  const quadruplePredictionEdgeWidths = async () => {
     const indices = gd.data
       .map((trace, index) => trace.name === 'Prediction edges' ? index : -1)
       .filter(index => index >= 0);
     for (const index of indices) {
       const width = Number(gd.data[index].line?.width ?? 3);
-      await Plotly.restyle(gd, {'line.width': width * 2}, [index]);
+      await Plotly.restyle(gd, {'line.width': width * 4}, [index]);
     }
   };
 
-  await doublePredictionEdgeWidths();
+  await quadruplePredictionEdgeWidths();
   await addPredictionLoopOverlay();
   await Plotly.relayout(gd, {'scene.camera': defaultCamera});
   cameraField.value = JSON.stringify(defaultCamera);
