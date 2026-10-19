@@ -122,6 +122,8 @@ SCRIPT = r"""
     const axes = ['xaxis', 'yaxis', 'zaxis'];
     const restore = {};
     const clean = {};
+    restore['showlegend'] = gd.layout.showlegend ?? null;
+    clean['showlegend'] = false;
     axes.forEach(axis => {
       const settings = scene[axis] || {};
       restore[`scene.${axis}.showticklabels`] = settings.showticklabels ?? null;
@@ -139,7 +141,7 @@ SCRIPT = r"""
         format: 'png', width: 1800, height: 1400, scale: 2,
         filename: `${source}-${model}-clean`
       });
-      setStatus('Clean PNG saved without axis numbers.');
+      setStatus('Clean PNG saved without axis numbers or legend.');
     } catch (error) {
       setStatus(`Screenshot failed: ${error.message}`);
     } finally {

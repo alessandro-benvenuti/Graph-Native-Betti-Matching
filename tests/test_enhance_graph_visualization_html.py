@@ -12,6 +12,7 @@ class GraphVisualizationEnhancementTests(unittest.TestCase):
         self.assertIn('id="gnbm-paper-controls"', enhanced)
         self.assertIn("MRI slices", enhanced)
         self.assertIn("Plotly.downloadImage", enhanced)
+        self.assertIn("clean['showlegend'] = false", enhanced)
         self.assertEqual(enhance_html(enhanced), enhanced)
 
     def test_file_update_is_idempotent(self):
