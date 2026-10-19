@@ -46,6 +46,9 @@ SCRIPT = r"""
   const pasteCamera = document.getElementById('gnbm-paste-camera');
   const applyCamera = document.getElementById('gnbm-apply-camera');
   const screenshot = document.getElementById('gnbm-screenshot');
+  const gtOnly = document.querySelector(
+    'meta[name="gnbm-visualization-mode"]'
+  )?.content === 'ground-truth-only';
   const mriIndices = () => gd.data
     .map((trace, index) => trace.name === 'MRI slices' ? index : -1)
     .filter(index => index >= 0);
@@ -174,6 +177,38 @@ SCRIPT = r"""
     }
   };
 
+  const configureGroundTruthOnly = async () => {
+    const hidden = gd.data
+      .map((trace, index) => (
+        trace.name === 'MRI slices' ||
+        trace.name === 'Segmentation' ||
+        trace.name?.startsWith('Ground truth ')
+      ) ? -1 : index)
+      .filter(index => index >= 0);
+    if (hidden.length) await Plotly.restyle(gd, {visible: false}, hidden);
+
+    const edges = gd.data
+      .map((trace, index) => trace.name === 'Ground truth edges' ? index : -1)
+      .filter(index => index >= 0);
+    for (const index of edges) {
+      const width = Number(gd.data[index].line?.width ?? 3);
+      await Plotly.restyle(gd, {
+        visible: true, 'line.color': '#00cc00', 'line.width': width * 4
+      }, [index]);
+    }
+
+    const nodes = gd.data
+      .map((trace, index) => trace.name === 'Ground truth nodes' ? index : -1)
+      .filter(index => index >= 0);
+    for (const index of nodes) {
+      const size = Number(gd.data[index].marker?.size ?? 5);
+      await Plotly.restyle(gd, {
+        visible: true, 'marker.color': '#00cc00',
+        'marker.size': size * 4, 'marker.opacity': 1
+      }, [index]);
+    }
+  };
+
   const placeOpaqueNodesAboveEdges = async () => {
     const indices = gd.data
       .map((trace, index) => (
@@ -185,9 +220,13 @@ SCRIPT = r"""
     Plotly.moveTraces(gd, indices);
   };
 
-  await quadruplePredictionEdgeWidths();
-  await quadruplePredictionNodeSizes();
-  await addPredictionLoopOverlay();
+  if (gtOnly) {
+    await configureGroundTruthOnly();
+  } else {
+    await quadruplePredictionEdgeWidths();
+    await quadruplePredictionNodeSizes();
+    await addPredictionLoopOverlay();
+  }
   await placeOpaqueNodesAboveEdges();
   await Plotly.relayout(gd, {'scene.camera': defaultCamera});
   cameraField.value = JSON.stringify(defaultCamera);
@@ -283,7 +322,7 @@ SCRIPT = r"""
     const confidenceShowscale = confidenceTraces.map(
       index => gd.data[index].marker.showscale ?? null
     );
-    const groundTruthTraces = gd.data
+    const groundTruthTraces = gtOnly ? [] : gd.data
       .map((trace, index) => trace.name?.startsWith('Ground truth ') ? index : -1)
       .filter(index => index >= 0);
     const groundTruthVisibility = groundTruthTraces.map(
