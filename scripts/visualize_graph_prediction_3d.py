@@ -27,6 +27,7 @@ from training.evaluation.interactive_visualization import (  # noqa: E402
     resolve_prediction_record,
     validate_graph_endpoints,
 )
+from scripts.enhance_graph_visualization_html import enhance_html  # noqa: E402
 
 
 def _visibility_option(parser, name, default, help_text):
@@ -248,7 +249,7 @@ def _metadata_html(record, provenance, gt_nodes, gt_edges, prediction, args):
 def _write_html(path, figure, metadata):
     plot = figure.to_html(full_html=False, include_plotlyjs=True, config={"responsive": True, "displaylogo": False})
     document = f"""<!doctype html><html><head><meta charset=\"utf-8\"><title>SyntheticMRI graph prediction</title><style>body{{font-family:system-ui,sans-serif;margin:1.5rem;color:#222}}table{{border-collapse:collapse;margin-bottom:1rem}}th,td{{text-align:left;border:1px solid #ccc;padding:.35rem .55rem}}th{{background:#f3f3f3}}p{{max-width:80rem}}</style></head><body>{metadata}{plot}</body></html>"""
-    path.write_text(document, encoding="utf-8")
+    path.write_text(enhance_html(document), encoding="utf-8")
 
 
 def main(argv=None):
