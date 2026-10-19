@@ -36,7 +36,7 @@ CONTROLS = r"""
 
 SCRIPT = r"""
 <script id="gnbm-paper-controls-script">
-(() => {
+(async () => {
   const gd = document.querySelector('.plotly-graph-div');
   if (!gd || !window.Plotly) return;
   const status = document.getElementById('gnbm-control-status');
@@ -54,6 +54,81 @@ SCRIPT = r"""
   const currentCamera = () => clone(
     gd._fullLayout?.scene?.camera || gd.layout?.scene?.camera || {}
   );
+
+  const predictionGraph = () => {
+    const vertexIds = new Map();
+    const vertices = [];
+    const edges = [];
+    const vertex = point => {
+      const key = point.map(value => Number(value).toPrecision(12)).join('|');
+      if (!vertexIds.has(key)) {
+        vertexIds.set(key, vertices.length);
+        vertices.push(point);
+      }
+      return vertexIds.get(key);
+    };
+    gd.data
+      .filter(trace => trace.name === 'Prediction edges' && trace.mode === 'lines')
+      .forEach(trace => {
+        for (let index = 0; index + 1 < trace.x.length; index += 3) {
+          const left = [trace.x[index], trace.y[index], trace.z[index]];
+          const right = [trace.x[index + 1], trace.y[index + 1], trace.z[index + 1]];
+          edges.push({left: vertex(left), right: vertex(right), leftPoint: left, rightPoint: right});
+        }
+      });
+    return {vertexCount: vertices.length, edges};
+  };
+
+  const cycleEdgeIndices = ({vertexCount, edges}) => {
+    const adjacency = Array.from({length: vertexCount}, () => []);
+    edges.forEach((edge, index) => {
+      adjacency[edge.left].push([edge.right, index]);
+      adjacency[edge.right].push([edge.left, index]);
+    });
+    const discovery = Array(vertexCount).fill(-1);
+    const low = Array(vertexCount).fill(-1);
+    const bridges = new Set();
+    let time = 0;
+    const visit = (node, parentEdge) => {
+      discovery[node] = low[node] = time++;
+      for (const [neighbor, edgeIndex] of adjacency[node]) {
+        if (edgeIndex === parentEdge) continue;
+        if (discovery[neighbor] < 0) {
+          visit(neighbor, edgeIndex);
+          low[node] = Math.min(low[node], low[neighbor]);
+          if (low[neighbor] > discovery[node]) bridges.add(edgeIndex);
+        } else {
+          low[node] = Math.min(low[node], discovery[neighbor]);
+        }
+      }
+    };
+    for (let node = 0; node < vertexCount; node += 1) {
+      if (discovery[node] < 0) visit(node, -1);
+    }
+    return edges.map((_, index) => index).filter(index => !bridges.has(index));
+  };
+
+  const addPredictionLoopOverlay = async () => {
+    const graph = predictionGraph();
+    const loopIndices = cycleEdgeIndices(graph);
+    if (!loopIndices.length) return;
+    const x = [], y = [], z = [];
+    loopIndices.forEach(index => {
+      const edge = graph.edges[index];
+      x.push(edge.leftPoint[0], edge.rightPoint[0], null);
+      y.push(edge.leftPoint[1], edge.rightPoint[1], null);
+      z.push(edge.leftPoint[2], edge.rightPoint[2], null);
+    });
+    await Plotly.addTraces(gd, {
+      type: 'scatter3d', mode: 'lines', x, y, z,
+      line: {color: '#d62728', width: 9},
+      name: 'Predicted loop edges', legendgroup: 'Prediction',
+      hovertemplate: 'Predicted edge belonging to a cycle<extra></extra>',
+      visible: true
+    });
+  };
+
+  await addPredictionLoopOverlay();
 
   const updateMriLabel = () => {
     const shown = mriIndices().some(index => {
@@ -146,9 +221,18 @@ SCRIPT = r"""
     const confidenceShowscale = confidenceTraces.map(
       index => gd.data[index].marker.showscale ?? null
     );
+    const groundTruthTraces = gd.data
+      .map((trace, index) => trace.name?.startsWith('Ground truth ') ? index : -1)
+      .filter(index => index >= 0);
+    const groundTruthVisibility = groundTruthTraces.map(
+      index => gd.data[index].visible ?? null
+    );
     try {
       if (confidenceTraces.length) {
         await Plotly.restyle(gd, {'marker.showscale': false}, confidenceTraces);
+      }
+      if (groundTruthTraces.length) {
+        await Plotly.restyle(gd, {visible: false}, groundTruthTraces);
       }
       await Plotly.relayout(gd, clean);
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -159,7 +243,7 @@ SCRIPT = r"""
         format: 'png', width: 1800, height: 1400, scale: 2,
         filename: `${source}-${model}-clean`
       });
-      setStatus('Clean PNG saved full-frame without labels or legends.');
+      setStatus('Clean PNG saved with predicted loops highlighted in red.');
     } catch (error) {
       setStatus(`Screenshot failed: ${error.message}`);
     } finally {
@@ -167,6 +251,11 @@ SCRIPT = r"""
       if (confidenceTraces.length) {
         await Plotly.restyle(
           gd, {'marker.showscale': confidenceShowscale}, confidenceTraces
+        );
+      }
+      if (groundTruthTraces.length) {
+        await Plotly.restyle(
+          gd, {visible: groundTruthVisibility}, groundTruthTraces
         );
       }
       screenshot.disabled = false;

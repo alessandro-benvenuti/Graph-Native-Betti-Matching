@@ -16,6 +16,9 @@ class GraphVisualizationEnhancementTests(unittest.TestCase):
         self.assertIn("'marker.showscale': false", enhanced)
         self.assertIn("clean['scene.domain.x'] = [0, 1]", enhanced)
         self.assertIn("clean[`margin.${side}`] = 0", enhanced)
+        self.assertIn("name: 'Predicted loop edges'", enhanced)
+        self.assertIn("line: {color: '#d62728', width: 9}", enhanced)
+        self.assertIn("trace.name?.startsWith('Ground truth ')", enhanced)
         self.assertEqual(enhance_html(enhanced), enhanced)
 
     def test_file_update_is_idempotent(self):
