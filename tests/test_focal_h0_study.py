@@ -114,6 +114,27 @@ class FocalH0Tests(unittest.TestCase):
         with self.assertRaisesRegex(CampaignError, "configured fidelity"):
             stage_reference(self.output, 7)
 
+    def test_historical_source_without_sampling_schema_is_accepted(self):
+        path = self.source / "resolved-config.yaml"
+        historical = yaml.safe_load(path.read_text())
+        historical["topology"].pop("sampling")
+        historical["topology"]["betti_h0"].pop("activation_epoch")
+        content = yaml.safe_dump(historical)
+        path.write_text(content)
+        self.prepared()
+        self.assertEqual(path.read_text(), content)
+        base = json.loads((self.output / "base-config.json").read_text())
+        self.assertIn("sampling", base["topology"])
+
+    def test_historical_source_still_requires_matching_scientific_recipe(self):
+        path = self.source / "resolved-config.yaml"
+        historical = yaml.safe_load(path.read_text())
+        historical["topology"].pop("sampling")
+        historical["loss"]["edge"]["classification"]["focal_gamma"] = 1.
+        path.write_text(yaml.safe_dump(historical))
+        with self.assertRaisesRegex(CampaignError, "differ in loss"):
+            prepare(self.args)
+
     def test_h1_disabled_and_h0_uses_every_local_graph(self):
         self.prepared()
         config = concrete_config(self.output, "h0", 0, {"h0_weight": .01}, 5)

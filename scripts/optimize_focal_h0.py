@@ -120,8 +120,16 @@ def prepare(args):
             return
         base = load_config(reference / "resolved-config.yaml")
         scientific_reference(base, settings)
-        original = load_config(source / "resolved-config.yaml")
+        # This is historical provenance, not a configuration we train with.
+        # Older resolved files legitimately lack later topology/sampling keys.
+        # Validate the current reference above, then compare the original
+        # scientific sections directly without requiring today's full schema.
+        original = yaml.safe_load((source / "resolved-config.yaml").read_text())
+        if not isinstance(original, dict):
+            raise CampaignError("Historical source configuration must be a mapping")
         for key in ("loss", "model", "data", "augmentation"):
+            if not isinstance(original.get(key), dict):
+                raise CampaignError(f"Historical source configuration lacks {key}")
             # Batch sizes can legitimately change from original 2-GPU training.
             left, right = copy.deepcopy(original[key]), copy.deepcopy(base[key])
             if key == "data":
