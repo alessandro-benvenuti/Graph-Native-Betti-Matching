@@ -1,0 +1,21 @@
+# Scientific settings only. The existing focal continuation supplies the model,
+# data, focal objective, optimizer, evaluation protocol and early stopping.
+branch_epoch: 500
+endpoints: [525, 550, 600]
+continuation_epochs: 750
+schedule_duration_epochs: 250
+base_lr: 1.0e-5
+gpus: 4
+global_batch_size: 32
+validation_interval: 5
+tail_observations: 3
+trials: 8
+promotion_counts: [4, 2]
+seed: 364505
+h0_range: [0.001, 0.1]
+h0_anchors: [0.001, 0.003, 0.01, 0.03]
+tpe_startup_trials: 4
+ramp_epochs: 10
+h1_ablation_weights: [0.0, 0.001, 0.003]
+h1_false_positive_weight: 0.25
+h1_false_negative_weight: 1.0

@@ -17,6 +17,9 @@ parser.add_argument("--output-dir", type=Path, required=True)
 parser.add_argument("--run-name", required=True)
 parser.add_argument("--initial-weights")
 parser.add_argument("--resume")
+parser.add_argument("--reset-scheduler-on-resume", action="store_true")
+parser.add_argument("--reset-early-stopping-on-resume", action="store_true")
+parser.add_argument("--allow-world-size-change-on-resume", action="store_true")
 args = parser.parse_args()
 config = yaml.safe_load(args.config.read_text())
 run = args.output_dir / args.run_name
@@ -55,6 +58,9 @@ if args.resume:
         "checkpoint_epoch": start_epoch - 1,
         "optimizer_restored": bool(resume_payload and "optimizer" in resume_payload),
         "scheduler_restored": bool(resume_payload and "scheduler" in resume_payload),
+        "scheduler_reset": args.reset_scheduler_on_resume,
+        "patience_reset": args.reset_early_stopping_on_resume,
+        "world_size_change_allowed": args.allow_world_size_change_on_resume,
     }, indent=2, sort_keys=True) + "\n")
 
 def checkpoint_payload(epoch):
@@ -67,7 +73,7 @@ def checkpoint_payload(epoch):
         "iteration": epoch,
         "global_step": epoch,
         "runtime_states": [{"fake_rng": torch.tensor([epoch])}],
-        "trainer_state": {"world_size": 1},
+        "trainer_state": {"world_size": int(os.environ.get("FAKE_TRAIN_WORLD_SIZE", "1"))},
         "training_config": config,
     }
 
@@ -99,7 +105,9 @@ with history_path.open("a" if args.resume else "w") as handle:
         handle.write(json.dumps(record) + "\n")
         handle.flush()
         payload = checkpoint_payload(epoch)
-        torch.save(payload, run / "models/latest_checkpoint.pt")
+        temporary_checkpoint = run / "models/latest_checkpoint.pt.tmp"
+        torch.save(payload, temporary_checkpoint)
+        os.replace(temporary_checkpoint, run / "models/latest_checkpoint.pt")
         milestones = config["training"]["checkpoint"].get("milestone_epochs", [])
         if epoch in milestones:
             directory = run / "checkpoints"

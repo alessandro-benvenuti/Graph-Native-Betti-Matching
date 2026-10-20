@@ -390,6 +390,14 @@ class Trainer:
                 "global_batch_size": int(self.config["data"]["batch_size"]) * self.world_size,
             }
             means = {name: value / max(1, batches) for name, value in sums.items()}
+            # Persist effective topology contributions and sampling alongside
+            # timing so lightweight studies can audit cost and disabled terms.
+            for name in (
+                "betti_h0_weighted", "betti_h1_weighted",
+                "betti_h0_effective_weight", "betti_h1_effective_weight",
+                "topology_betti_h0_selected_graphs", "topology_betti_h1_selected_graphs",
+            ):
+                performance[name] = means.get(name, 0.0)
             if self.is_primary:
                 print(
                     "epoch={}/{} total={:.6f} lr={:.8g}".format(
