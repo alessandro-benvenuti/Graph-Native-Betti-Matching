@@ -16,9 +16,12 @@ STYLE = r"""
 #gnbm-paper-controls button{font:inherit;padding:.4rem .7rem;border:1px solid #888;border-radius:.3rem;background:#fff;color:#222}
 #gnbm-paper-controls button:hover{background:#f0f0f0}
 #gnbm-paper-controls button:disabled{opacity:.55}
+.gnbm-range-control{display:flex;align-items:center;gap:.35rem;white-space:nowrap;color:#222}
+.gnbm-range-control input{width:8rem;accent-color:#2468a2}
+.gnbm-range-control output{min-width:2.8rem;font-variant-numeric:tabular-nums}
 #gnbm-camera-json{flex:1 1 28rem;min-width:16rem;height:2.25rem;padding:.35rem .5rem;border:1px solid #999;border-radius:.3rem;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
 #gnbm-control-status{flex-basis:100%;min-height:1.2em;color:#444;font-size:.9rem}
-@media (prefers-color-scheme:dark){#gnbm-paper-controls{background:rgba(30,30,30,.96);border-color:#666;color:#eee}#gnbm-paper-controls button{background:#292929;color:#eee;border-color:#888}#gnbm-paper-controls button:hover{background:#3a3a3a}#gnbm-camera-json{background:#202020;color:#eee;border-color:#777}#gnbm-control-status{color:#ccc}}
+@media (prefers-color-scheme:dark){#gnbm-paper-controls{background:rgba(30,30,30,.96);border-color:#666;color:#eee}#gnbm-paper-controls button{background:#292929;color:#eee;border-color:#888}#gnbm-paper-controls button:hover{background:#3a3a3a}.gnbm-range-control{color:#eee}#gnbm-camera-json{background:#202020;color:#eee;border-color:#777}#gnbm-control-status{color:#ccc}}
 </style>
 """
 
@@ -29,6 +32,14 @@ CONTROLS = r"""
   <button id="gnbm-paste-camera" type="button">Paste camera</button>
   <button id="gnbm-apply-camera" type="button">Apply camera JSON</button>
   <button id="gnbm-screenshot" type="button">Save clean PNG</button>
+  <label class="gnbm-range-control">Node size
+    <input id="gnbm-node-scale" type="range" min="0.5" max="8" step="0.25" value="1">
+    <output id="gnbm-node-scale-value" for="gnbm-node-scale">1×</output>
+  </label>
+  <label class="gnbm-range-control">Edge width
+    <input id="gnbm-edge-scale" type="range" min="0.5" max="8" step="0.25" value="1">
+    <output id="gnbm-edge-scale-value" for="gnbm-edge-scale">1×</output>
+  </label>
   <textarea id="gnbm-camera-json" aria-label="Camera JSON" placeholder="Camera coordinates appear here; paste the same JSON into another report."></textarea>
   <span id="gnbm-control-status" aria-live="polite"></span>
 </div>
@@ -46,6 +57,10 @@ SCRIPT = r"""
   const pasteCamera = document.getElementById('gnbm-paste-camera');
   const applyCamera = document.getElementById('gnbm-apply-camera');
   const screenshot = document.getElementById('gnbm-screenshot');
+  const nodeScale = document.getElementById('gnbm-node-scale');
+  const edgeScale = document.getElementById('gnbm-edge-scale');
+  const nodeScaleValue = document.getElementById('gnbm-node-scale-value');
+  const edgeScaleValue = document.getElementById('gnbm-edge-scale-value');
   const gtOnly = document.querySelector(
     'meta[name="gnbm-visualization-mode"]'
   )?.content === 'ground-truth-only';
@@ -144,46 +159,15 @@ SCRIPT = r"""
       type: 'scatter3d', mode: 'lines',
       x: group.x, y: group.y, z: group.z,
       line: {color: '#ff3300', width: group.width},
-      name: 'Predicted loop edges', legendgroup: 'Prediction',
+      name: 'Predicted loop edges', legendgroup: 'prediction-loops',
       showlegend: index === 0,
       hovertemplate: 'Predicted edge belonging to a cycle<extra></extra>',
-      visible: true
+      visible: 'legendonly'
     }));
     await Plotly.addTraces(gd, traces);
   };
 
-  const quadruplePredictionEdgeWidths = async () => {
-    const indices = gd.data
-      .map((trace, index) => trace.name === 'Prediction edges' ? index : -1)
-      .filter(index => index >= 0);
-    for (const index of indices) {
-      const width = Number(gd.data[index].line?.width ?? 3);
-      await Plotly.restyle(gd, {'line.width': width * 4}, [index]);
-    }
-  };
-
-  const quadruplePredictionNodeSizes = async () => {
-    const indices = gd.data
-      .map((trace, index) => trace.name === 'Prediction nodes' ? index : -1)
-      .filter(index => index >= 0);
-    for (const index of indices) {
-      const size = gd.data[index].marker?.size ?? 5;
-      if (Array.isArray(size) || ArrayBuffer.isView(size)) {
-        const scaled = Array.from(size, value => Number(value) * 4);
-        await Plotly.restyle(gd, {'marker.size': [scaled]}, [index]);
-      } else {
-        await Plotly.restyle(gd, {'marker.size': Number(size) * 4}, [index]);
-      }
-    }
-  };
-
   const configureGroundTruthOnly = async () => {
-    const predictionEdgeWidth = Math.max(
-      12,
-      ...gd.data
-        .filter(trace => trace.name === 'Prediction edges')
-        .map(trace => Number(trace.line?.width ?? 3) * 4)
-    );
     const hidden = gd.data
       .map((trace, index) => (
         trace.name === 'MRI slices' ||
@@ -198,8 +182,7 @@ SCRIPT = r"""
       .filter(index => index >= 0);
     for (const index of edges) {
       await Plotly.restyle(gd, {
-        visible: true, 'line.color': '#33cc33',
-        'line.width': predictionEdgeWidth
+        visible: true, 'line.color': '#33cc33'
       }, [index]);
     }
 
@@ -207,11 +190,61 @@ SCRIPT = r"""
       .map((trace, index) => trace.name === 'Ground truth nodes' ? index : -1)
       .filter(index => index >= 0);
     for (const index of nodes) {
-      const size = Number(gd.data[index].marker?.size ?? 5);
       await Plotly.restyle(gd, {
         visible: true, 'marker.color': '#33cc33',
-        'marker.size': size * 4, 'marker.opacity': 1
+        'marker.opacity': 1
       }, [index]);
+    }
+  };
+
+  const formatScale = value => `${Number(value).toFixed(2).replace(/\.?0+$/, '')}×`;
+  const scalableNodes = () => gd.data.filter(trace => (
+    trace.name === (gtOnly ? 'Ground truth nodes' : 'Prediction nodes')
+  ));
+  const scalableEdges = () => gd.data.filter(trace => (
+    gtOnly
+      ? trace.name === 'Ground truth edges'
+      : trace.name === 'Prediction edges' || trace.name === 'Predicted loop edges'
+  ));
+  const baseNodeSizes = new Map();
+  const baseEdgeWidths = new Map();
+
+  const initializeSizeControls = () => {
+    scalableNodes().forEach(trace => {
+      const size = trace.marker?.size ?? 5;
+      baseNodeSizes.set(
+        trace,
+        Array.isArray(size) || ArrayBuffer.isView(size) ? Array.from(size) : Number(size)
+      );
+    });
+    scalableEdges().forEach(trace => {
+      baseEdgeWidths.set(trace, Number(trace.line?.width ?? 3));
+    });
+  };
+
+  const applyNodeScale = async () => {
+    const scale = Number(nodeScale.value);
+    nodeScaleValue.value = formatScale(scale);
+    for (const [trace, original] of baseNodeSizes) {
+      const index = gd.data.indexOf(trace);
+      if (index < 0) continue;
+      if (Array.isArray(original)) {
+        const scaled = original.map(value => Number(value) * scale);
+        await Plotly.restyle(gd, {'marker.size': [scaled]}, [index]);
+      } else {
+        await Plotly.restyle(gd, {'marker.size': original * scale}, [index]);
+      }
+    }
+  };
+
+  const applyEdgeScale = async () => {
+    const scale = Number(edgeScale.value);
+    edgeScaleValue.value = formatScale(scale);
+    for (const [trace, original] of baseEdgeWidths) {
+      const index = gd.data.indexOf(trace);
+      if (index >= 0) {
+        await Plotly.restyle(gd, {'line.width': original * scale}, [index]);
+      }
     }
   };
 
@@ -229,10 +262,13 @@ SCRIPT = r"""
   if (gtOnly) {
     await configureGroundTruthOnly();
   } else {
-    await quadruplePredictionEdgeWidths();
-    await quadruplePredictionNodeSizes();
     await addPredictionLoopOverlay();
   }
+  initializeSizeControls();
+  await applyNodeScale();
+  await applyEdgeScale();
+  nodeScale.addEventListener('input', applyNodeScale);
+  edgeScale.addEventListener('input', applyEdgeScale);
   await placeOpaqueNodesAboveEdges();
   await Plotly.relayout(gd, {'scene.camera': defaultCamera});
   cameraField.value = JSON.stringify(defaultCamera);
@@ -350,7 +386,7 @@ SCRIPT = r"""
         format: 'png', width: 1800, height: 1400, scale: 2,
         filename: `${source}-${model}-clean`
       });
-      setStatus('Clean PNG saved with predicted loops highlighted in red.');
+      setStatus('Clean PNG saved.');
     } catch (error) {
       setStatus(`Screenshot failed: ${error.message}`);
     } finally {
@@ -375,15 +411,20 @@ SCRIPT = r"""
 
 def enhance_html(text: str) -> str:
     if f'id="{MARKER}"' in text:
-        updated, replacements = re.subn(
-            r'<script id="gnbm-paper-controls-script">.*?</script>',
-            SCRIPT.strip(),
-            text,
-            count=1,
-            flags=re.DOTALL,
+        updated = text
+        replacements = (
+            (r'<style id="gnbm-paper-controls-style">.*?</style>', STYLE.strip(), "style"),
+            (r'<div id="gnbm-paper-controls".*?</div>', CONTROLS.strip(), "toolbar"),
+            (r'<script id="gnbm-paper-controls-script">.*?</script>', SCRIPT.strip(), "script"),
         )
-        if replacements != 1:
-            raise ValueError("Existing paper controls have no replaceable script")
+        for pattern, replacement, label in replacements:
+            updated, count = re.subn(
+                pattern, replacement, updated, count=1, flags=re.DOTALL
+            )
+            if count != 1:
+                raise ValueError(
+                    f"Existing paper controls have no replaceable {label}"
+                )
         return updated
     if "</head>" not in text or "<body>" not in text or "</body>" not in text:
         raise ValueError("Expected a complete HTML document")
