@@ -13,6 +13,7 @@ cd "$GNBM_REPO_DIR"
 python_bin="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}/bin/python"
 [[ -x "$python_bin" ]] || { echo "Missing $python_bin" >&2; exit 2; }
 if [[ "$action" == test ]]; then
+  "$python_bin" -c 'import optuna; print("Optuna", optuna.__version__)'
   exec "$python_bin" -m unittest tests.test_focal_h0_study
 fi
 export GNBM_OUTPUT_DIR="${GNBM_OUTPUT_DIR:-/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-edge-focal-g05-h0-study-a100}"
