@@ -4,14 +4,22 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
-import torch
-import torch.distributed as dist
+
+def progress(stage):
+    print(f"probe rank={os.environ.get('RANK', '?')} stage={stage} time={time.time():.3f}", flush=True)
 
 
 if __name__ == "__main__":
+    progress("import-torch")
+    import torch
+    import torch.distributed as dist
+
+    progress("init-process-group")
     dist.init_process_group("gloo", init_method="env://", timeout=timedelta(seconds=30))
     try:
+        progress("all-reduce")
         value = torch.tensor(float(dist.get_rank() + 1))
         dist.all_reduce(value)
         expected = dist.get_world_size() * (dist.get_world_size() + 1) / 2
@@ -23,4 +31,6 @@ if __name__ == "__main__":
                 "agent_store": True, "master_port": int(os.environ["MASTER_PORT"]),
             }))
     finally:
+        progress("destroy-process-group")
         dist.destroy_process_group()
+    progress("complete")

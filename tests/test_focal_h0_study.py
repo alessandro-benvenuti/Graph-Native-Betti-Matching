@@ -200,13 +200,35 @@ class FocalH0Tests(unittest.TestCase):
 
     def test_real_cpu_rendezvous_and_collective_across_repeated_launches(self):
         fixture = ROOT / "tests/fixtures/ddp_rendezvous_probe.py"
+        environment = dict(os.environ)
+        # This probe is strictly single-node. Do not let Gloo choose a login
+        # node's InfiniBand/hostname interface for local CPU communication.
+        environment.update(
+            GLOO_SOCKET_IFNAME="lo0" if sys.platform == "darwin" else "lo",
+            OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", LOGLEVEL="INFO",
+        )
         for index in range(2):
             report = self.root / f"collective-{index}.json"
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 single_node_launcher(2) + [str(fixture), str(report)],
-                capture_output=True, text=True, timeout=60,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env=environment, start_new_session=True,
             )
-            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            try:
+                # Includes launcher startup and torch imports from shared
+                # storage, not just the fixture's 30-second collective timeout.
+                log, _ = process.communicate(timeout=180)
+            except subprocess.TimeoutExpired:
+                # subprocess.run(timeout=...) only kills the launcher, leaving
+                # its distributed workers alive and hiding their useful logs.
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    log, _ = process.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    log, _ = process.communicate()
+                self.fail(f"CPU rendezvous launch {index} timed out after 180 seconds.\n{log}")
+            self.assertEqual(process.returncode, 0, log)
             result = json.loads(report.read_text())
             self.assertEqual(result["world_size"], 2)
             self.assertEqual(result["sum"], 3.)

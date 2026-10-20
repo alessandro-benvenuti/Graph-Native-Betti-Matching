@@ -113,6 +113,10 @@ and unique rendezvous ID per launch. Workers reuse the agent's TCP store, avoidi
 the separate rank-zero store bind used by standalone/c10d on PyTorch 2.3. The CPU
 test suite exercises two real two-process Gloo launches as well as fake training;
 the GPU smoke is still required to validate NCCL and actual H0/H1 backward passes.
+The CPU-only probe pins Gloo to loopback and allows 180 seconds per launch,
+including imports from shared storage. On failure it prints launcher/worker stage
+logs and terminates its entire child process group. These probe settings do not
+change the scientific training launcher or its NCCL networking.
 
 ## Launch and monitor H0 screening
 
