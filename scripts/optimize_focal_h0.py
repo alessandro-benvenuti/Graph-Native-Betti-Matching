@@ -15,7 +15,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import sys
+import uuid
 
 import yaml
 
@@ -294,15 +296,36 @@ def concrete_config(output, family, number, parameters, endpoint):
     return config
 
 
+def single_node_launcher(gpus):
+    """Use the agent-owned static store on the cluster's PyTorch 2.3 runtime.
+
+    Unlike standalone/c10d in 2.3, static rendezvous tells workers to reuse the
+    launcher's store instead of having rank zero bind a second TCPStore. Select
+    an available loopback port per invocation, not a shared fixed/default port.
+    Port selection is advisory until torchrun binds it (as with any free-port
+    probe); a unique rendezvous ID also isolates independent training launches.
+    """
+    command = [sys.executable, "-u"]
+    if gpus > 1:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        command += [
+            "-m", "torch.distributed.run", "--rdzv-backend=static",
+            f"--rdzv-id={uuid.uuid4().hex}", "--master-addr=127.0.0.1",
+            f"--master-port={port}", "--nnodes=1", "--node-rank=0",
+            f"--nproc_per_node={gpus}",
+        ]
+    return command
+
+
 def training_command(output, config_path, run_name, resume, first, train_command=None):
     saved = state(output)
     if train_command:
         command = [part.format(config=config_path, output=output, run_name=run_name) for part in train_command]
     else:
         gpus = saved["settings"]["gpus"]
-        command = [sys.executable, "-u"]
-        if gpus > 1:
-            command += ["-m", "torch.distributed.run", "--standalone", "--nnodes=1", f"--nproc_per_node={gpus}"]
+        command = single_node_launcher(gpus)
         command += [str(ROOT / "train.py"), "--config", str(config_path), "--output-dir", str(output), "--run-name", run_name]
         if gpus > 1:
             command.append("--distributed")
@@ -598,6 +621,24 @@ def gradient_probe(output):
     print(json.dumps(report, indent=2), flush=True)
 
 
+def smoke_config(output, number, label, parameters):
+    settings = state(output)["settings"]
+    config = concrete_config(output, "smoke", number, parameters, settings["branch_epoch"] + 3)
+    config["experiment"]["name"] = f"gpu-smoke/v2/{label}"
+    config["tracking"]["enabled"] = False
+    config["training"]["early_stopping"]["enabled"] = False
+    config["training"]["checkpoint"]["milestone_epochs"] = []
+    config["evaluation"]["interval_epochs"] = 1
+    # The metric loader deliberately ignores data.validation_samples. Cap its
+    # independent selection too, or each smoke epoch evaluates the full split.
+    config["evaluation"]["training_metrics"]["max_samples"] = 16
+    config["data"]["datasets"]["synthetic_mri"].update(train_samples=32, validation_samples=16)
+    for name in ("betti_h0", "betti_h1"):
+        config["topology"][name]["ramp_epochs"] = 1
+    validate_config(config)
+    return config
+
+
 def gpu_smoke(args):
     """Real DDP forward/backward and strict resume on a disposable tiny subset."""
     settings = state(args.output)["settings"]
@@ -608,19 +649,10 @@ def gpu_smoke(args):
         ("h0", {"h0_weight": .003, "h1_weight": 0.}),
         ("h0-h1", {"h0_weight": .003, "h1_weight": .001}),
     )):
-        config = concrete_config(args.output, "smoke", number, parameters, endpoint)
-        run_name = f"gpu-smoke/{label}"
+        config = smoke_config(args.output, number, label, parameters)
+        run_name = config["experiment"]["name"]
         directory = args.output / run_name
-        config["experiment"]["name"] = run_name
-        config["tracking"]["enabled"] = False
-        config["training"]["early_stopping"]["enabled"] = False
-        config["training"]["checkpoint"]["milestone_epochs"] = []
-        config["evaluation"]["interval_epochs"] = 1
-        config["data"]["datasets"]["synthetic_mri"].update(train_samples=32, validation_samples=16)
-        for name in ("betti_h0", "betti_h1"):
-            config["topology"][name]["ramp_epochs"] = 1
-        validate_config(config)
-        path = args.output / "gpu-smoke" / f"{label}.yaml"
+        path = args.output / "gpu-smoke/v2" / f"{label}.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         own = directory / "models/latest_checkpoint.pt"
         # Split the smoke into 1+2 epochs to exercise a strict scheduler resume.
@@ -641,7 +673,7 @@ def gpu_smoke(args):
             if any(float(r["topology_betti_h1_selected_graphs"]) != 0 for r in performance):
                 raise CampaignError("H1 unexpectedly active in H0-only GPU smoke")
     gradient_probe(args.output)
-    atomic_json(args.output / "gpu-smoke/passed.json", {"passed": True, "gpus": settings["gpus"], "completed_at": utc_now(), "test_split_used": False})
+    atomic_json(args.output / "gpu-smoke/passed.json", {"passed": True, "smoke_version": 2, "gpus": settings["gpus"], "completed_at": utc_now(), "test_split_used": False})
     print("GPU smoke passed; this tiny subset is infrastructure validation only", flush=True)
 
 

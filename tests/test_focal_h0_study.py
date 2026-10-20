@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,7 @@ from scripts.optimize_focal_h0 import (
     CampaignError, ablation_prepare, atomic_json, concrete_config, dominates,
     evaluate_trial, freeze, initialize_study, load_settings, prepare,
     promote, scientific_reference, stage_reference, state, study_for,
-    summary, training_command, trial_lock, worker,
+    single_node_launcher, smoke_config, summary, training_command, trial_lock, worker,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,6 +145,15 @@ class FocalH0Tests(unittest.TestCase):
         self.assertEqual(config["loss"], self.config["loss"])
         self.assertEqual(config["training"]["scheduler"], self.config["training"]["scheduler"])
 
+    def test_gpu_smoke_caps_the_independent_metric_loader(self):
+        self.prepared()
+        config = smoke_config(self.output, 0, "control", {"h0_weight": 0., "h1_weight": 0.})
+        self.assertEqual(config["data"]["datasets"]["synthetic_mri"]["validation_samples"], 16)
+        self.assertEqual(config["evaluation"]["training_metrics"]["max_samples"], 16)
+        self.assertEqual(config["experiment"]["name"], "gpu-smoke/v2/control")
+        scientific = concrete_config(self.output, "h0", 0, {"h0_weight": .003}, 5)
+        self.assertIsNone(scientific["evaluation"]["training_metrics"]["max_samples"])
+
     def test_real_h0_backward_skips_h1_in_training_and_validation(self):
         from tests.test_graph_losses import _config, _batch, CountingRelationHead
         from models.matcher import HungarianMatcher
@@ -173,6 +183,34 @@ class FocalH0Tests(unittest.TestCase):
         self.assertNotIn("--reset-early-stopping-on-resume", strict)
         self.assertNotIn("--allow-world-size-change-on-resume", strict)
         self.assertIn("--nproc_per_node=4", first)
+        self.assertIn("--rdzv-backend=static", first)
+        self.assertNotIn("--standalone", first)
+
+    def test_launcher_avoids_an_occupied_port_and_uses_unique_rendezvous(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            commands = [single_node_launcher(2), single_node_launcher(2)]
+            for command in commands:
+                port = int(next(part.split("=", 1)[1] for part in command if part.startswith("--master-port=")))
+                self.assertGreater(port, 0)
+                self.assertNotEqual(port, occupied.getsockname()[1])
+        ids = [next(part for part in command if part.startswith("--rdzv-id=")) for command in commands]
+        self.assertNotEqual(ids[0], ids[1])
+        self.assertEqual(single_node_launcher(1), [sys.executable, "-u"])
+
+    def test_real_cpu_rendezvous_and_collective_across_repeated_launches(self):
+        fixture = ROOT / "tests/fixtures/ddp_rendezvous_probe.py"
+        for index in range(2):
+            report = self.root / f"collective-{index}.json"
+            completed = subprocess.run(
+                single_node_launcher(2) + [str(fixture), str(report)],
+                capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            result = json.loads(report.read_text())
+            self.assertEqual(result["world_size"], 2)
+            self.assertEqual(result["sum"], 3.)
+            self.assertTrue(result["agent_store"])
 
     def test_pareto_tradeoffs_have_no_scalar_threshold(self):
         left = {"node_mAP": .8, "edge_mAP": .7, "beta0_absolute_error": 2., "beta1_absolute_error": 4.}

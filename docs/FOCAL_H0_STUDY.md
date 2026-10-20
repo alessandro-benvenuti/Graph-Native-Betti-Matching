@@ -89,7 +89,10 @@ bash cluster/jean_zay/submit_focal_h0_study.sh smoke
 ```
 
 This requests one four-A100 job, dev QoS, two-hour limit. It uses only 32 train /
-16 validation patches in disposable `gpu-smoke` directories. Control, H0-only,
+16 validation patches in disposable `gpu-smoke/v2` directories. Both the validation
+loss loader and the independent metric loader are capped; scientific trials still
+use the full validation split. The versioned directory preserves earlier smoke
+outputs without reusing their uncapped validation history. Control, H0-only,
 and small-H1 configurations each run three epochs as a 1+2 split to exercise real
 DDP training and strict restart. BN calibration and evaluation settings remain
 those of the reference. It also prints a fixed two-graph, single-GPU gradient probe
@@ -104,6 +107,12 @@ no exception, finite losses/gradients, and `passed=true`. A zero topology gradie
 on one batch is not proof of a defect, but should be inspected before relying on
 that weighting. No scientific search can be submitted until the smoke passes.
 Repeat `smoke` after a timeout; completed smoke phases are reused.
+
+Study training uses single-node static rendezvous with an available loopback port
+and unique rendezvous ID per launch. Workers reuse the agent's TCP store, avoiding
+the separate rank-zero store bind used by standalone/c10d on PyTorch 2.3. The CPU
+test suite exercises two real two-process Gloo launches as well as fake training;
+the GPU smoke is still required to validate NCCL and actual H0/H1 backward passes.
 
 ## Launch and monitor H0 screening
 
