@@ -67,3 +67,15 @@ real report will compare the fixed endpoint and trajectories, separate GT/suppor
 errors and exact cycle-space recovery, and expose correct-edge damage and cycle
 turnover. Successful free-logit optimization alone cannot establish a benefit
 for network training.
+
+## Batch Git follow-up
+
+The user-provided log for job 1440813 showed `git: command not found` in the
+initial clone guard, before any prediction-cache work. The experimental setup
+now loads Git when absent, rechecks after module purges, and fails explicitly
+on Git-status errors. A directory-identity check supports filesystem aliases.
+Four shell regression tests emulate missing Git, environment purge, failed
+module loading and failed status. The complete focused suite now passes
+**58 tests**; all five experimental Bash files pass syntax checks. Real cluster
+verification remains pending resubmission by the user. Production environment
+scripts and resource requests were not changed.

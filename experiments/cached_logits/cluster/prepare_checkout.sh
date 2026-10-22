@@ -2,6 +2,8 @@
 # Run on a Jean Zay login node. Never switches a campaign checkout.
 set -euo pipefail
 : "${WORK:?WORK is required}"
+source "${BASH_SOURCE[0]%/*}/git_env.sh"
+cached_logit_require_git
 repo_dir="$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test"
 remote_url=https://github.com/alessandro-benvenuti/Graph-Native-Betti-Matching.git
 branch=codex/cached-logit-betti-test

@@ -15,7 +15,7 @@ From the disposable clone:
 
 ```bash
 MPLCONFIGDIR=/tmp/gnbm-cached-logit-mpl python3 -m unittest \
-  tests.test_cached_logit_betti tests.test_betti_h0 tests.test_betti_h1 \
+  tests.test_cached_logit_betti tests.test_cached_logit_cluster_env tests.test_betti_h0 tests.test_betti_h1 \
   tests.test_betti_node_edge_filtration tests.test_graph_losses \
   tests.test_compare_loop_patch_predictions -v
 ```
@@ -79,7 +79,7 @@ bash "$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test/experiments/c
 
 Smoke requests **one A100, one process, eight CPUs, one hour**, no DDP. It sets
 `GNBM_REPO_DIR` before sourcing `env_a100.sh`, verifies `$PWD`, checks imports/CUDA,
-selects exactly two training IDs, caches them, closes the network stage, runs a
+loads the Git module when missing (including after environment purges), selects exactly two training IDs, caches them, closes the network stage, runs a
 20-step CPU optimization, and verifies all arm starts against cache step-zero
 metrics. No validation/test samples or training epochs run. A timeout/failure
 cannot write the final success marker. Each output directory must be new.
@@ -110,6 +110,8 @@ export CACHED_LOGIT_ROOT=/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm
 cd "$GNBM_REPO_DIR"
 module purge
 module load pytorch-gpu/py3/2.3.0
+source experiments/cached_logits/cluster/git_env.sh
+cached_logit_require_git
 source "${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}/bin/activate"
 export WANDB_MODE=disabled OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 cat "$CACHED_LOGIT_ROOT/smoke-opt/report.md"
@@ -267,3 +269,17 @@ Real smoke adds `SMOKE_VERIFIED.json`. The benchmark writes `benchmark.json`.
 No automatic merge or deletion. Retain caches/results/provenance before removing
 the disposable clone or branch. Never merge into `features-gnbm-nodes-edges` as
 part of this diagnostic.
+
+## Smoke failure before caching: Git missing
+
+Job 1440813 stopped in the clone guard because compute-node PATH lacked Git.
+The experimental setup now loads `${CACHED_LOGIT_GIT_MODULE:-git}` when required,
+then checks again after the A100/CPU environment's module purge. Failed Git status
+commands cannot pass the clean-checkout check. Production environment scripts
+are unchanged. If the site requires an explicit Git module version, export
+`CACHED_LOGIT_GIT_MODULE` before submission; the job reports module-load failures.
+The working-directory check compares directory identity to allow filesystem aliases.
+
+Update only the disposable checkout, then resubmit the same smoke command from
+above. That failed job never reached manifest/cache creation, so its original
+smoke paths can be reused. Keep its log; do not delete or overwrite any output.
