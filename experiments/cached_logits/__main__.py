@@ -10,6 +10,7 @@ import torch
 from .cache import (DATASET, SOURCE_RUN, select_manifest, cache_predictions,
     load_torch, torch_write, json_write, new_directory, code_provenance, OUTPUT_ROOT)
 from .core import ARMS, STEPS, fingerprint, optimize, sha256
+from .runtime import MAX_SECONDS
 from .report import report
 
 
@@ -28,8 +29,8 @@ def load_cache(path):
 
 def run(args):
     cache = load_cache(args.cache)
-    if not (1 <= args.threads <= 8 and 0 < args.steps <= 200 and 0 < args.max_seconds <= 14400 and args.lr > 0):
-        raise ValueError('bounds: threads 1..8, steps 1..200, runtime (0,14400], lr>0')
+    if not (1 <= args.threads <= 8 and 0 < args.steps <= 200 and 0 < args.max_seconds <= MAX_SECONDS and args.lr > 0):
+        raise ValueError('bounds: threads 1..8, steps 1..200, runtime (0,28800], lr>0')
     torch.set_num_threads(args.threads)
     torch.use_deterministic_algorithms(True)
     output = Path(args.output)
@@ -50,6 +51,10 @@ def run(args):
     begun = time.perf_counter()
     entries = []
     try:
+        with (output/'invocations.jsonl').open('a') as handle:
+            handle.write(json.dumps(dict(max_seconds=args.max_seconds,
+                slurm_job_id=os.environ.get('SLURM_JOB_ID'),resume=args.resume,
+                started_unix_seconds=time.time(),code=settings['code']),sort_keys=True)+'\n')
         for record in cache['records']:
             for mode in ('A','B'):
                 for arm in ARMS:

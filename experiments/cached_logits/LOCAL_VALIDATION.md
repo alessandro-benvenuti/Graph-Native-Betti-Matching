@@ -109,3 +109,22 @@ No successful real cache or optimization has been reported yet.
 The full focused suite now passes **70 tests**, including six schema/retry
 regressions. Bash syntax, Python compilation and diff checks pass. The existing
 failed cache and frozen two-sample manifest are preserved by the retry path.
+
+
+## Measured main-cache CPU budget follow-up
+
+The user reported CPU benchmark job 1447879 completed successfully: 8/26/37
+vertices, 28/325/666 pairs, and .278/.624/2.166 seconds for five updates each.
+Its conservative maximum-support projection is 24,955.139 seconds. An explicit
+`main-long`/`resume-long` route now offers an eight-hour CPU allocation with a
+27,000-second runtime cap. Normal one-hour submissions remain gated at 3,300
+seconds. Source scientific settings, core objective and cached data are unchanged.
+The scheduler is preflighted with `sbatch --test-only` before a longer submission.
+Local tests validate both actual submission routes using a mocked scheduler,
+exercise actual batch startup/main/resume scripts without Git, and confirm
+identical short-vs-long-budget synthetic endpoint metrics. No long main run
+has been submitted by this agent; scientific conclusions remain pending.
+The full focused suite passes **75 tests** after the runtime-control change.
+The tested submission helper checks the eight-hour request with Slurm test-only;
+its ordinary stages retain one-hour requests. Core losses, cache construction,
+selection, metrics and configuration adapters have no changes in this update.

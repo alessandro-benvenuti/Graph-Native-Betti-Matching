@@ -16,7 +16,8 @@ From the disposable clone:
 ```bash
 MPLCONFIGDIR=/tmp/gnbm-cached-logit-mpl python3 -m unittest \
   tests.test_cached_logit_betti tests.test_cached_logit_cluster_env \
-  tests.test_cached_logit_configuration tests.test_betti_h0 tests.test_betti_h1 \
+  tests.test_cached_logit_configuration tests.test_cached_logit_runtime \
+  tests.test_betti_h0 tests.test_betti_h1 \
   tests.test_betti_node_edge_filtration tests.test_graph_losses \
   tests.test_compare_loop_patch_predictions -v
 ```
@@ -334,3 +335,49 @@ It then preserves an incomplete `smoke-cache/` and chooses a fresh
 outputs are refused rather than overwritten. No cleanup or manual YAML editing
 is necessary for the reported failure. The new job still requests one A100,
 eight CPUs and one hour.
+
+## Explicit longer CPU main run after benchmark 1447879
+
+The completed real-graph benchmark projects **24,955 seconds (6h 55m 55s)**
+using the slowest of three supports and 50% headroom. This is a conservative
+projection, not measured main-run walltime. It exceeds the normal 3,300-second
+budget. The ordinary `main`/`resume` commands still use that one-hour allocation
+and refuse this projection.
+
+The explicitly named longer option requests **eight hours, four CPUs, zero
+GPUs**, with **one numerical thread and a 27,000-second (7h30m) runtime cap**.
+It uses the same cached predictions, fixed 32 patches, six mode/arm conditions,
+200 steps, learning rate, losses, thresholds, normalization and detach rules.
+No network run or cache rebuilding is needed for this scheduling-only change.
+The submission helper first uses Slurm
+[`--test-only`](https://slurm.schedmd.com/sbatch.html#OPT_test-only) to check the
+request without submitting; it then submits only if that check succeeds.
+The cluster's current scheduler determines whether this time request is allowed.
+
+To choose this longer CPU budget:
+
+```bash
+cd "$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test" &&
+git pull --ff-only origin codex/cached-logit-betti-test &&
+bash experiments/cached_logits/cluster/submit.sh main-long
+```
+
+After an interrupted **stopped** long job, resume with:
+
+```bash
+bash experiments/cached_logits/cluster/submit.sh resume-long
+```
+
+All invocations record their actual runtime budget and Slurm job ID in
+`main-opt/invocations.jsonl`; optimizer state and settings are retained as before.
+Completion/overwrite protection is unchanged. These named options do not change
+the one-hour default. They have not been submitted automatically.
+
+Most topology matching consists of detached CPU/Python GF2 calculations.
+Moving logits to a GPU would not move this work there. The measured CPU cost
+therefore does not establish a GPU speedup; the longer CPU budget avoids spending
+an A100 allocation on the same matching bottleneck. Cache/benchmark provenance
+retains its original code commits, while the optimization records the new
+runtime-control commit. The existing strict `next-commands` code-commit guard
+is unchanged; use the explicit longer submission command above for this
+scheduling-only update.

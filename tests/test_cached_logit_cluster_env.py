@@ -117,7 +117,7 @@ class CachedLogitClusterEnvironmentTests(unittest.TestCase):
                 '/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-cached-logit-betti-test-a100',
                 str(self.repo/'artifacts'))
             self.write('experiments/cached_logits/cluster/'+name, text)
-        for helper in ('provenance.py','retry.py'):
+        for helper in ('provenance.py','retry.py','runtime.py'):
             self.write('experiments/cached_logits/'+helper,
                        (ROOT/'experiments/cached_logits'/helper).read_text())
         self.write('cluster/jean_zay/env_a100.sh',
@@ -128,7 +128,7 @@ class CachedLogitClusterEnvironmentTests(unittest.TestCase):
         bin_dir.mkdir()
         python = bin_dir/'python'
         python.write_text('''#!/bin/bash
-if [[ "$1" == */provenance.py || "$1" == */retry.py ]]; then exec "$TEST_PYTHON" "$@"; fi
+if [[ "$1" == */provenance.py || "$1" == */retry.py || "$1" == */runtime.py ]]; then exec "$TEST_PYTHON" "$@"; fi
 printf '%s\\n' "$*" >> "$TEST_PYTHON_LOG"
 ''')
         python.chmod(0o755)
@@ -140,10 +140,19 @@ printf '%s\\n' "$*" >> "$TEST_PYTHON_LOG"
             GNBM_CODE_PROVENANCE_FILE=str(snapshot), GNBM_A100_VENV=str(venv),
             TEST_BIN=str(bin_dir), TEST_PYTHON=sys.executable,
             TEST_PYTHON_LOG=str(self.root/'python.log'), SLURM_JOB_ID='123')
-        for name in ('cache.slurm', 'optimize.slurm'):
+        cases=(('cache.slurm',None,3300),('optimize.slurm','benchmark',3300),
+               ('optimize.slurm','main',3300),('optimize.slurm','main',27000),
+               ('optimize.slurm','resume',27000))
+        for name,stage,budget in cases:
             if name=='optimize.slurm':
-                marker.parent.mkdir(parents=True)
+                marker.parent.mkdir(parents=True,exist_ok=True)
                 marker.write_text('{}')
+                benchmark=self.repo/'artifacts/cpu-benchmark/benchmark.json'
+                benchmark.parent.mkdir(parents=True,exist_ok=True)
+                benchmark.write_text(json.dumps(dict(complete=True,
+                    projected_32_patch_200_step_seconds=24955 if budget==27000 else 100)))
+                env['CACHED_LOGIT_CPU_STAGE']=stage
+                env['CACHED_LOGIT_CPU_BUDGET_SECONDS']=str(budget)
             env['TEST_JOB'] = str(self.repo/'experiments/cached_logits/cluster'/name)
             result = subprocess.run(['/bin/bash', '-c', 'module() { :; }; source "$TEST_JOB"'],
                 env=env, text=True, capture_output=True)
@@ -154,10 +163,43 @@ printf '%s\\n' "$*" >> "$TEST_PYTHON_LOG"
         self.assertIn('experiments.cached_logits cache', log)
         self.assertIn('experiments.cached_logits verify-smoke', log)
         self.assertIn('experiments.cached_logits benchmark', log)
+        self.assertIn('--steps 200 --threads 1 --max-seconds 27000 --resume',log)
+
+    def test_actual_submit_requests_long_walltime_only_for_named_long_stage(self):
+        for name in ('submit.sh','git_env.sh'):
+            text=(CLUSTER/name).read_text().replace(
+                '/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-cached-logit-betti-test-a100',
+                str(self.repo/'artifacts'))
+            self.write('experiments/cached_logits/cluster/'+name,text)
+        self.write('experiments/cached_logits/provenance.py',
+                   (ROOT/'experiments/cached_logits/provenance.py').read_text())
+        self.commit()
+        bin_dir=self.root/'bin';bin_dir.mkdir()
+        (bin_dir/'python3').symlink_to(sys.executable)
+        mock=bin_dir/'sbatch'
+        mock.write_text("""#!/bin/bash
+exec "$TEST_PYTHON" -c 'import json,os,sys;print(json.dumps(dict(args=sys.argv[1:],stage=os.environ.get("CACHED_LOGIT_CPU_STAGE"),budget=os.environ.get("CACHED_LOGIT_CPU_BUDGET_SECONDS"),snapshot=os.environ.get("GNBM_CODE_PROVENANCE_FILE"))))' "$@"
+""")
+        mock.chmod(0o755)
+        environment=dict(os.environ,WORK=str(self.root/'work'),TEST_PYTHON=sys.executable,
+                         PATH=str(bin_dir)+os.pathsep+os.environ['PATH'])
+        for stage in ('main','main-long','resume-long'):
+            result=subprocess.run(['/bin/bash',str(self.repo/'experiments/cached_logits/cluster/submit.sh'),stage],
+                env=environment,text=True,capture_output=True)
+            self.assertEqual(result.returncode,0,result.stdout+'\n'+result.stderr)
+            record=json.loads(result.stdout.splitlines()[-1])
+            self.assertEqual(record['stage'],'resume' if stage=='resume-long' else 'main')
+            self.assertEqual(record['budget'],'3300' if stage=='main' else '27000')
+            self.assertEqual('--time=08:00:00' in record['args'],stage!='main')
+            self.assertTrue(Path(record['snapshot']).is_file())
+            self.assertFalse(any(arg.startswith('--gres') for arg in record['args']))
+            if stage!='main':
+                preflight=json.loads(result.stdout.splitlines()[-2])
+                self.assertIn('--test-only',preflight['args'])
 
     def test_submit_captures_snapshot_before_sbatch_and_jobs_do_not_use_git(self):
         submit = (CLUSTER/'submit.sh').read_text()
-        self.assertLess(submit.index('provenance.py" capture'), submit.index('\nsbatch --export'))
+        self.assertLess(submit.index('provenance.py" capture'), submit.index('\nsbatch \"${slurm_options[@]}\"'))
         for name in ('guard.sh', 'cache.slurm', 'optimize.slurm'):
             text = (CLUSTER/name).read_text()
             self.assertNotIn('cached_logit_require_git', text)

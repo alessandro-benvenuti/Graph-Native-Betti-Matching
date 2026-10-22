@@ -26,15 +26,12 @@ case "${CACHED_LOGIT_CPU_STAGE:-benchmark}" in
     python -m experiments.cached_logits benchmark --cache "$CACHED_LOGIT_ROOT/main-cache/predictions.pt" --output "$CACHED_LOGIT_ROOT/cpu-benchmark" --steps 5 --threads 1 --max-seconds 300
     ;;
   main|resume)
-    python - "$CACHED_LOGIT_ROOT/cpu-benchmark/benchmark.json" <<'PY'
-import json,sys
-r=json.load(open(sys.argv[1]))
-assert r['complete'], 'Benchmark incomplete: inspect before proceeding'
-assert r['projected_32_patch_200_step_seconds'] <= 3300, 'CPU estimate exceeds bounded one-hour job: inspect before changing resources'
-PY
-    options=()
+    cpu_budget="${CACHED_LOGIT_CPU_BUDGET_SECONDS:-3300}"
+    python "$GNBM_REPO_DIR/experiments/cached_logits/runtime.py" \
+      --benchmark "$CACHED_LOGIT_ROOT/cpu-benchmark/benchmark.json" --budget "$cpu_budget"
+    options=(--steps 200 --threads 1 --max-seconds "$cpu_budget")
     if [[ "${CACHED_LOGIT_CPU_STAGE}" == resume ]]; then options+=(--resume); fi
-    python -m experiments.cached_logits optimize --cache "$CACHED_LOGIT_ROOT/main-cache/predictions.pt" --output "$CACHED_LOGIT_ROOT/main-opt" --steps 200 --threads 1 --max-seconds 3300 "${options[@]}"
+    python -m experiments.cached_logits optimize --cache "$CACHED_LOGIT_ROOT/main-cache/predictions.pt" --output "$CACHED_LOGIT_ROOT/main-opt" "${options[@]}"
     ;;
   *) exit 2 ;;
 esac
