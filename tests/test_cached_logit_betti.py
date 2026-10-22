@@ -182,12 +182,15 @@ class CachedLogitTests(unittest.TestCase):
                 for arm in ARMS:
                     state=optimize(r,config(),mode,arm,steps=1,spatial=True)
                     entries.append(dict(record=r,state=state))
-            report(output,dict(provenance={'split':'train'},selection={'synthetic':True}),entries)
+            report(output,dict(provenance={'split':'train','configuration_compatibility':{'additions':[
+                {'path':'topology.sampling.enabled','value':False,'reason':'absent in historical config'}]}},
+                selection={'synthetic':True}),entries)
             for name in ('summary.json','per-patch.csv','report.md','gradients.json','trajectories-A.png','trajectories-B.png'):
                 self.assertTrue((output/name).is_file(),name)
             summary=json.loads((output/'summary.json').read_text())
             self.assertEqual(summary['endpoints']['A/initial']['samples'],1)
             self.assertIn('GT_loop',summary['cohorts'])
+            self.assertIn('topology.sampling.enabled',(output/'report.md').read_text())
 
 
     def test_cli_runtime_bound_resume_and_step_zero_verification(self):
@@ -231,6 +234,11 @@ class CachedLogitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); dataset=root/'dataset'
             c=config()
+            c['model']['decoder']['hidden_dim']=12
+            c['topology'].pop('sampling')
+            c['topology'].pop('complex')
+            c['topology']['betti_h0'].pop('normalization')
+            c['topology']['betti_h1'].pop('normalization')
             model=TinyModel()
             checkpoint=root/'source.pt'
             torch_write(checkpoint,{'epoch':500,'net':model.state_dict()})
@@ -246,7 +254,7 @@ class CachedLogitTests(unittest.TestCase):
             args=Namespace(manifest=manifest,dataset=dataset,output=root/'cache',config=config_path,
                 checkpoint=checkpoint,workers=0,spatial_max_node_distance=.1,device='cpu',
                 dataset_name='synthetic_mri',select_count=None)
-            with patch('configs.load_config',return_value=c), patch('models.build_model',return_value=model), \
+            with patch('models.build_model',return_value=model), \
                  patch('data.loaders.build_evaluation_loader',return_value=Loader()) as loader, \
                  patch('experiments.cached_logits.cache.code_provenance',return_value=dict(commit='test',branch='disposable',dirty='')):
                 cache_predictions(args)
@@ -258,6 +266,9 @@ class CachedLogitTests(unittest.TestCase):
             self.assertEqual(len(cache['provenance']['checkpoint_sha256']),64)
             self.assertEqual(len(cache['records']),2)
             self.assertTrue((args.output/'step-zero.json').is_file())
+            self.assertTrue((args.output/'source-config.yaml').is_file())
+            self.assertNotIn('sampling',cache['provenance']['source_config']['topology'])
+            self.assertTrue(cache['provenance']['configuration_compatibility']['additions'])
             for record in cache['records']:
                 self.assertIn('target_cycle_basis_support_audit',record)
                 self.assertTrue(record['node_supervision'].all())

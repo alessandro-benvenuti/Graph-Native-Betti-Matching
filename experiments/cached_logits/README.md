@@ -15,7 +15,8 @@ From the disposable clone:
 
 ```bash
 MPLCONFIGDIR=/tmp/gnbm-cached-logit-mpl python3 -m unittest \
-  tests.test_cached_logit_betti tests.test_cached_logit_cluster_env tests.test_betti_h0 tests.test_betti_h1 \
+  tests.test_cached_logit_betti tests.test_cached_logit_cluster_env \
+  tests.test_cached_logit_configuration tests.test_betti_h0 tests.test_betti_h1 \
   tests.test_betti_node_edge_filtration tests.test_graph_losses \
   tests.test_compare_loop_patch_predictions -v
 ```
@@ -253,14 +254,16 @@ Expected Jean Zay directories, created only by the commands above:
 - `$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test` (independent Git clone).
 - New checkpoint root `gnbm-cached-logit-betti-test-a100/` with `logs/`,
   `matplotlib/`, `smoke-cache/`, `smoke-opt/`, `main-cache/`,
-  `cpu-benchmark/`, `main-opt/`, and optional `main-report-copy/`.
+  `cpu-benchmark/`, `main-opt/`, and optional `main-report-copy/`. Incomplete
+  smoke caches are retained; retries use `smoke-cache-retry-<job_id>/`.
 - Root manifest files: `smoke-manifest.json`, `main-pool-manifest.json`.
 - Immutable submission snapshots in the disposable clone's `.git/cached-logit-provenance/`.
 - Existing environment setup may ensure shared tool/extension/temp caches exist;
   it does not alter campaign outputs. W&B is disabled.
 
 Each cache has `predictions.pt`, `selection.json`, `step-zero.json`,
-`provenance.json`, `resolved-config.yaml`, `CACHE_COMPLETE.json`. Each run has
+`provenance.json`, `source-config.yaml`, `configuration-compatibility.json`,
+`resolved-config.yaml`, `CACHE_COMPLETE.json`. Each run has
 `run.json`, twelve-to-192 `<sample>-<mode>-<arm>.pt` state files (six per patch),
 reports/plots listed above, and `COMPLETE.json` only on successful completion.
 Incomplete runs have `INCOMPLETE.json`; a running process owns `RUNNING.lock`.
@@ -298,3 +301,36 @@ can load `${CACHED_LOGIT_GIT_MODULE:-git}`. Login-side Git failures now include
 the exit code and original stderr. Production environment scripts and resource
 requests are unchanged. Preserve previous logs; no output cleanup is needed
 for the two failures reported so far.
+
+## Historical source configuration and smoke retry
+
+The original epoch-500 resolved config can predate `topology.sampling`, the
+node-aware `topology.complex` block, and per-loss normalization/activation fields.
+The experimental `configuration.py` reuses production YAML/default expansion,
+adds only these absent schema fields from checked-in `configs/base.yaml`, then
+runs the full production validator. Null sampling/complex blocks count as
+unconfigured and are explicitly audited. Supplied values and loss/model/data
+coefficients are preserved; missing scientific loss coefficients remain errors.
+The production config loader and checkpoint-run files are not modified.
+
+Every addition is printed in the job log and retained in
+`configuration-compatibility.json`, cache provenance, and the Markdown report.
+`source-config.yaml` preserves the source file bytes; `resolved-config.yaml`
+records the effective experimental configuration. Config validation now happens
+before creating a cache output directory.
+
+After a config-stage failure such as job 1444630, pull and resubmit normally:
+
+```bash
+cd "$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test" &&
+git pull --ff-only origin codex/cached-logit-betti-test &&
+bash experiments/cached_logits/cluster/submit.sh smoke
+```
+
+Smoke uses `select --reuse`: it verifies the existing training root, seed,
+requested count, unique IDs and categories without rewriting the frozen manifest.
+It then preserves an incomplete `smoke-cache/` and chooses a fresh
+`smoke-cache-retry-<new_job_id>/`. Complete cache outputs and existing optimizer
+outputs are refused rather than overwritten. No cleanup or manual YAML editing
+is necessary for the reported failure. The new job still requests one A100,
+eight CPUs and one hour.

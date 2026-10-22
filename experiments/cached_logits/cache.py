@@ -16,6 +16,7 @@ import yaml
 from .core import canonical, edge_tensor, fingerprint, finite, sha256, validate_record, metrics, mode_view
 
 from .provenance import code_provenance
+from .configuration import load_source_config
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_RUN = Path('/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-boundary-gamma-sweep-500-a100/finetune_boundary_mri500_node_edge_focal_g05_seed364505')
@@ -114,7 +115,22 @@ def select_manifest(args):
     output = Path(args.output)
     if str(output.resolve()).startswith('/lustre/') and not output.resolve().is_relative_to(OUTPUT_ROOT):
         raise ValueError('selection output escaped isolated output root')
-    if output.exists(): raise FileExistsError(output)
+    if output.exists():
+        if not getattr(args,'reuse',False): raise FileExistsError(output)
+        frozen = json.loads(output.read_text())
+        ids = frozen.get('sample_ids',[])
+        selection = frozen.get('selection_provenance',{})
+        if (frozen.get('schema') != 1 or frozen.get('split') != 'train'
+            or Path(frozen.get('dataset_root','')).resolve() != Path(args.dataset).resolve()
+            or frozen.get('requested') != args.count or not ids or len(ids)>args.count
+            or len(set(ids)) != len(ids) or set(frozen.get('categories',{})) != set(ids)):
+            raise ValueError('Existing frozen manifest does not match this selection request')
+        if args.pool:
+            if selection.get('sha256') != sha256(args.pool): raise ValueError('Selection pool changed')
+        elif selection.get('seed') != args.seed or selection.get('bounded_pool') is not True:
+            raise ValueError('Existing manifest uses a different selection seed or pool')
+        print(json.dumps(dict(reused_frozen_manifest=str(output),sample_ids=ids),indent=2))
+        return
     # Strict root/split discovery disallows accidentally pointing at a test leaf.
     records = discover_synthetic_mri(Path(args.dataset), 'train', allow_direct=False)
     available = {r.sample_id:r for r in records}
@@ -148,7 +164,6 @@ def select_manifest(args):
 
 
 def cache_predictions(args):
-    from configs import load_config
     from data.loaders import build_evaluation_loader
     from models import build_model
     from models.checkpoint import load_checkpoint_file, extract_model_state, load_legacy_model_checkpoint
@@ -162,15 +177,17 @@ def cache_predictions(args):
         raise ValueError('manifest is not from requested training root')
     if len(manifest['sample_ids']) > 128: raise ValueError('bounded pool limit is 128 patches')
     if len(set(manifest['sample_ids'])) != len(manifest['sample_ids']): raise ValueError('duplicate manifest IDs')
-    output = new_directory(args.output)
+    if Path(args.output).exists():
+        raise FileExistsError('cache output already exists: '+str(args.output))
     started = time.perf_counter()
     if args.workers < 0 or args.workers > 8 or args.spatial_max_node_distance <= 0:
         raise ValueError('invalid worker count or spatial distance')
     provenance_code = code_provenance()
     if provenance_code['dirty']:
         raise ValueError('commit experimental code before producing a network cache')
-    source_config = load_config(args.config)
+    source_config, original_source_config, compatibility = load_source_config(args.config)
     validate_source_config(source_config)
+    print(json.dumps(dict(configuration_compatibility=compatibility),indent=2),flush=True)
     config = copy.deepcopy(source_config)
     # Deliberate mode B support override only. Read all other topology settings.
     config['topology']['complex']['mode'] = 'node_aware'
@@ -179,6 +196,9 @@ def cache_predictions(args):
     config['topology']['betti_h1'].update(false_positive_weight=.25,false_negative_weight=1.)
     config['data'].update(batch_size=1,validation_batch_size=1)
     config['data']['datasets'][args.dataset_name]['root'] = str(args.dataset)
+    output = new_directory(args.output)
+    json_write(output/'configuration-compatibility.json',compatibility)
+    (output/'source-config.yaml').write_bytes(Path(args.config).read_bytes())
     checkpoint_digest = sha256(args.checkpoint)
     checkpoint = load_checkpoint_file(args.checkpoint)
     if int(checkpoint.get('epoch',-1)) != 500: raise ValueError('checkpoint must be completed epoch 500')
@@ -256,7 +276,8 @@ def cache_predictions(args):
         dataset_root=str(Path(args.dataset).resolve()),split='train',batch_norm_buffers_unchanged=True,
         elapsed_seconds=time.perf_counter()-started,torch_version=str(torch.__version__),
         overrides={'topology.complex.mode':'node_aware','betti_h1.false_positive_weight':.25,
-                   'betti_h1.false_negative_weight':1.},source_config=source_config,
+                   'betti_h1.false_negative_weight':1.},source_config=original_source_config,
+        configuration_compatibility=compatibility,
         omitted_loss_terms=['boxes','nodes','cardinality'],
         omission_reason='coordinates fixed; cardinality uses nondifferentiable argmax',
         classification_orientation='equal mean of the two directed losses (expected random orientation)',

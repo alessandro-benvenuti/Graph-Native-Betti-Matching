@@ -88,6 +88,7 @@ def main():
     select.add_argument('--count',type=int,default=64)
     select.add_argument('--seed',type=int,default=364505)
     select.add_argument('--pool',type=Path)
+    select.add_argument('--reuse',action='store_true',help='Reuse a matching frozen manifest without rewriting it')
     cache=sub.add_parser('cache')
     cache.add_argument('--config',type=Path,default=SOURCE_RUN/'resolved-config.yaml')
     cache.add_argument('--checkpoint',type=Path,default=SOURCE_RUN/'models/latest_checkpoint.pt')

@@ -93,3 +93,19 @@ only expensive model/data commands were stubbed in that startup test. This is
 not a claim of successful cluster execution. Ten provenance/startup tests pass; the complete focused suite passes 64 tests.
 Submit using `bash experiments/cached_logits/cluster/submit.sh smoke`; direct
 `sbatch` calls without a captured snapshot now fail before model/data work.
+
+
+## Historical configuration follow-up
+
+Job 1444630 passed isolated-path checks, snapshot verification and A100/PyTorch
+preflight, then failed loading a source config without the current topology
+sampling mapping. Local regression reproduces that exact production-loader
+error. The experiment-only adapter supplies and audits only missing modern
+topology schema fields while preserving original coefficients and source bytes.
+The cache integration test now loads a historical-style YAML through the real
+adapter and validator; configuration loading is no longer mocked. Frozen-ID
+reuse and preservation of failed cache directories have regression coverage.
+No successful real cache or optimization has been reported yet.
+The full focused suite now passes **70 tests**, including six schema/retry
+regressions. Bash syntax, Python compilation and diff checks pass. The existing
+failed cache and frozen two-sample manifest are preserved by the retry path.

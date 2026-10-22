@@ -24,11 +24,13 @@ export WANDB_MODE=disabled OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THRE
 python -c 'import torch; from experiments.cached_logits.core import Objective; from models import build_model; assert torch.cuda.is_available(); print(torch.__version__,torch.cuda.get_device_name(0))'
 case "${CACHED_LOGIT_STAGE:-smoke}" in
   smoke)
-    python -m experiments.cached_logits select --count 2 --output "$CACHED_LOGIT_ROOT/smoke-manifest.json"
-    python -m experiments.cached_logits cache --manifest "$CACHED_LOGIT_ROOT/smoke-manifest.json" --output "$CACHED_LOGIT_ROOT/smoke-cache"
+    python -m experiments.cached_logits select --count 2 --reuse --output "$CACHED_LOGIT_ROOT/smoke-manifest.json"
+    smoke_cache="$(python "$GNBM_REPO_DIR/experiments/cached_logits/retry.py" --root "$CACHED_LOGIT_ROOT" --job-id "$SLURM_JOB_ID")"
+    echo "Smoke cache output: $smoke_cache (previous failed artifacts preserved)"
+    python -m experiments.cached_logits cache --manifest "$CACHED_LOGIT_ROOT/smoke-manifest.json" --output "$smoke_cache"
     # Cache is closed before optimizer starts. Optimization does not import model/images.
-    python -m experiments.cached_logits optimize --cache "$CACHED_LOGIT_ROOT/smoke-cache/predictions.pt" --output "$CACHED_LOGIT_ROOT/smoke-opt" --steps 20 --threads 1 --max-seconds 600
-    python -m experiments.cached_logits verify-smoke --cache "$CACHED_LOGIT_ROOT/smoke-cache/predictions.pt" --run "$CACHED_LOGIT_ROOT/smoke-opt"
+    python -m experiments.cached_logits optimize --cache "$smoke_cache/predictions.pt" --output "$CACHED_LOGIT_ROOT/smoke-opt" --steps 20 --threads 1 --max-seconds 600
+    python -m experiments.cached_logits verify-smoke --cache "$smoke_cache/predictions.pt" --run "$CACHED_LOGIT_ROOT/smoke-opt"
     ;;
   main)
     [[ -f "$CACHED_LOGIT_ROOT/smoke-opt/SMOKE_VERIFIED.json" ]] || { echo 'Smoke has not passed' >&2; exit 2; }

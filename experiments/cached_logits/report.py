@@ -205,6 +205,14 @@ def report(output, cache, entries):
         '## Local gradient attribution', '',
         'gradients.json records classification/H0/H1 gradients at steps 0, 20, 200 when reached, including node attributions, critical-edge GT membership and gradient conflicts. gradient-edges.csv summarizes promotion/suppression counts and absolute logit-gradient mass by GT membership and candidate type. Both directed orientations are counted; pair counts deduplicate them. These are local diagnostics, not causal explanations of all final changes.', '',
         ]
+    compatibility=cache['provenance'].get('configuration_compatibility',{})
+    if compatibility.get('additions'):
+        lines += ['## Historical configuration compatibility', '',
+            'The source resolved YAML predates these topology schema fields. Existing coefficients/settings were preserved; the additions below use the checked-in configs/base.yaml defaults. Original YAML and the full audit are retained in the prediction cache.', '',
+            '|Added field|Value|Reason|', '|---|---|---|']
+        for item in compatibility['additions']:
+            lines.append('|'+item['path']+'|'+json.dumps(item['value'])+'|'+item['reason']+'|')
+        lines.append('')
     lines += evidence_tables(rows,cohorts,gradients)
     lines += ['## Interpretation', '']
     conclusions = {}

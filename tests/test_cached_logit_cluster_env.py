@@ -117,8 +117,9 @@ class CachedLogitClusterEnvironmentTests(unittest.TestCase):
                 '/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-cached-logit-betti-test-a100',
                 str(self.repo/'artifacts'))
             self.write('experiments/cached_logits/cluster/'+name, text)
-        self.write('experiments/cached_logits/provenance.py',
-                   (ROOT/'experiments/cached_logits/provenance.py').read_text())
+        for helper in ('provenance.py','retry.py'):
+            self.write('experiments/cached_logits/'+helper,
+                       (ROOT/'experiments/cached_logits'/helper).read_text())
         self.write('cluster/jean_zay/env_a100.sh',
                    'export PATH="$TEST_BIN"\ncd "$GNBM_REPO_DIR"\n')
         self.commit()
@@ -127,7 +128,7 @@ class CachedLogitClusterEnvironmentTests(unittest.TestCase):
         bin_dir.mkdir()
         python = bin_dir/'python'
         python.write_text('''#!/bin/bash
-if [[ "$1" == */provenance.py ]]; then exec "$TEST_PYTHON" "$@"; fi
+if [[ "$1" == */provenance.py || "$1" == */retry.py ]]; then exec "$TEST_PYTHON" "$@"; fi
 printf '%s\\n' "$*" >> "$TEST_PYTHON_LOG"
 ''')
         python.chmod(0o755)
@@ -135,13 +136,14 @@ printf '%s\\n' "$*" >> "$TEST_PYTHON_LOG"
         (venv/'bin').mkdir(parents=True)
         (venv/'bin/activate').write_text('export PATH="$TEST_BIN"\n')
         marker = self.repo/'artifacts/smoke-opt/SMOKE_VERIFIED.json'
-        marker.parent.mkdir(parents=True)
-        marker.write_text('{}')
         env = dict(os.environ, WORK=str(self.root/'work'), PATH=str(bin_dir),
             GNBM_CODE_PROVENANCE_FILE=str(snapshot), GNBM_A100_VENV=str(venv),
             TEST_BIN=str(bin_dir), TEST_PYTHON=sys.executable,
             TEST_PYTHON_LOG=str(self.root/'python.log'), SLURM_JOB_ID='123')
         for name in ('cache.slurm', 'optimize.slurm'):
+            if name=='optimize.slurm':
+                marker.parent.mkdir(parents=True)
+                marker.write_text('{}')
             env['TEST_JOB'] = str(self.repo/'experiments/cached_logits/cluster'/name)
             result = subprocess.run(['/bin/bash', '-c', 'module() { :; }; source "$TEST_JOB"'],
                 env=env, text=True, capture_output=True)
