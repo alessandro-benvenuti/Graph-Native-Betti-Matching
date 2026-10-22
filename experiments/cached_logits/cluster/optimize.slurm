@@ -7,15 +7,19 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --hint=nomultithread
 #SBATCH --time=01:00:00
-set -eo pipefail
+set -Eeo pipefail
+trap 'rc=$?; echo "Cached-logit job failed at line $LINENO (exit $rc)" >&2' ERR
+echo "Cached-logit phase: isolated path checks"
 source "$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test/experiments/cached_logits/cluster/guard.sh"
 module purge
 module load pytorch-gpu/py3/2.3.0
 source "${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}/bin/activate"
 set -u
-cached_logit_require_git
 cd "$GNBM_REPO_DIR"
 [[ "$PWD" -ef "$GNBM_REPO_DIR" ]] || { echo 'Wrong disposable working directory' >&2; exit 2; }
+echo "Cached-logit phase: verify login-node code snapshot (no Git)"
+python "$GNBM_REPO_DIR/experiments/cached_logits/provenance.py" verify \
+  --repo "$GNBM_REPO_DIR" --manifest "$GNBM_CODE_PROVENANCE_FILE"
 [[ -f "$CACHED_LOGIT_ROOT/smoke-opt/SMOKE_VERIFIED.json" ]] || exit 2
 case "${CACHED_LOGIT_CPU_STAGE:-benchmark}" in
   benchmark)

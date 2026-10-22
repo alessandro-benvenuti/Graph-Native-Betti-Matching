@@ -273,14 +273,14 @@ class CachedLogitTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Synthetic'): next_commands(root)
             marker.write_text(json.dumps(dict(synthetic=False,code={'commit':'abc'})))
             with patch('experiments.cached_logits.cache.code_provenance',return_value={'commit':'abc','dirty':''}):
-                self.assertIn('CACHED_LOGIT_STAGE=main',next_commands(root))
+                self.assertIn('submit.sh cache-main',next_commands(root))
                 (root/'main-cache').mkdir(); (root/'main-cache/CACHE_COMPLETE.json').touch()
-                self.assertIn('CACHED_LOGIT_CPU_STAGE=benchmark',next_commands(root))
+                self.assertIn('submit.sh benchmark',next_commands(root))
                 (root/'cpu-benchmark').mkdir(); benchmark=root/'cpu-benchmark/benchmark.json'
                 benchmark.write_text(json.dumps(dict(complete=True,projected_32_patch_200_step_seconds=4000)))
                 self.assertNotIn('sbatch',next_commands(root))
                 benchmark.write_text(json.dumps(dict(complete=True,projected_32_patch_200_step_seconds=100)))
-                self.assertIn('CACHED_LOGIT_CPU_STAGE=main',next_commands(root))
+                self.assertIn('submit.sh main',next_commands(root))
 
     def test_config_validation(self):
         c=config(); validate_source_config(c)

@@ -1,81 +1,166 @@
-"""Batch environment regressions using an initially Git-free PATH."""
+"""Login provenance and real job-script startup without compute-node Git."""
+import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+
+from experiments.cached_logits import provenance
 
 ROOT = Path(__file__).resolve().parents[1]
-GUARD = ROOT / 'experiments/cached_logits/cluster/guard.sh'
+CLUSTER = ROOT / 'experiments/cached_logits/cluster'
 
 
 class CachedLogitClusterEnvironmentTests(unittest.TestCase):
-    def run_guard(self, *, fail_load=False, fail_status=False):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            repo = root / 'work/projects/Graph-Native-Betti-Matching-cached-logit-test'
-            (repo / '.git').mkdir(parents=True)
-            (repo / '.git/cached-logit-disposable').touch()
-            empty = root / 'empty'
-            empty.mkdir()
-            git_dir = root / 'git/bin'
-            git_dir.mkdir(parents=True)
-            executable = git_dir / 'git'
-            executable.write_text('''#!/bin/bash
-if [[ "$1" == --version ]]; then echo 'git test fixture'; exit 0; fi
-if [[ "$1" == -C ]]; then shift 2; fi
-case "$1" in
-  branch) echo codex/cached-logit-betti-test ;;
-  status) exit "${TEST_STATUS_RC:-0}" ;;
-  *) exit 1 ;;
-esac
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.repo = self.root / 'work/projects/Graph-Native-Betti-Matching-cached-logit-test'
+        self.repo.mkdir(parents=True)
+        self.git('init')
+        self.git('config', 'user.email', 'synthetic@example.invalid')
+        self.git('config', 'user.name', 'Synthetic fixture')
+        self.git('checkout', '-b', provenance.BRANCH)
+        self.git('remote', 'add', 'origin', provenance.REMOTE)
+        (self.repo / '.git/cached-logit-disposable').touch()
+        (self.repo / '.gitignore').write_text('artifacts/\n__pycache__/\n')
+        self.write('experiments/sample.py', 'value = 1\n')
+        self.commit()
+
+    def git(self, *arguments):
+        return subprocess.run(['git', '-C', str(self.repo), *arguments],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def write(self, name, value):
+        path = self.repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value)
+        return path
+
+    def commit(self):
+        self.git('add', '.')
+        self.git('commit', '-m', 'Synthetic fixture')
+
+    def test_snapshot_reuses_identical_capture_without_overwriting(self):
+        first = provenance.capture(self.repo)
+        contents = first.read_bytes()
+        self.assertEqual(first, provenance.capture(self.repo))
+        self.assertEqual(first.read_bytes(), contents)
+        result = provenance.verify(first, self.repo)
+        self.assertEqual(result['commit'], self.git('rev-parse', 'HEAD'))
+        self.assertEqual(result['dirty'], '')
+
+    def test_batch_code_provenance_never_invokes_git(self):
+        snapshot = provenance.capture(self.repo)
+        with patch.dict(os.environ, {'GNBM_CODE_PROVENANCE_FILE':str(snapshot), 'SLURM_JOB_ID':'123', 'PATH':''}), \
+             patch.object(provenance, 'ROOT', self.repo), \
+             patch.object(provenance.subprocess, 'run', side_effect=AssertionError('Batch launched a subprocess')):
+            result = provenance.code_provenance()
+        self.assertEqual(result['verification'], 'login_snapshot_sha256')
+        self.assertEqual(result['branch'], provenance.BRANCH)
+
+    def test_batch_without_snapshot_does_not_fall_back_to_git(self):
+        with patch.dict(os.environ, {'SLURM_JOB_ID':'123'}), \
+             patch.object(provenance.subprocess, 'run', side_effect=AssertionError('Batch invoked Git')):
+            with patch.dict(os.environ):
+                os.environ.pop('GNBM_CODE_PROVENANCE_FILE', None)
+                with self.assertRaisesRegex(ValueError, 'Missing login-node provenance'):
+                    provenance.code_provenance()
+
+    def test_changed_tracked_file_is_rejected(self):
+        snapshot = provenance.capture(self.repo)
+        self.write('experiments/sample.py', 'value = 2\n')
+        with self.assertRaisesRegex(ValueError, 'Code changed.*experiments/sample.py'):
+            provenance.verify(snapshot, self.repo)
+
+    def test_new_untracked_python_source_is_rejected(self):
+        snapshot = provenance.capture(self.repo)
+        self.write('experiments/untracked.py', 'value = 2\n')
+        with self.assertRaisesRegex(ValueError, 'Python source files changed'):
+            provenance.verify(snapshot, self.repo)
+
+    def test_modified_snapshot_and_other_checkout_are_rejected(self):
+        snapshot = provenance.capture(self.repo)
+        with self.assertRaisesRegex(ValueError, 'another checkout'):
+            provenance.verify(snapshot, self.root)
+        value = json.loads(snapshot.read_text())
+        value['commit'] = '0'*40
+        snapshot.write_text(json.dumps(value))
+        with self.assertRaisesRegex(ValueError, 'content hash changed'):
+            provenance.verify(snapshot, self.repo)
+
+    def test_login_refuses_dirty_or_wrong_branch(self):
+        self.write('experiments/sample.py', 'value = 2\n')
+        with self.assertRaisesRegex(ValueError, 'Commit changes'):
+            provenance.capture(self.repo)
+        self.commit()
+        self.git('checkout', '-b', 'unrelated')
+        with self.assertRaisesRegex(ValueError, 'Wrong disposable branch'):
+            provenance.capture(self.repo)
+
+    def test_git_status_failure_includes_original_error_text(self):
+        result = subprocess.CompletedProcess(['git'], 128, '', 'fixture status failure')
+        with patch.object(provenance.subprocess, 'run', return_value=result):
+            with self.assertRaisesRegex(RuntimeError, 'exit 128.*fixture status failure'):
+                provenance._git(self.repo, 'status', '--porcelain')
+
+    def test_real_gpu_and_cpu_job_startup_without_git(self):
+        # The real shell jobs and real snapshot verification run. Expensive
+        # model/data Python commands are stubs; this tests startup, not inference.
+        for name in ('guard.sh', 'cache.slurm', 'optimize.slurm'):
+            text = (CLUSTER / name).read_text().replace(
+                '/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-cached-logit-betti-test-a100',
+                str(self.repo/'artifacts'))
+            self.write('experiments/cached_logits/cluster/'+name, text)
+        self.write('experiments/cached_logits/provenance.py',
+                   (ROOT/'experiments/cached_logits/provenance.py').read_text())
+        self.write('cluster/jean_zay/env_a100.sh',
+                   'export PATH="$TEST_BIN"\ncd "$GNBM_REPO_DIR"\n')
+        self.commit()
+        snapshot = provenance.capture(self.repo)
+        bin_dir = self.root/'bin'
+        bin_dir.mkdir()
+        python = bin_dir/'python'
+        python.write_text('''#!/bin/bash
+if [[ "$1" == */provenance.py ]]; then exec "$TEST_PYTHON" "$@"; fi
+printf '%s\\n' "$*" >> "$TEST_PYTHON_LOG"
 ''')
-            executable.chmod(0o755)
-            environment = dict(os.environ, WORK=str(root/'work'), PATH=str(empty),
-                TEST_GIT_DIR=str(git_dir), TEST_EMPTY_PATH=str(empty),
-                TEST_STATUS_RC='128' if fail_status else '0',
-                TEST_LOAD_RC='1' if fail_load else '0', TEST_GUARD=str(GUARD))
-            script = '''set -euo pipefail
-module() {
-  [[ "$1" == load && "$2" == git ]] || return 1
-  [[ "$TEST_LOAD_RC" == 0 ]] || return 1
-  export PATH="$TEST_GIT_DIR:$PATH"
-  module_loads=$((module_loads+1))
-}
-module_loads=0
-source "$TEST_GUARD"
-[[ "$module_loads" == 1 ]]
-# Simulate the purge in env_a100.sh or the CPU batch environment.
-export PATH="$TEST_EMPTY_PATH"
-cached_logit_require_git
-[[ "$module_loads" == 2 ]]
-git --version
-'''
-            return subprocess.run(['/bin/bash', '-c', script], env=environment,
-                                  text=True, capture_output=True)
+        python.chmod(0o755)
+        venv = self.root/'venv'
+        (venv/'bin').mkdir(parents=True)
+        (venv/'bin/activate').write_text('export PATH="$TEST_BIN"\n')
+        marker = self.repo/'artifacts/smoke-opt/SMOKE_VERIFIED.json'
+        marker.parent.mkdir(parents=True)
+        marker.write_text('{}')
+        env = dict(os.environ, WORK=str(self.root/'work'), PATH=str(bin_dir),
+            GNBM_CODE_PROVENANCE_FILE=str(snapshot), GNBM_A100_VENV=str(venv),
+            TEST_BIN=str(bin_dir), TEST_PYTHON=sys.executable,
+            TEST_PYTHON_LOG=str(self.root/'python.log'), SLURM_JOB_ID='123')
+        for name in ('cache.slurm', 'optimize.slurm'):
+            env['TEST_JOB'] = str(self.repo/'experiments/cached_logits/cluster'/name)
+            result = subprocess.run(['/bin/bash', '-c', 'module() { :; }; source "$TEST_JOB"'],
+                env=env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout+'\n'+result.stderr)
+            self.assertIn('login_snapshot_sha256', result.stdout)
+            self.assertNotIn('command not found', result.stderr)
+        log = (self.root/'python.log').read_text()
+        self.assertIn('experiments.cached_logits cache', log)
+        self.assertIn('experiments.cached_logits verify-smoke', log)
+        self.assertIn('experiments.cached_logits benchmark', log)
 
-    def test_loads_git_before_guard_and_restores_it_after_purge(self):
-        result = self.run_guard()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('git test fixture', result.stdout)
-
-    def test_failed_module_load_stops_with_clear_error(self):
-        result = self.run_guard(fail_load=True)
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('Cannot load Git', result.stderr)
-
-    def test_failed_git_status_cannot_look_like_clean_checkout(self):
-        result = self.run_guard(fail_status=True)
-        self.assertEqual(result.returncode, 2)
-        self.assertIn('Cannot inspect disposable checkout', result.stderr)
-
-    def test_jobs_recheck_git_after_environment_setup(self):
-        for name, setup in (('cache.slurm', 'env_a100.sh'),
-                            ('optimize.slurm', '/bin/activate')):
-            script = (GUARD.parent / name).read_text()
-            self.assertGreater(script.index('\ncached_logit_require_git\n'),
-                               script.index(setup))
-            self.assertIn('[[ "$PWD" -ef "$GNBM_REPO_DIR" ]]', script)
+    def test_submit_captures_snapshot_before_sbatch_and_jobs_do_not_use_git(self):
+        submit = (CLUSTER/'submit.sh').read_text()
+        self.assertLess(submit.index('provenance.py" capture'), submit.index('\nsbatch --export'))
+        for name in ('guard.sh', 'cache.slurm', 'optimize.slurm'):
+            text = (CLUSTER/name).read_text()
+            self.assertNotIn('cached_logit_require_git', text)
+            self.assertNotIn('git -C', text)
+        self.assertIn('GNBM_CODE_PROVENANCE_FILE', submit)
 
 
 if __name__ == '__main__':

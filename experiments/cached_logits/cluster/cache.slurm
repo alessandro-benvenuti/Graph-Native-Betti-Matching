@@ -10,12 +10,16 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
 #SBATCH --time=01:00:00
-set -eo pipefail
+set -Eeo pipefail
+trap 'rc=$?; echo "Cached-logit job failed at line $LINENO (exit $rc)" >&2' ERR
+echo "Cached-logit phase: isolated path checks"
 source "$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test/experiments/cached_logits/cluster/guard.sh"
 source "$GNBM_REPO_DIR/cluster/jean_zay/env_a100.sh"
 set -u
-cached_logit_require_git
 [[ "$PWD" -ef "$GNBM_REPO_DIR" ]] || { echo 'Wrong disposable working directory' >&2; exit 2; }
+echo "Cached-logit phase: verify login-node code snapshot (no Git)"
+python "$GNBM_REPO_DIR/experiments/cached_logits/provenance.py" verify \
+  --repo "$GNBM_REPO_DIR" --manifest "$GNBM_CODE_PROVENANCE_FILE"
 export WANDB_MODE=disabled OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 python -c 'import torch; from experiments.cached_logits.core import Objective; from models import build_model; assert torch.cuda.is_available(); print(torch.__version__,torch.cuda.get_device_name(0))'
 case "${CACHED_LOGIT_STAGE:-smoke}" in

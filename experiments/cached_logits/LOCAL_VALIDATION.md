@@ -79,3 +79,17 @@ module loading and failed status. The complete focused suite now passes
 **58 tests**; all five experimental Bash files pass syntax checks. Real cluster
 verification remains pending resubmission by the user. Production environment
 scripts and resource requests were not changed.
+
+
+## Login-only Git provenance follow-up
+
+The user-provided log for job 1442109 showed that compute-node `git status`
+still failed. The new submission helper captures branch, clean status, commit
+and all tracked file hashes on the login node. Compute jobs perform hash
+verification with the Python standard library and never invoke Git. They
+reject changed files, added Python sources and missing/altered snapshots.
+Both actual batch scripts were exercised locally with Git absent from PATH;
+only expensive model/data commands were stubbed in that startup test. This is
+not a claim of successful cluster execution. Ten provenance/startup tests pass; the complete focused suite passes 64 tests.
+Submit using `bash experiments/cached_logits/cluster/submit.sh smoke`; direct
+`sbatch` calls without a captured snapshot now fail before model/data work.

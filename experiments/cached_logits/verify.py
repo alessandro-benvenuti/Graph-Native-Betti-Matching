@@ -78,16 +78,16 @@ def next_commands(root):
     benchmark_path=root/'cpu-benchmark/benchmark.json'
     if not (root/'main-cache/CACHE_COMPLETE.json').is_file():
         return ('Inspect smoke-opt/report.md, then submit the bounded 64-patch pool / 32-patch cache:\n'
-            'CACHED_LOGIT_STAGE=main sbatch --export=ALL --output="'+str(root)+'/logs/%x-%j.out" experiments/cached_logits/cluster/cache.slurm\n'
+            'bash experiments/cached_logits/cluster/submit.sh cache-main\n'
             'After that job completes, run next-commands again.')
     if not benchmark_path.is_file():
         return ('Main cache is ready. Inspect main-cache/selection.json for category availability and shortfall.\n'
-            'CACHED_LOGIT_CPU_STAGE=benchmark sbatch --export=ALL --output="'+str(root)+'/logs/%x-%j.out" experiments/cached_logits/cluster/optimize.slurm\n'
+            'bash experiments/cached_logits/cluster/submit.sh benchmark\n'
             'After the CPU benchmark completes, run next-commands again.')
     benchmark=json.loads(benchmark_path.read_text())
     estimate=benchmark.get('projected_32_patch_200_step_seconds')
     if not benchmark['complete'] or estimate is None or estimate>3300:
         return 'CPU benchmark exceeds the bounded main request or is incomplete. Inspect benchmark.json; main is not authorized automatically. No resource/sample/step increases were made.'
     return (f'Measured CPU projection: {estimate:.1f} seconds including 50% headroom.\n'
-        'CACHED_LOGIT_CPU_STAGE=main sbatch --export=ALL --output="'+str(root)+'/logs/%x-%j.out" experiments/cached_logits/cluster/optimize.slurm\n'
-        'For an interrupted, stopped job use CACHED_LOGIT_CPU_STAGE=resume instead; inspect any stale RUNNING.lock first.')
+        'bash experiments/cached_logits/cluster/submit.sh main\n'
+        'For an interrupted, stopped job use submit.sh resume instead; inspect any stale RUNNING.lock first.')

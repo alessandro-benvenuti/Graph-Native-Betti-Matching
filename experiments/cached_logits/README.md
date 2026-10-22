@@ -63,9 +63,7 @@ fi
 cd "$GNBM_REPO_DIR"
 bash experiments/cached_logits/cluster/prepare_checkout.sh
 mkdir -p "$CACHED_LOGIT_ROOT/logs"
-CACHED_LOGIT_STAGE=smoke sbatch --export=ALL \
-  --output="$CACHED_LOGIT_ROOT/logs/%x-%j.out" \
-  experiments/cached_logits/cluster/cache.slurm
+bash experiments/cached_logits/cluster/submit.sh smoke
 ```
 
 `prepare_checkout.sh` checks the origin URL, branch, clean working tree,
@@ -79,7 +77,8 @@ bash "$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test/experiments/c
 
 Smoke requests **one A100, one process, eight CPUs, one hour**, no DDP. It sets
 `GNBM_REPO_DIR` before sourcing `env_a100.sh`, verifies `$PWD`, checks imports/CUDA,
-loads the Git module when missing (including after environment purges), selects exactly two training IDs, caches them, closes the network stage, runs a
+verifies the login-node code snapshot without Git, selects exactly two training
+IDs, caches them, closes the network stage, runs a
 20-step CPU optimization, and verifies all arm starts against cache step-zero
 metrics. No validation/test samples or training epochs run. A timeout/failure
 cannot write the final success marker. Each output directory must be new.
@@ -216,8 +215,8 @@ change. All correctness statements are relative to GT annotation quality.
 
 ## Resumption and reporting
 
-For an interrupted **stopped** main job, use the `next-commands` output with
-`CACHED_LOGIT_CPU_STAGE=resume`. States include Adam moments, update number,
+For an interrupted **stopped** main job, use
+`bash experiments/cached_logits/cluster/submit.sh resume` on the login node. States include Adam moments, update number,
 logits and past observations. Resume rejects changed cache, configuration,
 optimizer settings, threads or code. The per-invocation runtime bound can change.
 If a scheduler kill leaves `main-opt/RUNNING.lock`, first verify that its job is
@@ -244,7 +243,7 @@ by itself locate a training limitation.
 ## Created directories and retention
 
 Tracked experiment code is only in `experiments/` and
-`tests/test_cached_logit_betti.py`. Local generated artifacts are under the
+`tests/test_cached_logit_betti.py` and `tests/test_cached_logit_cluster_env.py`. Local generated artifacts are under the
 ignored `artifacts/cached-logit-local-smoke/`: cache, run, report-v2, benchmark,
 verification JSON and all per-arm states. A clean-commit replay is retained in `final-cache/` and `final-run/`. See `LOCAL_VALIDATION.md` for the
 local artifact inventory. Temporary tests use auto-cleaned system temp folders.
@@ -256,6 +255,7 @@ Expected Jean Zay directories, created only by the commands above:
   `matplotlib/`, `smoke-cache/`, `smoke-opt/`, `main-cache/`,
   `cpu-benchmark/`, `main-opt/`, and optional `main-report-copy/`.
 - Root manifest files: `smoke-manifest.json`, `main-pool-manifest.json`.
+- Immutable submission snapshots in the disposable clone's `.git/cached-logit-provenance/`.
 - Existing environment setup may ensure shared tool/extension/temp caches exist;
   it does not alter campaign outputs. W&B is disabled.
 
@@ -270,16 +270,31 @@ No automatic merge or deletion. Retain caches/results/provenance before removing
 the disposable clone or branch. Never merge into `features-gnbm-nodes-edges` as
 part of this diagnostic.
 
-## Smoke failure before caching: Git missing
+## Restart after a startup failure
 
-Job 1440813 stopped in the clone guard because compute-node PATH lacked Git.
-The experimental setup now loads `${CACHED_LOGIT_GIT_MODULE:-git}` when required,
-then checks again after the A100/CPU environment's module purge. Failed Git status
-commands cannot pass the clean-checkout check. Production environment scripts
-are unchanged. If the site requires an explicit Git module version, export
-`CACHED_LOGIT_GIT_MODULE` before submission; the job reports module-load failures.
-The working-directory check compares directory identity to allow filesystem aliases.
+Both reported jobs stopped before manifest/cache creation. Update the disposable
+clone and submit through the login-node helper:
 
-Update only the disposable checkout, then resubmit the same smoke command from
-above. That failed job never reached manifest/cache creation, so its original
-smoke paths can be reused. Keep its log; do not delete or overwrite any output.
+```bash
+cd "$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test"
+bash experiments/cached_logits/cluster/prepare_checkout.sh
+bash experiments/cached_logits/cluster/submit.sh smoke
+```
+
+Use `submit.sh` rather than calling `sbatch` directly. The login-node helper
+checks the exact clean branch, independent clone, origin and commit with Git.
+It captures SHA256 for all tracked files in an immutable JSON snapshot under
+`.git/cached-logit-provenance/` and exports its path to the job. It uses only
+Python's standard library before submission, without loading the model or data.
+The batch job verifies every recorded file and rejects added Python sources;
+its Python provenance calls use this snapshot rather than Git. No Git commands
+or Git modules are used on compute nodes. Snapshot verification also runs before
+CUDA/model imports and prints the verified commit. Code changed while queued
+causes a clear failure; snapshots and results are never silently overwritten.
+
+Git is still needed on the login node for `prepare_checkout.sh`, `submit.sh`,
+and unsnapshotted local CLI commands. If absent there, the login-only helper
+can load `${CACHED_LOGIT_GIT_MODULE:-git}`. Login-side Git failures now include
+the exit code and original stderr. Production environment scripts and resource
+requests are unchanged. Preserve previous logs; no output cleanup is needed
+for the two failures reported so far.

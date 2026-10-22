@@ -15,6 +15,8 @@ import yaml
 
 from .core import canonical, edge_tensor, fingerprint, finite, sha256, validate_record, metrics, mode_view
 
+from .provenance import code_provenance
+
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_RUN = Path('/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-boundary-gamma-sweep-500-a100/finetune_boundary_mri500_node_edge_focal_g05_seed364505')
 DATASET = Path('/lustre/fsn1/projects/rech/vnc/upz73jr/datasets/syntheticMRI/new_patches_boundary')
@@ -48,10 +50,6 @@ def load_torch(path):
     return torch.load(str(path), map_location='cpu', weights_only=False)
 
 
-def code_provenance():
-    def git(*args): return subprocess.check_output(['git', '-C', str(ROOT), *args], text=True).strip()
-    return dict(commit=git('rev-parse','HEAD'), branch=git('branch','--show-current'),
-                dirty=git('status','--porcelain','--untracked-files=normal'))
 
 
 def validate_source_config(config):
