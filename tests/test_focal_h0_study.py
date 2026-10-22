@@ -21,7 +21,7 @@ from configs import load_config
 from scripts.optimize_focal_h0 import (
     CampaignError, H1_ABLATION_WEIGHTS, ablation_prepare, ablation_reference, atomic_json, concrete_config, dominates,
     evaluate_trial, freeze, initialize_study, load_settings, prepare,
-    promote, scientific_reference, stage_reference, state, study_for,
+    manual_stop_path, promote, prune_trials, result_path, scientific_reference, stage_reference, state, study_for,
     single_node_launcher, smoke_config, summary, training_command, trial_lock, worker,
 )
 
@@ -358,6 +358,125 @@ class FocalH0Tests(unittest.TestCase):
         self.assertIn("--array=0-1", submitted[2])
         self.assertIn("--gres=gpu:4", submitted[2])
         self.assertIn("--dependency=afterany:9003", submitted[3])
+        stopped = subprocess.run(
+            ["bash", command[1], "prune", "0", "Manual stop with an explicit reason"],
+            env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(stopped.returncode, 0, stopped.stdout + stopped.stderr)
+        self.assertIn("already COMPLETE", stopped.stdout)
+        self.assertEqual(len((self.root / "submissions.jsonl").read_text().splitlines()), 4)
+
+    def _allocate_h0_trials(self, count):
+        study = study_for(self.output, "h0")
+        trials = []
+        for _ in range(count):
+            trial = study.ask()
+            trial.suggest_float("h0_weight", *self.settings["h0_range"], log=True)
+            trials.append(trial)
+        return study, trials
+
+    def _complete_h0_trial(self, study, trial, tell=True):
+        reference = stage_reference(self.output, 5)
+        row = {"family": "h0", "trial": trial.number, "endpoint": 5,
+               "parameters": trial.params, "aggregation": reference,
+               "control": reference["metrics"], "metrics": reference["metrics"],
+               "deltas": {key: 0. for key in reference["metrics"]}}
+        path = result_path(self.output, "h0", 5, trial.number)
+        atomic_json(path, row)
+        if tell:
+            study.tell(trial, values=[reference["metrics"][key] for key in (
+                "node_mAP", "edge_mAP", "beta0_absolute_error", "beta1_absolute_error",
+            )])
+        return path
+
+    def test_manual_pruning_is_terminal_idempotent_and_preserves_files(self):
+        self.prepared()
+        study, trials = self._allocate_h0_trials(4)
+        for trial in trials[:2]:
+            self._complete_h0_trial(study, trial)
+        h1 = study_for(self.output, "h1")
+        h1.enqueue_trial({"h0_weight": .03, "h1_weight": .001})
+        retained = [self.output / name for name in (
+            "campaign.json", "base-config.json", "initialization/epoch_0500.pt", "studies/h1/study.journal",
+        )]
+        for trial in trials[2:]:
+            run = self.output / f"runs/h0/trial_{trial.number:04d}"
+            checkpoint = run / "models/latest_checkpoint.pt"
+            checkpoint.parent.mkdir(parents=True)
+            checkpoint.write_bytes(b"retained checkpoint")
+            history = run / "validation-metrics.jsonl"
+            history.write_text('{"epoch":3}\n{"epoch":4}\n')
+            retained += [checkpoint, history]
+        before = {path: path.read_bytes() for path in retained}
+        self.args.trials, self.args.reason = "2,3", "H0-only trade-off; switching to the H1 ablation"
+        prune_trials(self.args)
+        self.assertEqual([trial.state.name for trial in study.trials], ["COMPLETE", "COMPLETE", "PRUNED", "PRUNED"])
+        for trial in study.trials[2:]:
+            audit = json.loads(manual_stop_path(self.output, "h0", trial.number).read_text())
+            self.assertEqual(audit["latest_validation_epoch"], 4)
+            self.assertFalse(audit["endpoint_comparison_eligible"])
+            self.assertTrue(audit["checkpoint_retained"])
+            self.assertEqual(audit["reason"], self.args.reason)
+            self.assertEqual(trial.user_attrs["manual_stop"], audit)
+        prune_trials(self.args)
+        with patch("scripts.optimize_focal_h0.run_command", side_effect=AssertionError("Pruned trials must never resume")):
+            worker(self.args)
+        self.assertEqual(len(study.trials), 4)
+        for path in retained:
+            self.assertEqual(path.read_bytes(), before[path], str(path))
+        summary(self.args)
+        with (self.output / "summaries/h0/epoch_0005.csv").open() as handle:
+            self.assertEqual({row["trial"] for row in csv.DictReader(handle)}, {"0", "1"})
+        self.assertFalse((self.output / "runs/h0/trial_0002/training-complete").exists())
+
+    def test_manual_pruning_refuses_any_live_worker_before_mutating_any_trial(self):
+        self.prepared()
+        study, _ = self._allocate_h0_trials(2)
+        self.args.trials, self.args.reason = "0,1", "Explicit manual stop"
+        with trial_lock(self.output, "h0", 1) as acquired:
+            self.assertTrue(acquired)
+            with self.assertRaisesRegex(CampaignError, "still locked"):
+                prune_trials(self.args)
+        self.assertTrue(all(trial.state.name == "RUNNING" for trial in study.trials))
+        self.assertFalse(manual_stop_path(self.output, "h0", 0).exists())
+        self.assertFalse(any(trial.user_attrs for trial in study.trials))
+        for numbers in ("0,999", "0,0", "-1", "bad"):
+            self.args.trials = numbers
+            with self.subTest(numbers=numbers), self.assertRaises(CampaignError):
+                prune_trials(self.args)
+        self.args.trials, self.args.reason = "0", ""
+        with self.assertRaisesRegex(CampaignError, "reason"):
+            prune_trials(self.args)
+
+    def test_manual_pruning_recovers_an_already_written_endpoint_as_complete(self):
+        self.prepared()
+        study, trials = self._allocate_h0_trials(1)
+        path = self._complete_h0_trial(study, trials[0], tell=False)
+        retained = path.read_bytes()
+        self.args.trials, self.args.reason = "0", "Manual cancellation raced endpoint completion"
+        prune_trials(self.args)
+        self.assertEqual(study.trials[0].state.name, "COMPLETE")
+        self.assertEqual(path.read_bytes(), retained)
+        self.assertFalse(manual_stop_path(self.output, "h0", 0).exists())
+        prune_trials(self.args)
+        self.assertEqual(study.trials[0].state.name, "COMPLETE")
+
+    def test_manual_stop_record_blocks_resume_if_finalization_is_interrupted(self):
+        import optuna
+        self.settings.update(trials=1, h0_anchors=[.003], promotion_counts=[1, 1])
+        self.settings_path.write_text(yaml.safe_dump(self.settings))
+        self.prepared()
+        study, _ = self._allocate_h0_trials(1)
+        self.args.trials, self.args.reason = "0", "Explicit manual stop"
+        with patch.object(optuna.study.Study, "tell", side_effect=RuntimeError("interrupted finalization")):
+            with self.assertRaisesRegex(RuntimeError, "interrupted finalization"):
+                prune_trials(self.args)
+        self.assertEqual(study.trials[0].state.name, "RUNNING")
+        with patch("scripts.optimize_focal_h0.run_command", side_effect=AssertionError("Stop marker must block resume")):
+            worker(self.args)
+        prune_trials(self.args)
+        self.assertEqual(study.trials[0].state.name, "PRUNED")
+        self.assertEqual(len(study.trials), 1)
 
     def test_h1_prepare_from_initial_budget_is_frozen_and_preserves_h0(self):
         self.settings.update(h0_anchors=[.03])

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import copy
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import csv
 import fcntl
 import json
@@ -504,6 +504,92 @@ def trial_lock(output, family, number):
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+def manual_stop_path(output, family, number):
+    return output / f"runs/{family}/trial_{number:04d}/manual-stop.json"
+
+
+def prune_trials(args):
+    """Finalize explicitly stopped screening trials; never kill jobs or delete data."""
+    import optuna
+    reason = (args.reason or "").strip()
+    if not reason:
+        raise CampaignError("Manual pruning requires a nonempty --reason")
+    try:
+        numbers = [int(part) for part in (args.trials or "").split(",")]
+    except ValueError as error:
+        raise CampaignError("--trials must contain comma-separated trial numbers") from error
+    if any(n < 0 for n in numbers) or len(set(numbers)) != len(numbers):
+        raise CampaignError("Trial numbers must be distinct and nonnegative")
+    output, family = args.output, args.family
+    endpoint = state(output)["settings"]["endpoints"][0]
+    with AllocationLock(output / ".locks/ask.lock"), ExitStack() as locks:
+        study = study_for(output, family)
+        trials = {trial.number: trial for trial in study.trials}
+        if any(number not in trials for number in numbers):
+            raise CampaignError("Requested trial does not exist; nothing was pruned")
+        # Acquire every target before changing any trial. A live worker keeps
+        # this lock throughout training, so scancel alone cannot race this step.
+        for number in sorted(numbers):
+            if not locks.enter_context(trial_lock(output, family, number)):
+                raise CampaignError(f"Trial {number} is still locked by a worker; cancel its Slurm job and wait, then retry")
+        actions = []
+        for number in numbers:
+            trial = trials[number]
+            if trial.state.is_finished():
+                actions.append((trial, None, None))
+                continue
+            target = result_path(output, family, endpoint, number)
+            if target.exists():
+                # The worker may have finished the endpoint just before scancel,
+                # but been interrupted between saving its result and study.tell.
+                row = json.loads(target.read_text())
+                if (row["family"] != family or row["trial"] != number
+                        or row["endpoint"] != endpoint or row["parameters"] != trial.params
+                        or row["aggregation"]["contributing_epochs"] != stage_reference(output, endpoint)["contributing_epochs"]):
+                    raise CampaignError(f"Trial {number} has an incompatible completed result; refusing to overwrite it")
+                values = [float(row["metrics"][key]) for key, _ in OBJECTIVES]
+                if not all(math.isfinite(value) for value in values):
+                    raise CampaignError(f"Trial {number} has non-finite endpoint results")
+                actions.append((trial, values, None))
+                continue
+            from scripts.optimize_node_edge_betti import JsonlMonitor
+            run = output / f"runs/{family}/trial_{number:04d}"
+            records = JsonlMonitor(run / "validation-metrics.jsonl").read_new()
+            path = manual_stop_path(output, family, number)
+            if path.exists():
+                audit = json.loads(path.read_text())
+                if (audit["family"] != family or audit["trial"] != number
+                        or audit["requested_endpoint"] != endpoint or audit["state"] != "PRUNED"):
+                    raise CampaignError("Existing manual-stop record has incompatible trial identity")
+                if audit["reason"] != reason:
+                    raise CampaignError("Refusing to change an existing manual-stop reason")
+            else:
+                audit = {"schema_version": 1, "family": family, "trial": number,
+                         "state": "PRUNED", "previous_state": trial.state.name,
+                         "reason": reason, "stopped_at": utc_now(),
+                         "latest_validation_epoch": max((int(r["epoch"]) for r in records), default=None),
+                         "parameters": trial.params or trial.system_attrs.get("fixed_params", {}),
+                         "requested_endpoint": endpoint, "endpoint_comparison_eligible": False,
+                         "slurm_job_id": trial.user_attrs.get("slurm_job_id"),
+                         "checkpoint_retained": (run / "models/latest_checkpoint.pt").exists(),
+                         "files_deleted": False}
+            actions.append((trial, None, audit))
+        for trial, values, audit in actions:
+            if trial.state.is_finished():
+                print(f"Trial {trial.number}: already {trial.state.name}; retained unchanged")
+            elif values is not None:
+                live = optuna.trial.Trial(study, trial._trial_id)
+                live.set_user_attr("endpoint", endpoint)
+                study.tell(trial.number, values=values)
+                print(f"Trial {trial.number}: endpoint result already existed; finalized COMPLETE, not pruned")
+            else:
+                freeze(manual_stop_path(output, family, trial.number), audit)
+                live = optuna.trial.Trial(study, trial._trial_id)
+                live.set_user_attr("manual_stop", audit)
+                study.tell(trial.number, state=optuna.trial.TrialState.PRUNED)
+                print(f"Trial {trial.number}: PRUNED at last validation {audit['latest_validation_epoch']}; files retained")
+
+
 def worker(args):
     import optuna
     saved = state(args.output)
@@ -541,6 +627,10 @@ def worker(args):
                 if item.state.name == "RUNNING":
                     if not args.resume:
                         continue
+                    if manual_stop_path(args.output, family, item.number).exists():
+                        # A durable stop record also prevents a restart if the
+                        # manual finalizer was interrupted before study.tell.
+                        continue
                     context = trial_lock(args.output, family, item.number)
                     if context.__enter__():
                         chosen = (optuna.trial.Trial(study, item._trial_id), context)
@@ -551,6 +641,11 @@ def worker(args):
                 if not any(t.state.name == "WAITING" for t in trials) and len(trials) >= total:
                     break
                 trial = study.ask()
+                stop_path = manual_stop_path(args.output, family, trial.number)
+                if stop_path.exists():
+                    trial.set_user_attr("manual_stop", json.loads(stop_path.read_text()))
+                    study.tell(trial, state=optuna.trial.TrialState.PRUNED)
+                    continue
                 if family == "h0":
                     trial.suggest_float("h0_weight", *settings["h0_range"], log=True)
                 else:
@@ -651,12 +746,14 @@ def summary(args):
         for path in sorted(directory.glob("trial_*.incomplete.json")):
             print("Excluded incomplete endpoint:", json.loads(path.read_text()))
     study = study_for(args.output, args.family)
-    print("Study states:", {name: sum(t.state.name == name for t in study.trials) for name in ("WAITING", "RUNNING", "COMPLETE", "FAIL")})
+    print("Study states:", {name: sum(t.state.name == name for t in study.trials) for name in ("WAITING", "RUNNING", "COMPLETE", "PRUNED", "FAIL")})
     for trial in study.trials:
         run = args.output / f"runs/{args.family}/trial_{trial.number:04d}"
         from scripts.optimize_node_edge_betti import JsonlMonitor
         records = JsonlMonitor(run / "validation-metrics.jsonl").read_new()
         print(f"trial={trial.number:04d} state={trial.state.name} latest_validation={records[-1]['epoch'] if records else None} checkpoint={(run / 'models/latest_checkpoint.pt').exists()} resumes={trial.user_attrs.get('resume_count', 0)} job={trial.user_attrs.get('slurm_job_id')} failure={trial.user_attrs.get('failure_reason', '-')}")
+        if trial.user_attrs.get("manual_stop"):
+            print("  manual_stop=" + trial.user_attrs["manual_stop"]["reason"])
 
 
 def gradient_probe(output):
@@ -767,7 +864,7 @@ def gpu_smoke(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "worker", "promote", "summary", "h1-prepare", "gpu-smoke"))
+    parser.add_argument("action", choices=("prepare", "worker", "promote", "summary", "h1-prepare", "gpu-smoke", "prune"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--settings", type=Path, default=ROOT / "configs/experiments/focal_h0_study.yaml")
     parser.add_argument("--source-run", type=Path)
@@ -777,6 +874,7 @@ def main():
     parser.add_argument("--trials", help="Comma-separated manually selected trial IDs")
     parser.add_argument("--parent", type=int)
     parser.add_argument("--h1-weights", help="Comma-separated H1 grid, frozen separately from the H0 campaign")
+    parser.add_argument("--reason", help="Audit reason for manually pruning stopped screening trials")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--poll-interval", type=float, default=.5)
     parser.add_argument("--train-command", nargs=argparse.REMAINDER)
@@ -797,6 +895,8 @@ def main():
             if args.endpoint is None or not args.trials:
                 raise CampaignError("promote requires --endpoint and --trials")
             promote(args)
+        elif args.action == "prune":
+            prune_trials(args)
         elif args.action == "h1-prepare":
             if args.parent is None:
                 raise CampaignError("h1-prepare requires --parent")

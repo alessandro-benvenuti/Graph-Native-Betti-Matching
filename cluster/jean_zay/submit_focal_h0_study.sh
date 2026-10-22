@@ -2,7 +2,7 @@
 # Prepare a new H0 study; never submit or modify the existing focal control.
 set -euo pipefail
 usage() {
-  echo "Usage: $0 prepare|test|smoke|status|summary|h1-summary | screen|resume|h1-screen [WORKERS] | promote ENDPOINT IDS | extend ENDPOINT [WORKERS] | h1-prepare PARENT [H1_WEIGHTS]" >&2
+  echo "Usage: $0 prepare|test|smoke|status|summary|h1-summary | screen|resume|h1-screen [WORKERS] | promote ENDPOINT IDS | extend ENDPOINT [WORKERS] | h1-prepare PARENT [H1_WEIGHTS] | prune IDS REASON" >&2
   exit 2
 }
 [[ $# -ge 1 && $# -le 3 ]] || usage
@@ -35,6 +35,10 @@ case "$action" in
     [[ $# == 3 ]] || usage
     exec "$python_bin" -m scripts.optimize_focal_h0 promote --output "$GNBM_OUTPUT_DIR" \
       --family "$GNBM_H0_FAMILY" --endpoint "$2" --trials "$3" ;;
+  prune)
+    [[ $# == 3 ]] || usage
+    exec "$python_bin" -m scripts.optimize_focal_h0 prune --output "$GNBM_OUTPUT_DIR" \
+      --family "$GNBM_H0_FAMILY" --trials "$2" --reason "$3" ;;
   h1-prepare)
     [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || usage
     ablation_weights=()

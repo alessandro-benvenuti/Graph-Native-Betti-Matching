@@ -179,6 +179,37 @@ Later-stage workers use trial locks and existing checkpoints. Repeat the same
 `extend` command after that stage's chain ends if more time is required. Do not
 update the live checkout while a chain still needs it.
 
+## Clean manual stopping of screening trials
+
+Cancel only the selected campaign's queued continuation jobs first, then its
+active Slurm tasks. Wait until they leave the queue before finalizing the trials;
+ordinary interruption deliberately leaves Optuna trials RUNNING for resumption.
+For the manually stopped H0 trials 6 and 7:
+
+```bash
+GNBM_H0_FAMILY=h0 bash cluster/jean_zay/submit_focal_h0_study.sh prune 6,7 \
+  "Manual stop: H0-only connectivity/cycle trade-off; proceeding to the H1 ablation"
+bash cluster/jean_zay/submit_focal_h0_study.sh status
+```
+
+The command does **not** cancel Slurm jobs itself. It requires an explicit reason,
+checks every target worker lock before changing any trial, and marks stopped
+screening trials PRUNED. Each trial retains its checkpoint/history and receives
+`manual-stop.json` plus matching Optuna user attributes, including the last
+validation epoch and exclusion from endpoint comparisons. No checkpoint is
+loaded or deleted, and no fake training-complete marker is created. Partial
+metrics are not assigned epoch-525 objective values. Existing completed/failed
+trials remain unchanged; a valid endpoint result saved just before cancellation
+is recovered as COMPLETE rather than discarded.
+
+Repeated finalization is safe. A durable manual-stop record blocks resumption
+even if finalization is interrupted before Optuna records PRUNED. With all eight
+H0 trials allocated, terminal pruning does not allocate replacement trials.
+Reports explicitly count PRUNED trials: six completed plus two manually pruned is
+not an eight-completed-trial experiment. The focal control and H1 journal are
+untouched. Slurm accounting and existing W&B offline histories are not rewritten
+or erased; their cancellation/failure exit status is distinct from Optuna PRUNED.
+
 ## H1 ablation from a completed epoch-525 H0 result
 
 The selected H0-only comparator is **trial 3, H0 weight 0.03**. It only needs to
