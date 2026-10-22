@@ -1,6 +1,7 @@
 """CPU study lifecycle tests; fake training never substitutes for the GPU smoke."""
 import argparse
 import copy
+import csv
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,7 @@ import yaml
 
 from configs import load_config
 from scripts.optimize_focal_h0 import (
-    CampaignError, ablation_prepare, atomic_json, concrete_config, dominates,
+    CampaignError, H1_ABLATION_WEIGHTS, ablation_prepare, ablation_reference, atomic_json, concrete_config, dominates,
     evaluate_trial, freeze, initialize_study, load_settings, prepare,
     promote, scientific_reference, stage_reference, state, study_for,
     single_node_launcher, smoke_config, summary, training_command, trial_lock, worker,
@@ -173,6 +174,37 @@ class FocalH0Tests(unittest.TestCase):
                 losses["total"].backward()
                 self.assertTrue(torch.isfinite(tokens.grad).all())
 
+    def test_all_four_h1_weights_have_real_finite_sampled_backward(self):
+        from tests.test_graph_losses import _config, _batch, CountingRelationHead
+        from models.matcher import HungarianMatcher
+        from training.losses import GraphCriterion
+        self.prepared()
+        for weight in H1_ABLATION_WEIGHTS:
+            for validation in (False, True):
+                with self.subTest(h1_weight=weight, validation=validation):
+                    config = _config()
+                    config["topology"] = concrete_config(
+                        self.output, "h1", 0, {"h0_weight": .03, "h1_weight": weight}, 5,
+                    )["topology"]
+                    for name in ("betti_h0", "betti_h1"):
+                        config["topology"][name].update(activation_epoch=0, ramp_epochs=0)
+                    relation = CountingRelationHead()
+                    criterion = GraphCriterion(config, HungarianMatcher(2., 5.), relation, validation=validation)
+                    criterion.set_training_progress(3, 0.)
+                    tokens, predictions, targets = _batch()
+                    tokens = tokens.detach().repeat(2, 1, 1).requires_grad_()
+                    predictions = {key: value.detach().repeat(2, 1, 1).requires_grad_()
+                                   for key, value in predictions.items()}
+                    targets = {key: value * 2 for key, value in targets.items()}
+                    losses = criterion(tokens, predictions, targets)
+                    self.assertEqual(float(losses["topology_betti_h0_selected_graphs"]), 2.)
+                    self.assertEqual(float(losses["topology_betti_h1_selected_graphs"]), 2. if validation else 1.)
+                    self.assertGreater(float(losses["betti_h1"].detach()), 0.)
+                    (losses["betti_h0_weighted"] + losses["betti_h1_weighted"]).backward()
+                    self.assertTrue(torch.isfinite(tokens.grad).all())
+                    self.assertIsNotNone(relation.linear.weight.grad)
+                    self.assertTrue(torch.isfinite(relation.linear.weight.grad).all())
+
     def test_scheduler_reset_only_at_initial_branch(self):
         self.prepared()
         first = training_command(self.output, Path("config"), "run", Path("source"), True)
@@ -308,6 +340,143 @@ class FocalH0Tests(unittest.TestCase):
         self.assertIn("--dependency=afterany:9001", submitted[1])
         self.assertIn("--array=0-1", submitted[0])
         self.assertIn("--gres=gpu:4", submitted[0])
+        self.assertIn("--job-name=gnbm-focal-h0", submitted[0])
+        h1_command = ["bash", command[1], "h1-screen", "2"]
+        failed = subprocess.run(h1_command, env=env, capture_output=True, text=True)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("h1-prepare", failed.stderr)
+        worker(self.args)
+        prepared = subprocess.run(
+            ["bash", command[1], "h1-prepare", "0", "0.001,0.003,0.01,0.03"],
+            env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
+        subprocess.run(h1_command, env=env, check=True, capture_output=True, text=True)
+        submitted = [json.loads(line) for line in (self.root / "submissions.jsonl").read_text().splitlines()]
+        self.assertEqual(len(submitted), 4)
+        self.assertIn("--job-name=gnbm-focal-h1", submitted[2])
+        self.assertIn("--array=0-1", submitted[2])
+        self.assertIn("--gres=gpu:4", submitted[2])
+        self.assertIn("--dependency=afterany:9003", submitted[3])
+
+    def test_h1_prepare_from_initial_budget_is_frozen_and_preserves_h0(self):
+        self.settings.update(h0_anchors=[.03])
+        self.settings_path.write_text(yaml.safe_dump(self.settings))
+        self.prepared()
+        worker(self.args)
+        untouched = [self.output / name for name in (
+            "campaign.json", "base-config.json", "dataset-manifest.json", "initialization/epoch_0500.pt",
+            "studies/h0/study.journal", "runs/h0/trial_0000/models/latest_checkpoint.pt",
+        )]
+        before = {path: path.read_bytes() for path in untouched}
+        self.assertFalse((self.output / "results/h0/epoch_0008/trial_0000.json").exists())
+        ablation_prepare(self.output, 0)
+        plan_path = self.output / "h1-plan.json"
+        frozen = plan_path.read_bytes()
+        plan = json.loads(frozen)
+        self.assertEqual(plan["h0_weight"], .03)
+        self.assertEqual(plan["h1_weights"], list(H1_ABLATION_WEIGHTS))
+        self.assertEqual(plan["h0_reference"]["endpoint"], 5)
+        self.assertEqual(plan["initial_checkpoint"], state(self.output)["checkpoint"])
+        ablation_prepare(self.output, 0)
+        self.assertEqual(plan_path.read_bytes(), frozen)
+        self.assertEqual(len(study_for(self.output, "h1").trials), 4)
+        with self.assertRaisesRegex(CampaignError, "frozen H1"):
+            ablation_prepare(self.output, 0, [.001, .01])
+        self.args.family = "h1"
+        worker(self.args)
+        trials = study_for(self.output, "h1").trials
+        self.assertEqual(len(trials), 4)
+        self.assertTrue(all(t.state.name == "COMPLETE" for t in trials))
+        for trial in trials:
+            self.assertEqual(trial.params["h0_weight"], .03)
+            provenance = json.loads((self.output / f"runs/h1/trial_{trial.number:04d}/resume-provenance.json").read_text())
+            self.assertEqual(Path(provenance["checkpoint"]).resolve(), Path(state(self.output)["checkpoint"]).resolve())
+            self.assertEqual(provenance["checkpoint_epoch"], 2)
+            self.assertTrue(provenance["optimizer_restored"])
+            self.assertTrue(provenance["scheduler_reset"])
+        for path in untouched:
+            self.assertEqual(path.read_bytes(), before[path], str(path))
+        summary(self.args)
+        with (self.output / "summaries/h1/epoch_0005.csv").open() as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 4)
+        for row in rows:
+            self.assertEqual(row["h0_reference_trial"], "0")
+            self.assertAlmostEqual(float(row["delta_vs_h0_beta0_absolute_error"]), 0.)
+            self.assertAlmostEqual(float(row["delta_vs_h0_beta1_absolute_error"]), -2 * float(row["h1_weight"]))
+        # Never compare later H1 results against an earlier H0 endpoint.
+        self.assertIsNone(ablation_reference(self.output, 8))
+
+    def test_h1_rejects_unfinished_parent_and_invalid_weights(self):
+        self.prepared()
+        with self.assertRaisesRegex(CampaignError, "completed epoch 5"):
+            ablation_prepare(self.output, 0)
+        self.assertFalse((self.output / "h1-plan.json").exists())
+        worker(self.args)
+        for weights in ([], [.001, .001], [-.1], [float("nan")], [float("inf")], ["bad"]):
+            with self.subTest(weights=weights), self.assertRaises(CampaignError):
+                ablation_prepare(self.output, 0, weights)
+        self.assertFalse((self.output / "h1-plan.json").exists())
+
+    def test_h1_prepare_repairs_partially_enqueued_grid(self):
+        import optuna
+        self.prepared()
+        worker(self.args)
+        enqueue = optuna.study.Study.enqueue_trial
+        calls = 0
+        def interrupted(study, parameters):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("interrupted enqueue")
+            return enqueue(study, parameters)
+        with patch.object(optuna.study.Study, "enqueue_trial", interrupted):
+            with self.assertRaisesRegex(RuntimeError, "interrupted enqueue"):
+                ablation_prepare(self.output, 0)
+        self.assertEqual(len(study_for(self.output, "h1").trials), 1)
+        ablation_prepare(self.output, 0)
+        self.assertEqual(len(study_for(self.output, "h1").trials), 4)
+
+    def test_two_h1_workers_allocate_only_the_four_frozen_arms(self):
+        self.prepared()
+        worker(self.args)
+        ablation_prepare(self.output, 0)
+        h0_journal = self.output / "studies/h0/study.journal"
+        original = h0_journal.read_bytes()
+        command = [sys.executable, str(ROOT / "scripts/optimize_focal_h0.py"), "worker",
+                   "--output", str(self.output), "--family", "h1", "--resume", "--poll-interval", ".02",
+                   "--train-command", *self.args.train_command]
+        with (self.root / "parallel-h1.log").open("w") as log:
+            processes = [subprocess.Popen(
+                command, env={**os.environ, "SLURM_ARRAY_TASK_ID": str(index), "FAKE_TRAIN_SLEEP_PER_EPOCH": ".1"},
+                stdout=log, stderr=log,
+            ) for index in range(2)]
+            try:
+                for process in processes:
+                    self.assertEqual(process.wait(timeout=60), 0, (self.root / "parallel-h1.log").read_text())
+            finally:
+                for process in processes:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+        trials = study_for(self.output, "h1").trials
+        self.assertEqual(len(trials), 4)
+        self.assertTrue(all(trial.state.name == "COMPLETE" for trial in trials))
+        self.assertEqual({trial.params["h1_weight"] for trial in trials}, set(H1_ABLATION_WEIGHTS))
+        self.assertEqual(h0_journal.read_bytes(), original)
+
+    def test_legacy_h1_plan_keeps_its_own_grid(self):
+        self.prepared()
+        worker(self.args)
+        atomic_json(self.output / "h1-plan.json", {
+            "parent_trial": 0, "h0_weight": .001,
+            "h1_weights": [0., .001, .003], "endpoint": 5,
+        })
+        ablation_prepare(self.output, 0)
+        self.args.family = "h1"
+        worker(self.args)
+        self.assertEqual(len(study_for(self.output, "h1").trials), 3)
 
     def test_full_lifecycle_promotions_and_optional_h1_are_separate(self):
         self.prepared()
@@ -333,8 +502,8 @@ class FocalH0Tests(unittest.TestCase):
         self.args.family, self.args.endpoint = "h1", None
         worker(self.args)
         h1 = study_for(self.output, "h1")
-        self.assertEqual(len(h1.trials), 3)
-        self.assertEqual({t.params["h1_weight"] for t in h1.trials}, {0., .001, .003})
+        self.assertEqual(len(h1.trials), 4)
+        self.assertEqual({t.params["h1_weight"] for t in h1.trials}, set(H1_ABLATION_WEIGHTS))
         self.assertEqual(len(study_for(self.output, "h0").trials), 4)
 
     def test_real_signal_interruption_resumes_same_trial(self):

@@ -31,6 +31,10 @@ Scientific settings are in `configs/experiments/focal_h0_study.yaml`:
 - Objectives: maximize node/edge mAP, minimize absolute beta0/beta1 errors.
   No scalar score, hard degradation threshold, or automatic "best" selection.
 
+Those H0-only promotions remain available but are not automatic. Following the
+observed H0/H1 trade-off at 525, the agreed next budget is the H1 ablation below,
+not an obligatory H0-only continuation to 550.
+
 Only the first-budget values enter Optuna. Promotions produce separate Pareto
 reports and never overwrite those values or mix different budgets in a ranking.
 Reports include all common numeric diagnostics, signed node/edge/component/cycle
@@ -175,23 +179,53 @@ Later-stage workers use trial locks and existing checkpoints. Repeat the same
 `extend` command after that stage's chain ends if more time is required. Do not
 update the live checkout while a chain still needs it.
 
-## Optional H1 ablation, only after H0 is informative
+## H1 ablation from a completed epoch-525 H0 result
 
-Choose an H0 parent that completed at least epoch 550. Example parent 2:
+The selected H0-only comparator is **trial 3, H0 weight 0.03**. It only needs to
+have completed epoch 525; no epoch-550 continuation is required. Prepare the
+ablation without changing `campaign.json`, the H0 journal, or existing runs:
 
 ```bash
-bash cluster/jean_zay/submit_focal_h0_study.sh h1-prepare 2
+bash cluster/jean_zay/submit_focal_h0_study.sh h1-prepare 3 0.001,0.003,0.01,0.03
+cat "$GNBM_OUTPUT_DIR/h1-plan.json"
+# After the existing H0 workers finish, submit the new grid:
 bash cluster/jean_zay/submit_focal_h0_study.sh h1-screen 2
 bash cluster/jean_zay/submit_focal_h0_study.sh h1-summary
+GNBM_H0_FAMILY=h1 bash cluster/jean_zay/submit_focal_h0_study.sh status
 ```
 
-This creates a separate three-trial journal, keeps the chosen H0 weight fixed,
-and compares H1 weights 0, 0.001, 0.003 from the same epoch-500 initialization.
-The H1-zero arm is an independent H0-only repeat. H1 uses one graph/rank;
-FP/FN weights are fixed at 0.25/1.0. This ablation is not automatically launched
-or mixed into the main search. Its shorter report is not compared with a
-50/100-epoch parent's endpoint. To promote ablation candidates, use the same
-`promote`/`extend` commands with `GNBM_H0_FAMILY=h1`, then unset that variable.
+This creates **four fixed-grid arms**, not another adaptive search: H0=0.03 with
+H1=0.001, 0.003, 0.01, 0.03. The H1-zero comparison is the existing H0 trial 3,
+not an additional training job. Every new arm restarts from the original frozen
+epoch-500 model/optimizer, **not** from trial 3's epoch-525 model. The learning-rate
+restart, 10-epoch ramp, focal recipe, global batch 32, patience and validation
+protocol are unchanged. H0 uses all eight eligible local graphs; H1 samples one
+graph/rank during training. Validation is unsampled. H1 FP/FN weights stay at
+0.25/1.0; no loss-weight compensation for sampling is added.
+
+The separate `h1-plan.json` freezes this grid and an epoch-matched snapshot of the
+H0-only reference. Worker allocation and categorical choices use that plan, not
+the older `h1_ablation_weights` field in the frozen H0 campaign settings. Repeated
+preparation is idempotent, recovers partially enqueued grids, and refuses changed
+weights or a different parent. Previously prepared legacy grids remain unchanged.
+
+H1 files are isolated under `studies/h1`, `runs/h1`, `configs/h1`, `results/h1` and
+`summaries/h1`. Epoch-525 reports use exactly 515/520/525 and include comparisons
+against **both** the focal-only control and H0-only trial 3. CSV columns prefixed
+`delta_` compare with focal-only; `delta_vs_h0_` compare with H0-only. Later-stage
+reports never substitute the epoch-525 parent for a missing 550/600 reference.
+Both references also have relative percentage-change columns.
+
+Each worker requests four A100s. Two workers use up to eight A100s; the default
+six chained six-hour segments strictly resume existing H1 arms after timeouts.
+Repeat `h1-screen 2` only after its previous chain has ended. H1 jobs are named
+`gnbm-focal-h1`, with logs `gnbm-focal-h1-ARRAY_TASK.{out,err}` in the usual A100
+log directory. The successful existing GPU smoke already exercises H1 and strict
+DDP resume; a new GPU smoke is not required for this fixed-grid setup change.
+
+No H0-only or focal-control job is submitted by `h1-prepare` or `h1-screen`.
+To promote H1 candidates later, use the same `promote`/`extend` commands with
+`GNBM_H0_FAMILY=h1`, then unset that variable; no promotion is automatic.
 
 W&B uses project `gnbm`, group `edge-focal-g05-h0-study`, one stable ID per trial
 across segments and promotions. Each curve includes the original focal metrics

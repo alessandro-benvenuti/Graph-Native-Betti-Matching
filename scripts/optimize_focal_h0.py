@@ -12,6 +12,7 @@ from contextlib import contextmanager
 import csv
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -30,6 +31,8 @@ from scripts.optimize_node_edge_betti import (
     AllocationLock, CampaignError, OBJECTIVES, _file_sha256, _read_records,
     aggregate_tail, create_storage, run_command, utc_now,
 )
+
+H1_ABLATION_WEIGHTS = (0.001, 0.003, 0.01, 0.03)
 
 
 def atomic_json(path, value):
@@ -250,25 +253,94 @@ def initialize_study(output):
                 study.enqueue_trial({"h0_weight": weight})
 
 
-def ablation_prepare(output, parent):
+def validate_h1_weights(values):
+    try:
+        weights = [float(value) for value in values]
+    except (ValueError, TypeError) as error:
+        raise CampaignError("H1 weights must be finite nonnegative numbers") from error
+    if not weights or any(not math.isfinite(w) or w < 0 for w in weights):
+        raise CampaignError("H1 weights must be finite nonnegative numbers")
+    if len(set(weights)) != len(weights):
+        raise CampaignError("Duplicate H1 ablation weights")
+    return weights
+
+
+def ablation_reference(output, endpoint):
+    """Return the H0-only comparator only at the requested, identical fidelity."""
+    plan = json.loads((output / "h1-plan.json").read_text())
+    if endpoint == plan["endpoint"] and "h0_reference" in plan:
+        row = plan["h0_reference"]
+    else:
+        path = result_path(output, "h0", endpoint, plan["parent_trial"])
+        if not path.exists():
+            return None
+        row = json.loads(path.read_text())
+    reference = stage_reference(output, endpoint)
+    if (row["endpoint"] != endpoint
+            or row["aggregation"]["contributing_epochs"] != reference["contributing_epochs"]
+            or row["control"] != reference["metrics"]):
+        raise CampaignError("H0 ablation reference does not match the control fidelity")
+    return row
+
+
+def ablation_prepare(output, parent, h1_weights=None):
     saved = state(output)
     initial_endpoint = saved["settings"]["endpoints"][0]
-    parent_rows = []
-    for endpoint in saved["settings"]["endpoints"][1:]:
-        path = result_path(output, "h0", endpoint, parent)
-        if path.exists():
-            parent_rows.append(json.loads(path.read_text()))
-    if not parent_rows:
-        raise CampaignError("Select an H0 parent that completed at least the 50-epoch budget")
-    weight = parent_rows[-1]["parameters"]["h0_weight"]
+    path = result_path(output, "h0", initial_endpoint, parent)
+    if not path.is_file():
+        raise CampaignError(f"Select an H0 parent that completed epoch {initial_endpoint}")
+    row = json.loads(path.read_text())
+    reference = stage_reference(output, initial_endpoint)
+    if (row["family"] != "h0" or row["trial"] != parent
+            or row["endpoint"] != initial_endpoint
+            or row["aggregation"]["contributing_epochs"] != reference["contributing_epochs"]
+            or row["control"] != reference["metrics"]
+            or float(row["parameters"].get("h1_weight", 0)) != 0):
+        raise CampaignError("Parent must be an epoch-matched, completed H0-only result")
+    weight = float(row["parameters"]["h0_weight"])
+    if not math.isfinite(weight) or weight <= 0:
+        raise CampaignError("Parent must have a finite positive H0 weight")
     with AllocationLock(output / ".locks/ask.lock"):
-        plan = {"parent_trial": parent, "h0_weight": weight, "h1_weights": saved["settings"]["h1_ablation_weights"], "endpoint": initial_endpoint}
-        freeze(output / "h1-plan.json", plan)
+        plan_path = output / "h1-plan.json"
+        existing = json.loads(plan_path.read_text()) if plan_path.exists() else None
+        # The ablation plan, not campaign.json, owns this new finite grid. Never
+        # rewrite frozen H0 settings; already prepared legacy grids remain valid.
+        defaults = existing["h1_weights"] if existing else H1_ABLATION_WEIGHTS
+        weights = validate_h1_weights(defaults if h1_weights is None else h1_weights)
+        identity = {"parent_trial": parent, "h0_weight": weight,
+                    "h1_weights": weights, "endpoint": initial_endpoint}
+        if existing:
+            if any(existing.get(key) != value for key, value in identity.items()):
+                raise CampaignError("Refusing to change frozen H1 ablation plan")
+            if existing.get("parent_result_sha256", _file_sha256(path)) != _file_sha256(path):
+                raise CampaignError("Frozen H0 parent result changed")
+            plan = existing
+        else:
+            plan = {**identity, "schema_version": 2,
+                    "parent_result_sha256": _file_sha256(path),
+                    "h0_reference": row,
+                    "initial_checkpoint": saved["checkpoint"],
+                    "initial_checkpoint_sha256": saved["checkpoint_sha256"],
+                    "h1_false_positive_weight": saved["settings"]["h1_false_positive_weight"],
+                    "h1_false_negative_weight": saved["settings"]["h1_false_negative_weight"],
+                    "h1_graphs_per_rank": 1, "test_split_used": False}
+        freeze(plan_path, plan)
         study = study_for(output, "h1")
-        if not study.trials:
-            for h1 in plan["h1_weights"]:
+        enqueued = set()
+        for trial in study.trials:
+            parameters = trial.params or trial.system_attrs.get("fixed_params", {})
+            if (parameters.get("h0_weight") != weight
+                    or parameters.get("h1_weight") not in weights
+                    or parameters["h1_weight"] in enqueued):
+                raise CampaignError("H1 journal differs from the frozen finite ablation grid")
+            enqueued.add(parameters["h1_weight"])
+        # Also recover an interruption partway through enqueueing the grid.
+        for h1 in weights:
+            if h1 not in enqueued:
                 study.enqueue_trial({"h0_weight": weight, "h1_weight": h1})
-    print("Prepared independent H0-only / small-H1 ablation from the same epoch-500 checkpoint")
+    print(f"Prepared H1 ablation: H0={weight:g}; H1={weights}; "
+          f"H0-only reference=trial {parent} at epoch {initial_endpoint}; "
+          f"all new runs restart from epoch {saved['settings']['branch_epoch']}")
 
 
 def concrete_config(output, family, number, parameters, endpoint):
@@ -459,7 +531,8 @@ def worker(args):
                         else:
                             raise
         return
-    total = settings["trials"] if family == "h0" else len(settings["h1_ablation_weights"])
+    h1_plan = json.loads((args.output / "h1-plan.json").read_text()) if family == "h1" else None
+    total = settings["trials"] if family == "h0" else len(h1_plan["h1_weights"])
     # O_EXCL-free kernel locks are automatically released on Slurm termination.
     while True:
         chosen = None
@@ -481,9 +554,8 @@ def worker(args):
                 if family == "h0":
                     trial.suggest_float("h0_weight", *settings["h0_range"], log=True)
                 else:
-                    plan = json.loads((args.output / "h1-plan.json").read_text())
-                    trial.suggest_float("h0_weight", plan["h0_weight"], plan["h0_weight"])
-                    trial.suggest_categorical("h1_weight", settings["h1_ablation_weights"])
+                    trial.suggest_float("h0_weight", h1_plan["h0_weight"], h1_plan["h0_weight"])
+                    trial.suggest_categorical("h1_weight", h1_plan["h1_weights"])
                 context = trial_lock(args.output, family, trial.number)
                 if not context.__enter__():
                     raise CampaignError("New trial is unexpectedly locked")
@@ -519,7 +591,7 @@ def promote(args):
     required = settings["promotion_counts"][index - 1]
     if args.family == "h0" and len(numbers) != required:
         raise CampaignError(f"This H0 stage requires exactly {required} manually selected trials")
-    if args.family == "h1" and not 1 <= len(numbers) <= len(settings["h1_ablation_weights"]):
+    if args.family == "h1" and not 1 <= len(numbers) <= len(json.loads((args.output / "h1-plan.json").read_text())["h1_weights"]):
         raise CampaignError("Invalid optional H1 promotion count")
     previous = settings["endpoints"][index - 1]
     for number in numbers:
@@ -538,10 +610,15 @@ def dominates(left, right):
 
 def summary(args):
     settings = state(args.output)["settings"]
+    if args.family == "h1" and not (args.output / "h1-plan.json").is_file():
+        raise CampaignError("Run h1-prepare before requesting an H1 summary")
     for endpoint in settings["endpoints"]:
         directory = args.output / "results" / args.family / f"epoch_{endpoint:04d}"
         rows = [json.loads(p.read_text()) for p in sorted(directory.glob("trial_*.json")) if not p.name.endswith(".incomplete.json")]
         print(f"\nFAMILY={args.family} ENDPOINT={endpoint} complete={len(rows)}")
+        parent = ablation_reference(args.output, endpoint) if args.family == "h1" and rows else None
+        if parent:
+            print(f"H0-only reference trial={parent['trial']} epochs={parent['aggregation']['contributing_epochs']}")
         flat = []
         for row in rows:
             pareto = not any(dominates(other["metrics"], row["metrics"]) for other in rows if other is not row)
@@ -550,8 +627,19 @@ def summary(args):
             item.update({f"delta_{key}": value for key, value in row["deltas"].items()})
             item.update({f"control_{key}": value for key, value in row["control"].items()})
             item.update({f"percent_change_{key}": 100 * value / row["control"][key] if row["control"][key] else None for key, value in row["deltas"].items()})
+            if parent:
+                item["h0_reference_trial"] = parent["trial"]
+                item.update({f"h0_reference_{key}": value for key, value in parent["metrics"].items()})
+                item.update({f"delta_vs_h0_{key}": value - parent["metrics"][key]
+                             for key, value in row["metrics"].items() if key in parent["metrics"]})
+                item.update({f"percent_change_vs_h0_{key}": 100 * (value - parent["metrics"][key]) / parent["metrics"][key]
+                             if parent["metrics"][key] else None
+                             for key, value in row["metrics"].items() if key in parent["metrics"]})
             flat.append(item)
             print(f"trial={row['trial']:04d} params={row['parameters']} pareto={pareto} " + " ".join(f"d_{name}={row['deltas'][name]:+.6f}" for name, _ in OBJECTIVES))
+            if parent:
+                print("  versus H0-only: " + " ".join(
+                    f"d_{name}={row['metrics'][name] - parent['metrics'][name]:+.6f}" for name, _ in OBJECTIVES))
         if flat:
             destination = args.output / "summaries" / args.family
             destination.mkdir(parents=True, exist_ok=True)
@@ -688,6 +776,7 @@ def main():
     parser.add_argument("--endpoint", type=int)
     parser.add_argument("--trials", help="Comma-separated manually selected trial IDs")
     parser.add_argument("--parent", type=int)
+    parser.add_argument("--h1-weights", help="Comma-separated H1 grid, frozen separately from the H0 campaign")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--poll-interval", type=float, default=.5)
     parser.add_argument("--train-command", nargs=argparse.REMAINDER)
@@ -711,7 +800,8 @@ def main():
         elif args.action == "h1-prepare":
             if args.parent is None:
                 raise CampaignError("h1-prepare requires --parent")
-            ablation_prepare(args.output, args.parent)
+            ablation_prepare(args.output, args.parent,
+                             None if args.h1_weights is None else args.h1_weights.split(","))
         else:
             summary(args)
     except CampaignError as error:
