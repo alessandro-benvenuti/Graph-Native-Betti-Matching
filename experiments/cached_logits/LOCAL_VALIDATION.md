@@ -128,3 +128,17 @@ The full focused suite passes **75 tests** after the runtime-control change.
 The tested submission helper checks the eight-hour request with Slurm test-only;
 its ordinary stages retain one-hour requests. Core losses, cache construction,
 selection, metrics and configuration adapters have no changes in this update.
+
+
+### Read-only analysis of completed main artifacts
+
+Added `analyze_saved.py` and a login-node `cluster/analyze.sh` wrapper. Five focused
+portable tests use handcrafted saved-state fixtures, never an optimizer or model.
+They cover nonuniform-step error integration, transient observed perfection,
+spatial mismatch despite assignment perfection, preserved source hashes and output
+protection, individual-cycle analysis, and verification of an optional exact H1
+weight match from YAML. The full analyzer was also replayed against pre-existing
+local synthetic saved artifacts, without running optimization. Bash syntax and
+Git whitespace checks passed. Actual 32-patch cluster analysis remains pending
+execution by the user; no real convergence or spatial result is inferred from
+these tests.

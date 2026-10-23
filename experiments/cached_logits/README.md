@@ -381,3 +381,47 @@ retains its original code commits, while the optimization records the new
 runtime-control commit. The existing strict `next-commands` code-commit guard
 is unchanged; use the explicit longer submission command above for this
 scheduling-only update.
+
+
+## Analyze the completed main run without optimization
+
+Keep the existing `main-opt` and `main-cache`. Pull the disposable branch, then
+run the analysis wrapper on the Jean Zay login node:
+
+```bash
+cd "$WORK/projects/Graph-Native-Betti-Matching-cached-logit-test" &&
+git pull --ff-only origin codex/cached-logit-betti-test &&
+bash experiments/cached_logits/cluster/analyze.sh
+```
+
+This submits no job and invokes no model, optimizer, training, or patch discovery.
+It reads existing saved states and cached GT only. The wrapper loads the existing
+PyTorch environment, uses one CPU thread, and writes a **new** `main-analysis`
+directory below the disposable diagnostic output root. Existing analysis output
+is refused; an optional first argument supplies a fresh analysis output path.
+All source artifacts and reference files are hashed before and after reading.
+
+The campaign reference is
+`gnbm-edge-focal-g05-h0-study-a100/runs/h1/trial_0000/resolved-config.yaml`;
+`h1-plan.json` and optional trial-0002 resolved YAML are read without modification.
+The older staged node-focal/edge-CE campaign is not used. Trial 0002's weights
+are checked from its actual YAML before calling it an exact weight match.
+
+The report separates fixed-assignment and spatial graph correctness, observed
+convergence and sampled error areas, representability and two-cycle details,
+configuration discrepancies, and raw versus weighted gradient conflicts. Saved
+steps are 0/1/5/10/20/50/100/200; unsaved updates are unobserved. All arms use the
+same endpoint and observation grid. First perfection and later maintenance refer
+to saved observations, not every intervening update. Wall-clock measurements
+include topology computations and audit overhead even for classification-only.
+
+Read the result with:
+
+```bash
+cat /lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-cached-logit-betti-test-a100/main-analysis/report.md
+```
+
+Full per-patch tables, paired intermediate-step outcomes, sampled error areas,
+spatial node/edge results, individual cycle diagnostics, configuration comparisons,
+objective activity, gradient conflicts/persistence and compact PNG plots remain
+in `main-analysis`. Data stays on Jean Zay; only the analysis code travels by Git.
