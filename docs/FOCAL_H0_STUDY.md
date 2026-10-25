@@ -263,3 +263,62 @@ across segments and promotions. Each curve includes the original focal metrics
 through epoch 500. Metrics rather than all minibatch losses are bootstrapped.
 Sync completed offline transactions with the existing sync helper, explicitly
 setting `GNBM_WANDB_SYNC_PROJECT=gnbm`; do not upload an actively written file.
+
+## Two stronger H1 probes (no adaptive proposals yet)
+
+After the four H1 arms, prepare **only** these two additional configurations:
+
+| New family / trial | H0 weight | H1 weight |
+|---|---:|---:|
+| `h1-probes / 0000` | 0.03 | 0.06 |
+| `h1-probes / 0001` | 0.03 | 0.10 |
+
+Both restart the frozen original epoch-500 checkpoint, retaining the optimizer
+and applying the existing initial LR-tail restart, then stop at epoch 525.
+They do **not** continue from a trained H0/H1 candidate. FP/FN remain 0.25/1.0,
+the ramp remains ten epochs, H0 uses eight graphs/rank, H1 one graph/rank, and
+validation is full. The existing GPU smoke is reused; the topology implementation
+has not changed. Local tests additionally exercise real finite H1 backward at
+both stronger weights. This is a fixed two-arm probe, not adaptive TPE.
+
+The separate `h1-probes-plan.json` and `studies/h1-probes` journal do not change
+`campaign.json`, `h1-plan.json`, or either earlier journal. Runs, configurations,
+results, summaries and stable W&B names also use `h1-probes`, e.g.
+`runs/h1-probes/trial_0000` and `g05-h1-probes-000`. Project `gnbm`, the existing
+group and the original metric bootstrap through epoch 500 remain unchanged.
+Preparation validates the H0-only parent has weight 0.03; it is idempotent and
+rejects any other probe grid. Workers repair an interrupted enqueue under the
+allocation lock and never allocate more than these two arms.
+
+From the dedicated `Graph-Native-Betti-Matching-h0-g05` checkout and with the
+existing study's `GNBM_OUTPUT_DIR` exported:
+
+```bash
+bash cluster/jean_zay/submit_focal_h0_study.sh test
+bash cluster/jean_zay/submit_focal_h0_study.sh h1-probes-prepare 3
+cat "$GNBM_OUTPUT_DIR/h1-probes-plan.json"
+
+# Two workers, four A100s each, three chained six-hour segments per worker.
+# Unset a stale dependency so the probes do not wait on an unrelated old job.
+unset GNBM_H0_AFTER_JOB_ID
+GNBM_H0_SEGMENTS=3 GNBM_WALLTIME=06:00:00 \
+  bash cluster/jean_zay/submit_focal_h0_study.sh h1-probes-screen 2
+
+GNBM_H0_FAMILY=h1-probes \
+  bash cluster/jean_zay/submit_focal_h0_study.sh status
+bash cluster/jean_zay/submit_focal_h0_study.sh h1-probes-summary
+```
+
+Jobs are named `gnbm-focal-h1-probes`; logs use
+`gnbm-focal-h1-probes-ARRAY_TASK.{out,err}` in the usual A100 log directory.
+Chained segments strictly resume optimizer, scheduler, patience and runtime state.
+If the chain expires before completion, repeat `h1-probes-screen 2` with the same
+segment/time overrides, **only after the prior probe chain has ended**.
+Completed trials are not retrained; extra queued segments do not create new
+configurations. Reports compare the exact 515/520/525 tail with focal-only and
+H0-only trial 3 and save deltas/percentages under `summaries/h1-probes`.
+
+At screening, a generic `training-complete` marker may be absent because the
+overall horizon is 750; use the endpoint result and Optuna COMPLETE state to
+confirm epoch-525 completion. No stronger-weight promotion, adaptive study, new
+focal control, or old-grid rerun is submitted by these commands.

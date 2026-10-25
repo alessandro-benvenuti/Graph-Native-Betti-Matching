@@ -33,6 +33,14 @@ from scripts.optimize_node_edge_betti import (
 )
 
 H1_ABLATION_WEIGHTS = (0.001, 0.003, 0.01, 0.03)
+H1_PROBE_WEIGHTS = (0.06, 0.10)
+H1_FAMILIES = ("h1", "h1-probes")
+
+
+def ablation_plan_path(output, family="h1"):
+    if family not in H1_FAMILIES:
+        raise CampaignError(f"Not an H1 ablation family: {family}")
+    return output / f"{family}-plan.json"
 
 
 def atomic_json(path, value):
@@ -265,9 +273,9 @@ def validate_h1_weights(values):
     return weights
 
 
-def ablation_reference(output, endpoint):
+def ablation_reference(output, endpoint, family="h1"):
     """Return the H0-only comparator only at the requested, identical fidelity."""
-    plan = json.loads((output / "h1-plan.json").read_text())
+    plan = json.loads(ablation_plan_path(output, family).read_text())
     if endpoint == plan["endpoint"] and "h0_reference" in plan:
         row = plan["h0_reference"]
     else:
@@ -283,7 +291,8 @@ def ablation_reference(output, endpoint):
     return row
 
 
-def ablation_prepare(output, parent, h1_weights=None):
+def ablation_prepare(output, parent, h1_weights=None, *, family="h1"):
+    plan_path = ablation_plan_path(output, family)
     saved = state(output)
     initial_endpoint = saved["settings"]["endpoints"][0]
     path = result_path(output, "h0", initial_endpoint, parent)
@@ -300,13 +309,18 @@ def ablation_prepare(output, parent, h1_weights=None):
     weight = float(row["parameters"]["h0_weight"])
     if not math.isfinite(weight) or weight <= 0:
         raise CampaignError("Parent must have a finite positive H0 weight")
+    if family == "h1-probes" and weight != .03:
+        raise CampaignError("The stronger H1 probes require an H0=0.03 parent")
     with AllocationLock(output / ".locks/ask.lock"):
-        plan_path = output / "h1-plan.json"
         existing = json.loads(plan_path.read_text()) if plan_path.exists() else None
         # The ablation plan, not campaign.json, owns this new finite grid. Never
         # rewrite frozen H0 settings; already prepared legacy grids remain valid.
-        defaults = existing["h1_weights"] if existing else H1_ABLATION_WEIGHTS
+        defaults = existing["h1_weights"] if existing else (
+            H1_PROBE_WEIGHTS if family == "h1-probes" else H1_ABLATION_WEIGHTS
+        )
         weights = validate_h1_weights(defaults if h1_weights is None else h1_weights)
+        if family == "h1-probes" and weights != list(H1_PROBE_WEIGHTS):
+            raise CampaignError("The fixed H1 probes must be exactly 0.06,0.10")
         identity = {"parent_trial": parent, "h0_weight": weight,
                     "h1_weights": weights, "endpoint": initial_endpoint}
         if existing:
@@ -325,7 +339,7 @@ def ablation_prepare(output, parent, h1_weights=None):
                     "h1_false_negative_weight": saved["settings"]["h1_false_negative_weight"],
                     "h1_graphs_per_rank": 1, "test_split_used": False}
         freeze(plan_path, plan)
-        study = study_for(output, "h1")
+        study = study_for(output, family)
         enqueued = set()
         for trial in study.trials:
             parameters = trial.params or trial.system_attrs.get("fixed_params", {})
@@ -338,7 +352,7 @@ def ablation_prepare(output, parent, h1_weights=None):
         for h1 in weights:
             if h1 not in enqueued:
                 study.enqueue_trial({"h0_weight": weight, "h1_weight": h1})
-    print(f"Prepared H1 ablation: H0={weight:g}; H1={weights}; "
+    print(f"Prepared {family} ablation: H0={weight:g}; H1={weights}; "
           f"H0-only reference=trial {parent} at epoch {initial_endpoint}; "
           f"all new runs restart from epoch {saved['settings']['branch_epoch']}")
 
@@ -596,8 +610,13 @@ def worker(args):
     settings, family = saved["settings"], args.family
     endpoint = args.endpoint or settings["endpoints"][0]
     stage_reference(args.output, endpoint)
-    if family == "h1" and not (args.output / "h1-plan.json").exists():
-        raise CampaignError("Run h1-prepare before the optional ablation")
+    if family in H1_FAMILIES and not ablation_plan_path(args.output, family).exists():
+        raise CampaignError(f"Run {family}-prepare before the optional ablation")
+    if family == "h1-probes":
+        # Repair a preparation interrupted while enqueueing. These two probes
+        # must never fall through to a sampler-generated replacement/duplicate.
+        plan = json.loads(ablation_plan_path(args.output, family).read_text())
+        ablation_prepare(args.output, plan["parent_trial"], family=family)
     study = study_for(args.output, family, int(os.environ.get("SLURM_ARRAY_TASK_ID", "0")))
     if endpoint != settings["endpoints"][0]:
         plan = json.loads((args.output / "promotions" / family / f"epoch_{endpoint:04d}.json").read_text())
@@ -617,7 +636,7 @@ def worker(args):
                         else:
                             raise
         return
-    h1_plan = json.loads((args.output / "h1-plan.json").read_text()) if family == "h1" else None
+    h1_plan = json.loads(ablation_plan_path(args.output, family).read_text()) if family in H1_FAMILIES else None
     total = settings["trials"] if family == "h0" else len(h1_plan["h1_weights"])
     # O_EXCL-free kernel locks are automatically released on Slurm termination.
     while True:
@@ -686,7 +705,7 @@ def promote(args):
     required = settings["promotion_counts"][index - 1]
     if args.family == "h0" and len(numbers) != required:
         raise CampaignError(f"This H0 stage requires exactly {required} manually selected trials")
-    if args.family == "h1" and not 1 <= len(numbers) <= len(json.loads((args.output / "h1-plan.json").read_text())["h1_weights"]):
+    if args.family in H1_FAMILIES and not 1 <= len(numbers) <= len(json.loads(ablation_plan_path(args.output, args.family).read_text())["h1_weights"]):
         raise CampaignError("Invalid optional H1 promotion count")
     previous = settings["endpoints"][index - 1]
     for number in numbers:
@@ -705,13 +724,13 @@ def dominates(left, right):
 
 def summary(args):
     settings = state(args.output)["settings"]
-    if args.family == "h1" and not (args.output / "h1-plan.json").is_file():
-        raise CampaignError("Run h1-prepare before requesting an H1 summary")
+    if args.family in H1_FAMILIES and not ablation_plan_path(args.output, args.family).is_file():
+        raise CampaignError(f"Run {args.family}-prepare before requesting an H1 summary")
     for endpoint in settings["endpoints"]:
         directory = args.output / "results" / args.family / f"epoch_{endpoint:04d}"
         rows = [json.loads(p.read_text()) for p in sorted(directory.glob("trial_*.json")) if not p.name.endswith(".incomplete.json")]
         print(f"\nFAMILY={args.family} ENDPOINT={endpoint} complete={len(rows)}")
-        parent = ablation_reference(args.output, endpoint) if args.family == "h1" and rows else None
+        parent = ablation_reference(args.output, endpoint, args.family) if args.family in H1_FAMILIES and rows else None
         if parent:
             print(f"H0-only reference trial={parent['trial']} epochs={parent['aggregation']['contributing_epochs']}")
         flat = []
@@ -869,7 +888,7 @@ def main():
     parser.add_argument("--settings", type=Path, default=ROOT / "configs/experiments/focal_h0_study.yaml")
     parser.add_argument("--source-run", type=Path)
     parser.add_argument("--reference-run", type=Path)
-    parser.add_argument("--family", choices=("h0", "h1"), default="h0")
+    parser.add_argument("--family", choices=("h0", *H1_FAMILIES), default="h0")
     parser.add_argument("--endpoint", type=int)
     parser.add_argument("--trials", help="Comma-separated manually selected trial IDs")
     parser.add_argument("--parent", type=int)
@@ -901,7 +920,8 @@ def main():
             if args.parent is None:
                 raise CampaignError("h1-prepare requires --parent")
             ablation_prepare(args.output, args.parent,
-                             None if args.h1_weights is None else args.h1_weights.split(","))
+                             None if args.h1_weights is None else args.h1_weights.split(","),
+                             family="h1" if args.family == "h0" else args.family)
         else:
             summary(args)
     except CampaignError as error:

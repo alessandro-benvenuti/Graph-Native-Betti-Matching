@@ -19,7 +19,7 @@ import yaml
 
 from configs import load_config
 from scripts.optimize_focal_h0 import (
-    CampaignError, H1_ABLATION_WEIGHTS, ablation_prepare, ablation_reference, atomic_json, concrete_config, dominates,
+    CampaignError, H1_ABLATION_WEIGHTS, H1_PROBE_WEIGHTS, ablation_prepare, ablation_reference, atomic_json, concrete_config, dominates,
     evaluate_trial, freeze, initialize_study, load_settings, prepare,
     manual_stop_path, promote, prune_trials, result_path, scientific_reference, stage_reference, state, study_for,
     single_node_launcher, smoke_config, summary, training_command, trial_lock, worker,
@@ -174,12 +174,12 @@ class FocalH0Tests(unittest.TestCase):
                 losses["total"].backward()
                 self.assertTrue(torch.isfinite(tokens.grad).all())
 
-    def test_all_four_h1_weights_have_real_finite_sampled_backward(self):
+    def test_all_h1_grid_and_probe_weights_have_real_finite_sampled_backward(self):
         from tests.test_graph_losses import _config, _batch, CountingRelationHead
         from models.matcher import HungarianMatcher
         from training.losses import GraphCriterion
         self.prepared()
-        for weight in H1_ABLATION_WEIGHTS:
+        for weight in (*H1_ABLATION_WEIGHTS, *H1_PROBE_WEIGHTS):
             for validation in (False, True):
                 with self.subTest(h1_weight=weight, validation=validation):
                     config = _config()
@@ -358,6 +358,11 @@ class FocalH0Tests(unittest.TestCase):
         self.assertIn("--array=0-1", submitted[2])
         self.assertIn("--gres=gpu:4", submitted[2])
         self.assertIn("--dependency=afterany:9003", submitted[3])
+        probe_command = ["bash", command[1], "h1-probes-screen", "2"]
+        failed = subprocess.run(probe_command, env=env, capture_output=True, text=True)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("h1-probes-prepare", failed.stderr)
+        self.assertEqual(len((self.root / "submissions.jsonl").read_text().splitlines()), 4)
         stopped = subprocess.run(
             ["bash", command[1], "prune", "0", "Manual stop with an explicit reason"],
             env=env, capture_output=True, text=True,
@@ -557,6 +562,153 @@ class FocalH0Tests(unittest.TestCase):
         ablation_prepare(self.output, 0)
         self.assertEqual(len(study_for(self.output, "h1").trials), 4)
 
+    def _prepare_probe_parent(self):
+        self.settings.update(trials=1, h0_anchors=[.03], promotion_counts=[1, 1])
+        self.settings_path.write_text(yaml.safe_dump(self.settings))
+        self.prepared()
+        study, trials = self._allocate_h0_trials(1)
+        self._complete_h0_trial(study, trials[0])
+
+    def test_strong_h1_probes_are_frozen_isolated_and_restart_at_original_branch(self):
+        self._prepare_probe_parent()
+        ablation_prepare(self.output, 0)
+        retained = [self.output / name for name in (
+            "campaign.json", "base-config.json", "dataset-manifest.json",
+            "initialization/epoch_0500.pt", "h1-plan.json",
+            "studies/h0/study.journal", "studies/h1/study.journal",
+            "results/h0/epoch_0005/trial_0000.json",
+        )]
+        before = {path: path.read_bytes() for path in retained}
+        family = "h1-probes"
+        ablation_prepare(self.output, 0, family=family)
+        path = self.output / "h1-probes-plan.json"
+        original_plan = path.read_bytes()
+        plan = json.loads(original_plan)
+        self.assertEqual(plan["h0_weight"], .03)
+        self.assertEqual(plan["h1_weights"], [.06, .10])
+        self.assertEqual(plan["initial_checkpoint"], state(self.output)["checkpoint"])
+        ablation_prepare(self.output, 0, family=family)
+        self.assertEqual(path.read_bytes(), original_plan)
+        with self.assertRaisesRegex(CampaignError, "exactly"):
+            ablation_prepare(self.output, 0, [.06, .3], family=family)
+        self.args.family = family
+        worker(self.args)
+        trials = study_for(self.output, family).trials
+        self.assertEqual(len(trials), 2)
+        self.assertEqual({t.params["h1_weight"] for t in trials}, set(H1_PROBE_WEIGHTS))
+        self.assertTrue(all(t.state.name == "COMPLETE" for t in trials))
+        for trial in trials:
+            run = self.output / f"runs/{family}/trial_{trial.number:04d}"
+            provenance = json.loads((run / "resume-provenance.json").read_text())
+            self.assertEqual(Path(provenance["checkpoint"]).resolve(), Path(state(self.output)["checkpoint"]).resolve())
+            self.assertEqual(provenance["checkpoint_epoch"], 2)
+            self.assertTrue(provenance["optimizer_restored"])
+            self.assertTrue(provenance["scheduler_reset"])
+            config = yaml.safe_load((run / "resolved-config.yaml").read_text())
+            topology = config["topology"]
+            self.assertEqual(topology["betti_h0"]["weight"], .03)
+            self.assertEqual(topology["betti_h1"]["weight"], trial.params["h1_weight"])
+            self.assertEqual(topology["betti_h1"]["false_positive_weight"], .25)
+            self.assertEqual(topology["betti_h1"]["false_negative_weight"], 1.)
+            self.assertEqual(topology["sampling"]["betti_h1_max_graphs_per_rank"], 1)
+            self.assertEqual(config["tracking"]["project"], "gnbm")
+            self.assertEqual(config["tracking"]["run_name"], f"g05-{family}-{trial.number:03d}")
+        with patch("scripts.optimize_focal_h0.run_command", side_effect=AssertionError("No extra training")):
+            worker(self.args)
+        self.assertEqual(len(study_for(self.output, family).trials), 2)
+        summary(self.args)
+        with (self.output / f"summaries/{family}/epoch_0005.csv").open() as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row["h0_reference_trial"] == "0" for row in rows))
+        self.assertTrue(all("delta_vs_h0_beta1_absolute_error" in row for row in rows))
+        for path in retained:
+            self.assertEqual(path.read_bytes(), before[path], str(path))
+        self.assertIsNone(ablation_reference(self.output, 8, family))
+
+    def test_strong_h1_probe_preparation_rejects_other_parent_weight(self):
+        self.prepared()
+        study, trials = self._allocate_h0_trials(1)
+        self._complete_h0_trial(study, trials[0])
+        with self.assertRaisesRegex(CampaignError, "H0=0.03"):
+            ablation_prepare(self.output, 0, family="h1-probes")
+        self.assertFalse((self.output / "h1-probes-plan.json").exists())
+
+    def test_strong_probe_shell_submits_only_separate_resumable_arrays(self):
+        self._prepare_probe_parent()
+        venv = self.root / "venv/bin"
+        venv.mkdir(parents=True)
+        (venv / "python").symlink_to(sys.executable)
+        executable = self.root / "sbatch"
+        executable.write_text(
+            f"#!{sys.executable}\n"
+            "import json, os, pathlib, sys\n"
+            "path=pathlib.Path(os.environ['WORK'])/'submissions.jsonl'\n"
+            "old=path.read_text().splitlines() if path.exists() else []\n"
+            "with path.open('a') as h: h.write(json.dumps(sys.argv[1:])+'\\n')\n"
+            "print('Submitted batch job',9001+len(old))\n"
+        )
+        executable.chmod(0o755)
+        env = {**os.environ, "WORK": str(self.root), "GNBM_OUTPUT_DIR": str(self.output),
+               "GNBM_A100_VENV": str(venv.parent), "GNBM_H0_SEGMENTS": "3",
+               "GNBM_WALLTIME": "06:00:00", "GNBM_H0_AFTER_JOB_ID": "",
+               "GNBM_H0_FAMILY": "h0", "PATH": str(self.root) + os.pathsep + os.environ["PATH"]}
+        script = str(ROOT / "cluster/jean_zay/submit_focal_h0_study.sh")
+        result = subprocess.run(["bash", script, "h1-probes-prepare", "0"], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.root / "submissions.jsonl").exists())
+        atomic_json(self.output / "gpu-smoke/passed.json", {"passed": True})
+        result = subprocess.run(["bash", script, "h1-probes-screen", "2"], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        submitted = [json.loads(line) for line in (self.root / "submissions.jsonl").read_text().splitlines()]
+        self.assertEqual(len(submitted), 3)
+        for arguments in submitted:
+            self.assertIn("--job-name=gnbm-focal-h1-probes", arguments)
+            self.assertIn("--array=0-1", arguments)
+            self.assertIn("--gres=gpu:4", arguments)
+            self.assertIn("--cpus-per-task=32", arguments)
+            self.assertIn("--time=06:00:00", arguments)
+        self.assertFalse(any(item.startswith("--dependency") for item in submitted[0]))
+        self.assertIn("--dependency=afterany:9001", submitted[1])
+        self.assertIn("--dependency=afterany:9002", submitted[2])
+        self.assertIn("h1-probes-screen 2", result.stdout)
+        self.assertEqual({t.system_attrs['fixed_params']['h1_weight'] for t in study_for(self.output, 'h1-probes').trials}, set(H1_PROBE_WEIGHTS))
+
+    def test_probe_workers_repair_partial_enqueue_and_allocate_only_two_arms(self):
+        import optuna
+        self._prepare_probe_parent()
+        enqueue = optuna.study.Study.enqueue_trial
+        calls = 0
+        def interrupted(study, parameters):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("interrupted enqueue")
+            return enqueue(study, parameters)
+        with patch.object(optuna.study.Study, "enqueue_trial", interrupted):
+            with self.assertRaisesRegex(RuntimeError, "interrupted enqueue"):
+                ablation_prepare(self.output, 0, family="h1-probes")
+        command = [sys.executable, str(ROOT / "scripts/optimize_focal_h0.py"), "worker",
+                   "--output", str(self.output), "--family", "h1-probes", "--resume",
+                   "--poll-interval", ".02", "--train-command", *self.args.train_command]
+        with (self.root / "parallel-probes.log").open("w") as log:
+            processes = [subprocess.Popen(
+                command, env={**os.environ, "SLURM_ARRAY_TASK_ID": str(index), "FAKE_TRAIN_SLEEP_PER_EPOCH": ".1"},
+                stdout=log, stderr=log,
+            ) for index in range(2)]
+            try:
+                for process in processes:
+                    self.assertEqual(process.wait(timeout=60), 0, (self.root / "parallel-probes.log").read_text())
+            finally:
+                for process in processes:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+        trials = study_for(self.output, "h1-probes").trials
+        self.assertEqual(len(trials), 2)
+        self.assertTrue(all(t.state.name == "COMPLETE" for t in trials))
+        self.assertEqual({t.params["h1_weight"] for t in trials}, set(H1_PROBE_WEIGHTS))
+
     def test_two_h1_workers_allocate_only_the_four_frozen_arms(self):
         self.prepared()
         worker(self.args)
@@ -626,16 +778,27 @@ class FocalH0Tests(unittest.TestCase):
         self.assertEqual(len(study_for(self.output, "h0").trials), 4)
 
     def test_real_signal_interruption_resumes_same_trial(self):
-        self.settings.update(trials=1, h0_anchors=[.003], promotion_counts=[1, 1])
+        self._assert_signal_resume("h0")
+
+    def test_strong_probe_real_signal_resume_preserves_scheduler_and_patience(self):
+        self._assert_signal_resume("h1-probes")
+
+    def _assert_signal_resume(self, family):
+        self.settings.update(trials=1, h0_anchors=[.03], promotion_counts=[1, 1])
         self.settings_path.write_text(yaml.safe_dump(self.settings))
         self.prepared()
+        if family == "h1-probes":
+            study, trials = self._allocate_h0_trials(1)
+            self._complete_h0_trial(study, trials[0])
+            ablation_prepare(self.output, 0, family=family)
+        self.args.family = family
         command = [sys.executable, str(ROOT / "scripts/optimize_focal_h0.py"), "worker",
-                   "--output", str(self.output), "--resume", "--poll-interval", ".02", "--train-command", *self.args.train_command]
+                   "--output", str(self.output), "--family", family, "--resume", "--poll-interval", ".02", "--train-command", *self.args.train_command]
         # Wait for a real intermediate checkpoint before delivering SIGTERM.
         with (self.root / "worker.log").open("w") as log:
             process = subprocess.Popen(command, env={**os.environ, "FAKE_TRAIN_SLEEP_PER_EPOCH": "1"}, stdout=log, stderr=log)
             try:
-                own = self.output / "runs/h0/trial_0000/models/latest_checkpoint.pt"
+                own = self.output / f"runs/{family}/trial_0000/models/latest_checkpoint.pt"
                 deadline = time.monotonic() + 45
                 while not own.exists() and time.monotonic() < deadline:
                     if process.poll() is not None:
@@ -648,15 +811,16 @@ class FocalH0Tests(unittest.TestCase):
                 if process.poll() is None:
                     process.kill()
                     process.wait()
-        study = study_for(self.output, "h0")
+        study = study_for(self.output, family)
         self.assertEqual(study.trials[0].state.name, "RUNNING")
         worker(self.args)
-        study = study_for(self.output, "h0")
-        self.assertEqual(len(study.trials), 1)
+        study = study_for(self.output, family)
+        self.assertEqual(len(study.trials), 2 if family == "h1-probes" else 1)
         self.assertEqual(study.trials[0].state.name, "COMPLETE")
         self.assertEqual(study.trials[0].user_attrs["resume_count"], 1)
-        provenance = json.loads((self.output / "runs/h0/trial_0000/resume-provenance.json").read_text())
+        provenance = json.loads((self.output / f"runs/{family}/trial_0000/resume-provenance.json").read_text())
         self.assertFalse(provenance["scheduler_reset"])
+        self.assertFalse(provenance["patience_reset"])
 
 
 if __name__ == "__main__":

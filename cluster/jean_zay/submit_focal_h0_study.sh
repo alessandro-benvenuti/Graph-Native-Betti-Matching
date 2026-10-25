@@ -2,7 +2,7 @@
 # Prepare a new H0 study; never submit or modify the existing focal control.
 set -euo pipefail
 usage() {
-  echo "Usage: $0 prepare|test|smoke|status|summary|h1-summary | screen|resume|h1-screen [WORKERS] | promote ENDPOINT IDS | extend ENDPOINT [WORKERS] | h1-prepare PARENT [H1_WEIGHTS] | prune IDS REASON" >&2
+  echo "Usage: $0 prepare|test|smoke|status|summary|h1-summary|h1-probes-summary | screen|resume|h1-screen|h1-probes-screen [WORKERS] | promote ENDPOINT IDS | extend ENDPOINT [WORKERS] | h1-prepare PARENT [H1_WEIGHTS] | h1-probes-prepare PARENT | prune IDS REASON" >&2
   exit 2
 }
 [[ $# -ge 1 && $# -le 3 ]] || usage
@@ -21,14 +21,16 @@ source_run="${GNBM_H0_SOURCE_RUN:-/lustre/fsn1/projects/rech/vnc/upz73jr/checkpo
 reference_run="${GNBM_H0_REFERENCE_RUN:-/lustre/fsn1/projects/rech/vnc/upz73jr/checkpoints/gnbm-boundary-gamma-extension-750-a100/finetune_boundary_mri750_node_edge_focal_g05_tail250_seed364505}"
 settings="${GNBM_H0_SETTINGS:-$GNBM_REPO_DIR/configs/experiments/focal_h0_study.yaml}"
 export GNBM_H0_FAMILY="${GNBM_H0_FAMILY:-h0}"
+case "$GNBM_H0_FAMILY" in h0|h1|h1-probes) ;; *) echo "Invalid GNBM_H0_FAMILY" >&2; exit 2 ;; esac
 case "$action" in
   prepare)
     exec "$python_bin" -m scripts.optimize_focal_h0 prepare --output "$GNBM_OUTPUT_DIR" \
       --settings "$settings" --source-run "$source_run" --reference-run "$reference_run" ;;
-  summary|h1-summary|status)
+  summary|h1-summary|h1-probes-summary|status)
     [[ "$action" != h1-summary ]] || export GNBM_H0_FAMILY=h1
+    [[ "$action" != h1-probes-summary ]] || export GNBM_H0_FAMILY=h1-probes
     if [[ "$action" == status ]]; then
-      squeue -u "$USER" -n gnbm-focal-h0,gnbm-focal-h1 -o "%.18i %.2t %.10M %.30R"
+      squeue -u "$USER" -n gnbm-focal-h0,gnbm-focal-h1,gnbm-focal-h1-probes -o "%.18i %.2t %.10M %.30R"
     fi
     exec "$python_bin" -m scripts.optimize_focal_h0 summary --output "$GNBM_OUTPUT_DIR" --family "$GNBM_H0_FAMILY" ;;
   promote)
@@ -39,12 +41,17 @@ case "$action" in
     [[ $# == 3 ]] || usage
     exec "$python_bin" -m scripts.optimize_focal_h0 prune --output "$GNBM_OUTPUT_DIR" \
       --family "$GNBM_H0_FAMILY" --trials "$2" --reason "$3" ;;
-  h1-prepare)
+  h1-prepare|h1-probes-prepare)
     [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || usage
-    ablation_weights=()
-    [[ $# != 3 ]] || ablation_weights=(--h1-weights "$3")
-    exec "$python_bin" -m scripts.optimize_focal_h0 h1-prepare --output "$GNBM_OUTPUT_DIR" --parent "$2" "${ablation_weights[@]}" ;;
-  smoke|screen|resume|extend|h1-screen) ;;
+    export GNBM_H0_FAMILY=h1
+    if [[ "$action" == h1-probes-prepare ]]; then
+      [[ $# == 2 ]] || usage
+      export GNBM_H0_FAMILY=h1-probes
+    fi
+    ablation_options=(--family "$GNBM_H0_FAMILY")
+    [[ $# != 3 ]] || ablation_options+=(--h1-weights "$3")
+    exec "$python_bin" -m scripts.optimize_focal_h0 h1-prepare --output "$GNBM_OUTPUT_DIR" --parent "$2" "${ablation_options[@]}" ;;
+  smoke|screen|resume|extend|h1-screen|h1-probes-screen) ;;
   *) usage ;;
 esac
 [[ -f "$GNBM_OUTPUT_DIR/campaign.json" ]] || { echo "Run prepare first" >&2; exit 2; }
@@ -58,8 +65,9 @@ if [[ "$action" == extend ]]; then
   [[ -f "$GNBM_OUTPUT_DIR/promotions/$GNBM_H0_FAMILY/epoch_$(printf '%04d' "$endpoint").json" ]] || { echo "Run promote first" >&2; exit 2; }
 fi
 [[ "$action" != h1-screen ]] || export GNBM_H0_FAMILY=h1
-if [[ "$GNBM_H0_FAMILY" == h1 ]]; then
-  [[ -f "$GNBM_OUTPUT_DIR/h1-plan.json" ]] || { echo "Run h1-prepare first" >&2; exit 2; }
+[[ "$action" != h1-probes-screen ]] || export GNBM_H0_FAMILY=h1-probes
+if [[ "$GNBM_H0_FAMILY" != h0 ]]; then
+  [[ -f "$GNBM_OUTPUT_DIR/$GNBM_H0_FAMILY-plan.json" ]] || { echo "Run $GNBM_H0_FAMILY-prepare first" >&2; exit 2; }
 fi
 export GNBM_H0_ACTION=worker GNBM_H0_ENDPOINT="$endpoint"
 segments="${GNBM_H0_SEGMENTS:-6}"
@@ -80,14 +88,12 @@ log_dir="$WORK/logs/graph-native-betti-matching/a100"
 mkdir -p "$log_dir"
 previous="${GNBM_H0_AFTER_JOB_ID:-}"
 for ((segment=1; segment<=segments; segment++)); do
-  dependencies=()
-  [[ -z "$previous" ]] || dependencies=(--dependency="afterany:$previous")
-  job_name=gnbm-focal-h0
-  [[ "$GNBM_H0_FAMILY" != h1 ]] || job_name=gnbm-focal-h1
-  submission="$(sbatch "${dependencies[@]}" --job-name="$job_name" --array="0-$((workers-1))" \
-    --gres="gpu:$gpus" --cpus-per-task="$((8*gpus))" --qos="$qos" --time="$walltime" \
-    --chdir="$GNBM_REPO_DIR" --output="$log_dir/%x-%A_%a.out" --error="$log_dir/%x-%A_%a.err" \
-    "$GNBM_REPO_DIR/cluster/jean_zay/focal_h0_study_a100.slurm")"
+  job_name="gnbm-focal-$GNBM_H0_FAMILY"
+  sbatch_args=(--job-name="$job_name" --array="0-$((workers-1))"
+    --gres="gpu:$gpus" --cpus-per-task="$((8*gpus))" --qos="$qos" --time="$walltime"
+    --chdir="$GNBM_REPO_DIR" --output="$log_dir/%x-%A_%a.out" --error="$log_dir/%x-%A_%a.err")
+  [[ -z "$previous" ]] || sbatch_args+=(--dependency="afterany:$previous")
+  submission="$(sbatch "${sbatch_args[@]}" "$GNBM_REPO_DIR/cluster/jean_zay/focal_h0_study_a100.slurm")"
   echo "$submission (segment $segment/$segments)"
   previous="${submission##* }"
 done
@@ -96,8 +102,8 @@ if [[ "$action" == extend ]]; then
   echo "Resume this stage with: GNBM_H0_FAMILY=$GNBM_H0_FAMILY bash cluster/jean_zay/submit_focal_h0_study.sh extend $endpoint $workers"
 elif [[ "$action" == smoke ]]; then
   echo "Repeat smoke after timeout if needed; inspect gpu-smoke/passed.json before screening."
-elif [[ "$GNBM_H0_FAMILY" == h1 ]]; then
-  echo "Resume later with: bash cluster/jean_zay/submit_focal_h0_study.sh h1-screen $workers"
+elif [[ "$GNBM_H0_FAMILY" != h0 ]]; then
+  echo "Resume later with: bash cluster/jean_zay/submit_focal_h0_study.sh $GNBM_H0_FAMILY-screen $workers"
 else
   echo "Resume later with: bash cluster/jean_zay/submit_focal_h0_study.sh resume $workers"
 fi
