@@ -22,10 +22,11 @@ case "$action" in
 esac
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-for name in WORK SYNTHETIC_MRI_DATASET GNBM_OUTPUT_DIR GNBM_INITIAL_WEIGHTS; do
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
+for name in WORK SCRATCH SYNTHETIC_MRI_DATASET GNBM_OUTPUT_DIR GNBM_INITIAL_WEIGHTS; do
   [[ -n "${!name:-}" ]] || { echo "$name is not set." >&2; exit 2; }
 done
-venv="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}"
+venv="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}"
 python_bin="$venv/bin/python"
 [[ -x "$python_bin" ]] || { echo "Missing Python: $python_bin" >&2; exit 2; }
 [[ -f "$GNBM_INITIAL_WEIGHTS" ]] || { echo "Missing checkpoint: $GNBM_INITIAL_WEIGHTS" >&2; exit 2; }

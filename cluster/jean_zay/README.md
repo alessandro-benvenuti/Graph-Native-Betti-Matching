@@ -39,7 +39,7 @@ partition and separate environment setup for the A100 migration:
 - project account `vnc@h100` on partition `gpu_p6`.
 
 The A100 environment uses `arch/a100`, PyTorch 2.3.0 with CUDA 12.2,
-`$WORK/venvs/vascular-graph-extraction-a100-torch230`, and an independent
+`$SCRATCH/venvs/vascular-graph-extraction-a100-torch230`, and an independent
 `sm_80` extension cache. Create and activate it with:
 
 ```bash
@@ -64,9 +64,19 @@ bash cluster/jean_zay/submit_a100_full_dataset_benchmark.sh
 Do not launch the production gamma sweep until both checks pass.
 
 The virtual environment lives outside Git at
-`$WORK/venvs/vascular-graph-extraction-h100-torch231`; the repository `.venv`
+`$SCRATCH/venvs/vascular-graph-extraction-h100-torch231`; the repository `.venv`
 entry is only a symbolic link. The dataset, initial checkpoint, and outputs
 live under `$SCRATCH`.
+
+All new environments and rebuildable caches default to SCRATCH. Setup records
+the old WORK environment's local package versions under
+`$WORK/environment-records` before reinstalling them at the new location.
+Only source, logs, package records and the small uv executable remain in WORK.
+For archive-before-delete cleanup of legacy environments, use
+`cleanup_work_environments.sh --dry-run`, then `--apply`. The optional
+`--include-other-projects` also includes the known GREED/embedding environments.
+See the complete guide's **Environment storage and legacy WORK cleanup**
+section for migration commands, recovery, and SCRATCH's temporary lifetime.
 
 ## 1. Expected paths
 
@@ -74,7 +84,7 @@ Recommended layout:
 
 ```text
 $WORK/projects/Graph-Native-Betti-Matching
-$WORK/venvs/vascular-graph-extraction-h100-torch231
+$SCRATCH/venvs/vascular-graph-extraction-h100-torch231
 $WORK/tools/uv
 $SCRATCH/datasets/syntheticMRI/new_patches
 $SCRATCH/checkpoints/checkpoint_epoch=280.pt

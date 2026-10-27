@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
 for name in WORK SCRATCH PLANTS_DATASET SYNTHETIC_MRI_DATASET GNBM_OUTPUT_DIR; do
   if [[ -z "${!name:-}" ]]; then
     echo "$name is not set." >&2
@@ -98,7 +99,7 @@ finetune_runs=(
   finetune_boundary_mri500_node_edge_focal_g20_seed364505
 )
 
-venv="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}"
+venv="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}"
 python_bin="$venv/bin/python"
 if [[ ! -x "$python_bin" ]]; then
   echo "Project Python is not executable: $python_bin" >&2

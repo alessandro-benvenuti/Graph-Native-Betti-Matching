@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
 config_root="configs/experiments/fgw_medium_confirmation"
 default_pretrained_checkpoint="/lustre/fsn1/projects/rech/vnc/upz73jr/experiments/gnbm/full-data-fresh250-20260831_160421/pretrain_full_mixed_nodefocal_edgefocal_mm_seed364505/models/best_checkpoint.pt"
 initial_weights="${GNBM_INITIAL_WEIGHTS:-$default_pretrained_checkpoint}"
@@ -54,7 +55,7 @@ if [[ ! -f "$initial_weights" ]]; then
   exit 2
 fi
 
-venv="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}"
+venv="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}"
 python_bin="$venv/bin/python"
 if [[ ! -x "$python_bin" ]]; then
   echo "A100 project Python is not executable: $python_bin" >&2

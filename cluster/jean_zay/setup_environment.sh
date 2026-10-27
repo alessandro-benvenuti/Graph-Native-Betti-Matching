@@ -9,7 +9,8 @@ if [[ -z "${WORK:-}" || -z "${SCRATCH:-}" ]]; then
 fi
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-venv="${GNBM_VENV:-$WORK/venvs/vascular-graph-extraction-h100-torch231}"
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
+venv="${GNBM_H100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-h100-torch231}"
 uv_bin="$WORK/tools/uv/uv"
 
 module purge
@@ -24,8 +25,7 @@ if [[ ! -x "$uv_bin" ]]; then
   exit 2
 fi
 
-mkdir -p "$WORK/venvs" "$WORK/.cache/uv"
-export UV_CACHE_DIR="$WORK/.cache/uv"
+mkdir -p "$(dirname "$venv")" "$UV_CACHE_DIR"
 
 if [[ ! -x "$venv/bin/python" ]]; then
   "$uv_bin" venv \
@@ -50,6 +50,13 @@ fi
 
 source "$venv/bin/activate"
 
+record="$WORK/environment-records/$(basename "$venv").requirements.txt"
+legacy_venv="$WORK/venvs/$(basename "$venv")"
+if [[ -f "$legacy_venv/pyvenv.cfg" ]]; then
+  python "$repo_dir/cluster/jean_zay/snapshot_environment_requirements.py" \
+    --venv "$legacy_venv" --output "$record"
+fi
+
 # Install the frozen training stack without resolving dependencies. This keeps
 # MONAI from installing another PyTorch build over the cluster module.
 "$uv_bin" pip install \
@@ -62,6 +69,10 @@ source "$venv/bin/activate"
 "$uv_bin" pip install \
   --python "$venv/bin/python" \
   "wandb==0.28.1"
+
+if [[ -s "$record" ]]; then
+  "$uv_bin" pip install --python "$venv/bin/python" --no-deps --requirements "$record"
+fi
 
 python - <<'PY'
 import sys

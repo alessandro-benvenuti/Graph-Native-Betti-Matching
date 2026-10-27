@@ -29,7 +29,7 @@ for name in "${required[@]}"; do
   fi
 done
 
-python_bin="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}/bin/python"
+python_bin="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}/bin/python"
 if [[ ! -x "$python_bin" ]]; then
   echo "A100 Python is not executable: $python_bin" >&2
   exit 2

@@ -8,9 +8,10 @@ usage() {
 [[ $# -ge 1 && $# -le 3 ]] || usage
 action="$1"
 export GNBM_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$GNBM_REPO_DIR/cluster/jean_zay/scratch_paths.sh"
 cd "$GNBM_REPO_DIR"
 [[ -n "${WORK:-}" ]] || { echo "WORK is not set" >&2; exit 2; }
-python_bin="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}/bin/python"
+python_bin="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}/bin/python"
 [[ -x "$python_bin" ]] || { echo "Missing $python_bin" >&2; exit 2; }
 if [[ "$action" == test ]]; then
   "$python_bin" -c 'import optuna; print("Optuna", optuna.__version__)'

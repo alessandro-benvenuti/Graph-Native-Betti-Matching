@@ -8,6 +8,7 @@ if [[ $# -ne 2 ]]; then
 fi
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
 config="$1"
 run_name="$2"
 
@@ -23,7 +24,7 @@ if [[ ! -f "$repo_dir/$config" && ! -f "$config" ]]; then
   echo "Configuration does not exist: $config" >&2
   exit 2
 fi
-venv="${GNBM_VENV:-$WORK/venvs/vascular-graph-extraction-h100-torch231}"
+venv="${GNBM_VENV:-$SCRATCH/venvs/vascular-graph-extraction-h100-torch231}"
 python_bin="$venv/bin/python"
 if [[ ! -x "$python_bin" ]]; then
   echo "Project Python is not executable: $python_bin" >&2

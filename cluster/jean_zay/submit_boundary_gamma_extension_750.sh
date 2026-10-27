@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
 for name in WORK SCRATCH SYNTHETIC_MRI_DATASET; do
   if [[ -z "${!name:-}" ]]; then
     echo "$name is not set." >&2
@@ -35,7 +36,7 @@ case "$hardware" in
     continuation_gpus=4
     batch_per_gpu=8
     default_output_root="$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-a100"
-    venv_dir="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}"
+    venv_dir="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}"
     python_bin="$venv_dir/bin/python"
     submit_helper="$repo_dir/cluster/jean_zay/submit_train_a100.sh"
     qos=qos_gpu_a100-t3
@@ -47,7 +48,7 @@ case "$hardware" in
     continuation_gpus=2
     batch_per_gpu=16
     default_output_root="$SCRATCH/checkpoints/gnbm-boundary-gamma-extension-750-h100"
-    venv_dir="${GNBM_H100_VENV:-$WORK/venvs/vascular-graph-extraction-h100-torch231}"
+    venv_dir="${GNBM_H100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-h100-torch231}"
     python_bin="$venv_dir/bin/python"
     submit_helper="$repo_dir/cluster/jean_zay/submit_train.sh"
     qos=qos_gpu_h100-t3

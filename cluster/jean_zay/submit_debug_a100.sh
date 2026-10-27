@@ -2,6 +2,7 @@
 # Submit the bounded one-A100 migration smoke test.
 set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
 if ! command -v sbatch >/dev/null 2>&1; then
   echo "sbatch is unavailable; run this on Jean Zay." >&2
   exit 2
@@ -11,7 +12,7 @@ if [[ -z "${WORK:-}" || -z "${SCRATCH:-}" ]]; then
   exit 2
 fi
 export GNBM_REPO_DIR="$repo_dir"
-export GNBM_VENV="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}"
+export GNBM_VENV="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}"
 export GNBM_OUTPUT_DIR="${GNBM_OUTPUT_DIR:-$SCRATCH/experiments/gnbm-a100-debug}"
 for name in SYNTHETIC_MRI_DATASET GNBM_MRI_CHECKPOINT; do
   if [[ -z "${!name:-}" ]]; then

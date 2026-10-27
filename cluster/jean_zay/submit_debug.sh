@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
 
 if ! command -v sbatch >/dev/null 2>&1; then
   echo "sbatch is unavailable; run this on a Jean Zay login node." >&2
@@ -31,7 +32,7 @@ if [[ ! -f "$GNBM_MRI_CHECKPOINT" ]]; then
   echo "Checkpoint does not exist: $GNBM_MRI_CHECKPOINT" >&2
   exit 2
 fi
-venv="${GNBM_VENV:-$WORK/venvs/vascular-graph-extraction-h100-torch231}"
+venv="${GNBM_VENV:-$SCRATCH/venvs/vascular-graph-extraction-h100-torch231}"
 if [[ ! -x "$venv/bin/python" ]]; then
   echo "The external environment is missing; run setup_environment.sh first." >&2
   exit 2

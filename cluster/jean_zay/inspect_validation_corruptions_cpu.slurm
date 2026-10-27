@@ -12,13 +12,14 @@
 set -eo pipefail
 
 repo_dir="${GNBM_REPO_DIR:-$SLURM_SUBMIT_DIR}"
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
 module purge
 module load pytorch-gpu/py3/2.3.0
 set -u
 
 analysis_root="${GNBM_ANALYSIS_ROOT:-$WORK/analysis/vascular-corruptions-full}"
 output_dir="${GNBM_DETAILED_ANALYSIS_OUTPUT:-$analysis_root/detailed_summary}"
-venv_dir="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}"
+venv_dir="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}"
 python_bin="$venv_dir/bin/python"
 
 if [[ ! -f "$analysis_root/checkpoint_comparison.csv" || ! -f "$analysis_root/edge_pairs.pt" ]]; then

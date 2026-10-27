@@ -14,7 +14,7 @@ set -euo pipefail
 
 repo_dir="${GNBM_REPO_DIR:-$SLURM_SUBMIT_DIR}"
 source "$repo_dir/cluster/jean_zay/env_a100.sh"
-python_bin="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}/bin/python"
+python_bin="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}/bin/python"
 
 echo "job=$SLURM_JOB_ID host=$(hostname)"
 echo "checkpoint=$GNBM_PROFILE_CHECKPOINT"

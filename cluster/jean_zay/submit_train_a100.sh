@@ -8,6 +8,7 @@ if [[ $# -ne 2 ]]; then
 fi
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_dir/cluster/jean_zay/scratch_paths.sh"
 config="$1"
 run_name="$2"
 if ! command -v sbatch >/dev/null 2>&1; then
@@ -23,7 +24,7 @@ if [[ ! -f "$repo_dir/$config" && ! -f "$config" ]]; then
   exit 2
 fi
 
-venv="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}"
+venv="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}"
 python_bin="$venv/bin/python"
 if [[ ! -x "$python_bin" ]]; then
   echo "A100 project Python is not executable: $python_bin" >&2

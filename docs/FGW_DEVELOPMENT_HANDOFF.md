@@ -295,11 +295,14 @@ git clone \
 The FGW development checkout uses its own venv and CUDA-extension cache:
 
 ```text
-$WORK/venvs/vascular-graph-extraction-a100-torch230-fgw
-$WORK/.cache/torch-extensions/gnbm-a100-torch230-fgw-sm80
+$SCRATCH/venvs/vascular-graph-extraction-a100-torch230-fgw
+$SCRATCH/.cache/torch-extensions/gnbm-a100-torch230-fgw-sm80
 ```
 
-The frozen campaign continues to use its original environment and cache. The
+After the SCRATCH-storage migration, the frozen campaign uses its standard
+A100 environment in SCRATCH and FGW retains a separate environment/cache.
+Update this checkout's environment scripts before removing any old WORK venv;
+see `docs/RUNNING_THE_MODEL.md` for archive and recreation commands. The
 development environment inherits Jean Zay's A100 PyTorch module:
 
 ```text
@@ -316,8 +319,8 @@ Set the development overrides before sourcing `env_a100.sh`:
 cd "$WORK/projects/Graph-Native-Betti-Matching-next"
 
 export GNBM_REPO_DIR="$WORK/projects/Graph-Native-Betti-Matching-next"
-export GNBM_A100_VENV="$WORK/venvs/vascular-graph-extraction-a100-torch230-fgw"
-export GNBM_A100_EXTENSIONS_DIR="$WORK/.cache/torch-extensions/gnbm-a100-torch230-fgw-sm80"
+export GNBM_A100_VENV="$SCRATCH/venvs/vascular-graph-extraction-a100-torch230-fgw"
+export GNBM_A100_EXTENSIONS_DIR="$SCRATCH/.cache/torch-extensions/gnbm-a100-torch230-fgw-sm80"
 
 export SYNTHETIC_MRI_DATASET="$SCRATCH/datasets/syntheticMRI/new_patches_boundary"
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm-fgw-development"
@@ -330,8 +333,8 @@ Important environment variables:
 
 | Variable | Purpose |
 |---|---|
-| `WORK` | Jean Zay-provided work filesystem root; repositories, venvs, caches and logs. |
-| `SCRATCH` | Jean Zay-provided project filesystem root; datasets and experiment outputs. |
+| `WORK` | Jean Zay-provided work filesystem root; repositories, logs and small package-version records. |
+| `SCRATCH` | Jean Zay-provided project filesystem root; venvs, rebuildable caches, datasets and experiment outputs. |
 | `GNBM_REPO_DIR` | Forces scripts and jobs to use the `-next` checkout. |
 | `GNBM_A100_VENV` | Selects the isolated FGW A100 venv before `env_a100.sh` is sourced. |
 | `GNBM_A100_EXTENSIONS_DIR` | Selects the isolated sm_80 extension cache. |
@@ -605,7 +608,7 @@ Set the isolated environment and immutable starting checkpoint once:
 
 ```bash
 cd "$WORK/projects/Graph-Native-Betti-Matching-next"
-export GNBM_A100_VENV="$WORK/venvs/vascular-graph-extraction-a100-torch230-fgw"
+export GNBM_A100_VENV="$SCRATCH/venvs/vascular-graph-extraction-a100-torch230-fgw"
 export GNBM_INITIAL_WEIGHTS=/lustre/fsn1/projects/rech/vnc/upz73jr/experiments/gnbm/full-data-fresh250-20260831_160421/finetune_full_mri_nodefocal_edgefocal_mm_seed364505/models/best_checkpoint.pt
 export GNBM_OUTPUT_DIR="$SCRATCH/experiments/gnbm-fgw-controlled"
 ```

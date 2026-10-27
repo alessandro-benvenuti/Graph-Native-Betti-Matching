@@ -11,13 +11,11 @@ module load arch/a100
 module load pytorch-gpu/py3/2.3.0
 
 export GNBM_REPO_DIR="${GNBM_REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-export GNBM_VENV="${GNBM_A100_VENV:-$WORK/venvs/vascular-graph-extraction-a100-torch230}"
+source "$GNBM_REPO_DIR/cluster/jean_zay/scratch_paths.sh"
+export GNBM_VENV="${GNBM_A100_VENV:-$SCRATCH/venvs/vascular-graph-extraction-a100-torch230}"
 source "$GNBM_REPO_DIR/cluster/jean_zay/wandb_env.sh"
 export PATH="$WORK/tools/uv:$PATH"
-export UV_CACHE_DIR="${UV_CACHE_DIR:-$WORK/.cache/uv}"
-export TORCH_EXTENSIONS_DIR="${GNBM_A100_EXTENSIONS_DIR:-$WORK/.cache/torch-extensions/gnbm-a100-torch230-sm80}"
-export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$WORK/.cache}"
-export MPLCONFIGDIR="${MPLCONFIGDIR:-$WORK/.cache/matplotlib}"
+export TORCH_EXTENSIONS_DIR="${GNBM_A100_EXTENSIONS_DIR:-$SCRATCH/.cache/torch-extensions/gnbm-a100-torch230-sm80}"
 export PYVISTA_OFF_SCREEN="true"
 export MPLBACKEND="Agg"
 export PYTHONUNBUFFERED="1"
@@ -43,6 +41,8 @@ mkdir -p \
   "$TORCH_EXTENSIONS_DIR" \
   "$XDG_CACHE_HOME" \
   "$MPLCONFIGDIR" \
+  "$WANDB_CACHE_DIR" \
+  "$WANDB_DATA_DIR" \
   "$TMPDIR"
 
 if [[ ! -x "$GNBM_VENV/bin/python" ]]; then

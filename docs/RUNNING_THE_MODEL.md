@@ -18,8 +18,10 @@ The expected layout is:
 
 ```text
 $WORK/projects/Graph-Native-Betti-Matching       repository
-$WORK/venvs/vascular-graph-extraction-h100-torch231
-$WORK/venvs/vascular-graph-extraction-a100-torch230
+$SCRATCH/venvs/vascular-graph-extraction-h100-torch231
+$SCRATCH/venvs/vascular-graph-extraction-a100-torch230
+$SCRATCH/.cache                               uv/pip/torch/W&B caches
+$WORK/environment-records                     small package-version records
 $WORK/logs/graph-native-betti-matching           Slurm stdout/stderr
 $SCRATCH/datasets/plants_3d2cut/patches_3d       Plants data
 $SCRATCH/datasets/syntheticMRI/new_patches_boundary  boundary-corrected MRI patches
@@ -29,6 +31,63 @@ $SCRATCH/experiments/gnbm                        run outputs/checkpoints
 Never run training or GPU evaluation on a login node. The login node is only
 for preparing the environment, validating configuration, submitting jobs,
 checking logs, and synchronizing offline W&B runs.
+
+### Environment storage and legacy WORK cleanup
+
+Environments and rebuildable caches now default to SCRATCH. The shared
+`cluster/jean_zay/scratch_paths.sh` also translates inherited environment/cache
+overrides under the old `$WORK/venvs` and `$WORK/.cache` locations. The uv
+executable stays in `$WORK/tools/uv` (only a few files); repositories, logs,
+credentials and small package records are not moved.
+
+On a login node, recreate the environments at their final installation paths;
+do not move a venv because its activation scripts and entry points contain
+absolute paths. Before deleting the old WORK environments, run:
+
+```bash
+cd "$WORK/projects/Graph-Native-Betti-Matching"
+export GNBM_REPO_DIR="$PWD"
+unset GNBM_A100_VENV GNBM_H100_VENV GNBM_VENV
+unset GNBM_A100_EXTENSIONS_DIR GNBM_H100_EXTENSIONS_DIR
+bash cluster/jean_zay/setup_environment_a100.sh
+GNBM_A100_VENV="$SCRATCH/venvs/vascular-graph-extraction-a100-torch230-fgw" \
+  bash cluster/jean_zay/setup_environment_a100.sh
+source cluster/jean_zay/env_a100.sh
+```
+
+Setup snapshots the former environment's venv-local package versions into
+`$WORK/environment-records/<environment>.requirements.txt` and reuses those
+versions, including experiment extras such as Optuna. It excludes the
+module-provided CUDA/PyTorch stack and the custom operator, which is rebuilt
+on the first GPU smoke job. If H100 is needed, run `setup_environment.sh`;
+`GNBM_H100_VENV` selects a custom H100 environment.
+
+Inspect and then apply cleanup only when no jobs are queued or running:
+
+```bash
+bash cluster/jean_zay/cleanup_work_environments.sh --dry-run
+bash cluster/jean_zay/cleanup_work_environments.sh --apply
+```
+
+The helper only targets the five known graph environments and the listed
+rebuildable caches. It archives all targets under
+`$STORE/environment-archives/work-cleanup-<timestamp>-<id>/`, verifies every
+file and symlink, records SHA256 checksums, and only then removes the WORK
+directories. It checks Slurm again before each removal. All archives must
+finish before any source is deleted. Restore a saved directory to its original
+location with `tar -xf ARCHIVE.tar -C "$WORK"`.
+
+To also archive/remove the known GREED and two embedding environments, add
+`--include-other-projects` to both commands. These separate projects must be
+configured/recreated in SCRATCH before their next use; this repository does
+not update their scripts. Other repository checkouts must also receive the
+new storage configuration before submitting jobs. Datasets, checkpoints,
+offline W&B histories and credentials are never cleanup targets.
+
+SCRATCH is temporary: an environment may need recreation after filesystem
+purging. Rerun the same setup script; the durable package records remain in
+WORK. A partially purged environment may require removal/recreation at its
+exact SCRATCH environment path rather than a simple reinstall.
 
 Initialize an H100 login shell with:
 
@@ -55,7 +114,7 @@ source cluster/jean_zay/env_a100.sh
 
 The A100 environment inherits `arch/a100` with
 `pytorch-gpu/py3/2.3.0` (CUDA 12.2), uses
-`$WORK/venvs/vascular-graph-extraction-a100-torch230`, compiles CUDA extensions
+`$SCRATCH/venvs/vascular-graph-extraction-a100-torch230`, compiles CUDA extensions
 for compute capability `8.0`, and keeps its extension cache separate from the
 H100 `sm_90` build. Source exactly one architecture environment before using
 its matching launcher. Do not use the existing H100 launcher after sourcing
